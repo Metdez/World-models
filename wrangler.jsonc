@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "suspension-lab",
+  "main": "./worker/index.ts",
+  "compatibility_date": "2026-11-20",
+  "upload_source_maps": true,
+  "workers_dev": true,
+  "assets": {
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/ws/*", "/r/*"]
+  },
+  "durable_objects": { "bindings": [{ "name": "ROOM", "class_name": "Room" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
+  "ai": { "binding": "AI" },
+  "analytics_engine_datasets": [{ "binding": "STATS", "dataset": "suspension_lab_events" }],
+  "ratelimits": [
+    { "name": "RL_ENGINEER", "namespace_id": "4101", "simple": { "limit": 6, "period": 60 } },
+    { "name": "RL_ROOMS", "namespace_id": "4102", "simple": { "limit": 10, "period": 60 } }
+  ],
+  "vars": { "APP_VERSION": "dev" },
+  "observability": { "enabled": true, "head_sampling_rate": 1 }
+}
