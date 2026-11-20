@@ -1,0 +1,183 @@
+/* Telemetry card (research 14 D5): bottom-left, above the "Ask the engineer" pill. Tokens only. */
+.sl-telemetry-panel {
+  --sl-telemetry-pill: 48px; /* the engineer pill's height + gap below this card */
+  position: absolute;
+  left: var(--margin);
+  bottom: calc(var(--margin) + var(--sl-telemetry-pill));
+  width: 316px;
+  padding: var(--sp-3) var(--sp-3) var(--sp-2);
+  display: grid;
+  gap: var(--sp-2);
+  color: var(--text-2);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-panel);
+  animation: sl-telemetry-panel-in var(--dur-hud) var(--ease);
+}
+.sl-telemetry-panel[hidden],
+.sl-telemetry-panel [hidden] {
+  display: none;
+}
+
+@keyframes sl-telemetry-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.sl-telemetry-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  color: var(--text-1);
+}
+.sl-telemetry-panel-note {
+  color: var(--accent);
+}
+
+.sl-telemetry-panel-top {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: var(--sp-3);
+  align-items: start;
+}
+
+.sl-telemetry-panel-ggbox {
+  display: grid;
+  gap: var(--sp-2);
+}
+.sl-telemetry-panel-gg,
+.sl-telemetry-panel-glyph,
+.sl-telemetry-panel-spark {
+  display: block;
+}
+
+.sl-telemetry-panel-heroes {
+  display: grid;
+  gap: var(--sp-1);
+}
+.sl-telemetry-panel-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.sl-telemetry-panel-hero {
+  min-width: 3.4ch;
+  color: var(--text-1);
+  font: 400 var(--fs-num) / 1.2 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.sl-telemetry-panel-corners {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-1);
+}
+.sl-telemetry-panel-corners.is-single {
+  grid-template-columns: 1fr;
+}
+
+.sl-telemetry-panel-corner {
+  display: grid;
+  gap: 2px;
+  padding: 6px var(--sp-2) 4px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-chip);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.sl-telemetry-panel-corner:hover {
+  border-color: var(--hair);
+}
+.sl-telemetry-panel-corner[aria-pressed='true'] {
+  border-color: var(--accent-dim);
+}
+.sl-telemetry-panel-corner-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.sl-telemetry-panel-corner-id {
+  color: var(--text-2);
+}
+.sl-telemetry-panel-value {
+  color: var(--text-1);
+  font-size: 12px;
+}
+.sl-telemetry-panel-corner[aria-pressed='true'] .sl-telemetry-panel-value {
+  color: var(--accent);
+}
+
+.sl-telemetry-panel-sparkhead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--hair);
+}
+.sl-telemetry-panel-tabs {
+  display: flex;
+  gap: 2px;
+}
+.sl-telemetry-panel-tab {
+  padding: 4px 8px;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.sl-telemetry-panel-tab:hover {
+  color: var(--text-1);
+}
+.sl-telemetry-panel-tab[aria-pressed='true'] {
+  color: var(--text-1);
+  border-color: var(--hair-strong);
+}
+
+.sl-telemetry-panel-legends {
+  display: grid;
+  justify-items: end;
+  gap: 1px;
+  font-size: var(--fs-label);
+  line-height: 1.3;
+}
+.sl-telemetry-panel-legend::before {
+  content: '';
+  display: inline-block;
+  width: 12px;
+  margin-right: 6px;
+  vertical-align: middle;
+  border-top: 1.5px solid var(--accent);
+}
+.sl-telemetry-panel-legend.is-live {
+  color: var(--text-1);
+}
+.sl-telemetry-panel-legend.is-ghost::before {
+  border-top: 1px dashed var(--text-2);
+}
+
+/* Narrow screens: g-g and the two headline numbers only (research 14 C4). */
+@media (max-width: 640px) {
+  .sl-telemetry-panel {
+    width: auto;
+  }
+  .sl-telemetry-panel-top {
+    grid-template-columns: 84px;
+  }
+  .sl-telemetry-panel-corners,
+  .sl-telemetry-panel-sparkhead,
+  .sl-telemetry-panel-spark {
+    display: none;
+  }
+}
