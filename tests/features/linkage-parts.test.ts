@@ -173,22 +173,6 @@ function tyreClearance(c: Capsule, centre: Vector3, axis: Vector3): number {
 
 const build = (def: CarSuspensionDefinition) => buildSpatialLinkage(def, VEHICLE);
 
-/**
- * Overlaps the visual cannot avoid because the shipped hardpoints (02-02 content) put the coil-over's top mount
- * axis through a link, or let the upright swing into the damper rod at full lock. Reported to the orchestrator
- * (03-04 SUMMARY) with suggested hardpoint moves; listed with their measured depth (m) so a regression or a new
- * conflict still fails.
- */
-const HARDPOINT_CONFLICTS: Record<string, Record<string, number>> = {
-  'double-wishbone': { 'upperArm.front / rod': 0.016 },
-  multilink: {
-    'upperFront / rod': 0.011,
-    'upperRear / rod': 0.0045,
-    'rod / upright.upperFrontOuter': 0.021,
-    'rod / upright.upperRearOuter': 0.016,
-  },
-};
-
 describe('linkage-parts feature', () => {
   it('contributes the spatial-linkage suspension visual', () => {
     const registered: string[] = [];
@@ -264,7 +248,6 @@ describe.each(DEFS.map((d) => [d.id, d] as const))('spatial-linkage: %s', (_id, 
 
   it('parts do not interpenetrate each other at static, bump, droop and lock (tyre/rim proxy reported)', () => {
     const report: string[] = [];
-    const known = new Map<string, number>();
     const tyreReport: string[] = [];
     let worst = Infinity;
     let worstTyre = Infinity;
@@ -273,10 +256,7 @@ describe.each(DEFS.map((d) => [d.id, d] as const))('spatial-linkage: %s', (_id, 
       for (const [corner, info] of Object.entries(v.inspect())) {
         for (const { pair, gap } of clearances(info.capsules)) {
           worst = Math.min(worst, gap);
-          if (gap >= 0) continue;
-          const limit = HARDPOINT_CONFLICTS[def.id]?.[pair];
-          if (limit !== undefined && -gap <= limit) known.set(pair, Math.max(known.get(pair) ?? 0, -gap));
-          else report.push(`${name} ${corner} ${pair} ${(gap * 1000).toFixed(1)} mm`);
+          if (gap < 0) report.push(`${name} ${corner} ${pair} ${(gap * 1000).toFixed(1)} mm`);
         }
         for (const c of info.capsules) {
           if (c.name.startsWith('upright')) continue;
@@ -288,7 +268,6 @@ describe.each(DEFS.map((d) => [d.id, d] as const))('spatial-linkage: %s', (_id, 
     }
     console.log(`${def.id}: min part clearance ${(worst * 1000).toFixed(1)} mm, min tyre/rim-proxy clearance ${(worstTyre * 1000).toFixed(1)} mm`);
     if (tyreReport.length) console.log(`${def.id} tyre/rim proxy overlaps (mm): ${tyreReport.join('; ')}`);
-    for (const [pair, depth] of known) console.log(`${def.id}: known hardpoint conflict ${pair}: ${(depth * 1000).toFixed(1)} mm`);
     expect(report).toEqual([]);
   });
 
@@ -369,13 +348,37 @@ describe('spatial-linkage on the live simulation (02-04 CornerFrame points, ampl
           expect(Math.abs(len - lengths.get(key)!), key).toBeLessThan(1e-4);
         }
         for (const { pair, gap } of clearances(info.capsules)) {
-          const limit = HARDPOINT_CONFLICTS[def.id]?.[pair];
-          if (gap < 0 && (limit === undefined || -gap > limit)) problems.push(`t${i} ${corner} ${pair} ${(gap * 1000).toFixed(1)} mm`);
+          if (gap < 0) problems.push(`t${i} ${corner} ${pair} ${(gap * 1000).toFixed(1)} mm`);
           worst = Math.min(worst, gap);
         }
       }
     }
     expect(problems).toEqual([]);
+    v.dispose();
+  });
+
+  it.each(DEFS.map((d) => [d.id, d] as const))('%s: the hub axle (disc, caliper, inspect axis) matches the sim wheel axis', (_id, def) => {
+    const sim = createSimulation({ catalog, trackId: 'proving-loop', vehicleId: gtCoupe.id, suspensionId: def.id });
+    const v = buildSpatialLinkage(def, gtCoupe);
+    const expected = new Vector3();
+    let worst = 0;
+    for (const at of [0, 0.25, 0.5, 0.75]) {
+      sim.seek(at * sim.lapDuration);
+      const f = sim.sample(1);
+      v.update(f);
+      const info = v.inspect();
+      for (const c of f.corners) {
+        // Outward spin axis in the sim frame = side * q (0, 1, 0); sim (x, y, z) -> three (x, z, -y).
+        const q = c.wheelRotation;
+        const ax = 2 * (q.x * q.y - q.w * q.z);
+        const ay = 1 - 2 * (q.x * q.x + q.z * q.z);
+        const az = 2 * (q.y * q.z + q.w * q.x);
+        expected.set(ax, az, -ay).multiplyScalar(c.side);
+        worst = Math.max(worst, info[c.id]!.wheel.axis.angleTo(expected));
+      }
+    }
+    // Static camber is 1.5 deg front / 1.2 deg rear: the old sign error showed as 2 x camber (>= 2.4 deg).
+    expect(worst * (180 / Math.PI)).toBeLessThan(0.1);
     v.dispose();
   });
 });

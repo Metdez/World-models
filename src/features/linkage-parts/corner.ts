@@ -114,8 +114,9 @@ export function buildCorner(o: CornerOptions): CornerVisual {
 
   // ---------------------------------------------------------------- hub axis and upright
   const W = R(WHEEL_CENTRE);
-  // Outward axle in sim terms (sin toe, side cos camber cos toe, sin camber) -> three (x, z, -y).
-  const simAxle = [Math.sin(o.toe), side * Math.cos(o.camber) * Math.cos(o.toe), Math.sin(o.camber)] as const;
+  // Outward axle in sim terms, as sim-core's spatial.ts axle0 (negative camber tilts the top inboard):
+  // (sin toe cos camber, side cos toe cos camber, -sin camber) -> three (x, z, -y).
+  const simAxle = [Math.sin(o.toe) * Math.cos(o.camber), side * Math.cos(o.toe) * Math.cos(o.camber), -Math.sin(o.camber)] as const;
   const axle = new Vector3(simAxle[0], simAxle[2], -simAxle[1]).normalize();
   const ringCentre = W.clone().addScaledVector(axle, RIM_CLEAR.ring);
   const discSpec = { outerRadius: 0.17, innerRadius: 0.1, thickness: 0.028, hatDepth: RIM_CLEAR.hatDepth, holes: 18, holeRadius: 0.0042 };
