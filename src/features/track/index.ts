@@ -39,11 +39,14 @@ export default {
       const mesh = new Mesh(g, surfaceMaterials);
       mesh.name = `track-ribbon-${i}`;
       mesh.receiveShadow = true;
+      // Road first, field last: the hidden ground under the road then fails the depth test early.
+      mesh.renderOrder = -1;
       return mesh;
     });
     const ground = new Mesh(buildTerrain(track), materials.grass);
     ground.name = 'track-terrain';
     ground.receiveShadow = true;
+    ground.renderOrder = 1;
     root.add(...road, ground);
     const cones = createCones(track);
     if (cones) root.add(cones);
