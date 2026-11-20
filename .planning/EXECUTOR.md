@@ -31,7 +31,7 @@ with attribution). But module boundaries in ARCHITECTURE.md are requirements, no
   - A typecheck/test failure located entirely in files you do not own may be another executor mid-work:
     re-run after a minute; if it persists, report it rather than "fixing" their files.
   - Do NOT push. The orchestrator pushes.
-- Commit messages: imperative summary line, body if useful, and END with exactly these two trailer lines:
+- Commit messages: imperative summary line, body if useful, and END with the two trailer lines your own session attribution instruction specifies (Co-Authored-By + Claude-Session). If you have none, use:
   ```
   Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
   Claude-Session: https://claude.ai/code/session_01U68EWqKzYD1oACNNZXAQnG
