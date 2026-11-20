@@ -31,6 +31,8 @@ interface State {
   readonly caption: HTMLElement;
   readonly text: HTMLElement;
   readonly chip: HTMLElement;
+  /** Screen-reader copy of each new caption; the live chip numbers are not announced. */
+  readonly announce: HTMLElement;
   readonly engine: InsightEngine;
   rec: LapRecord;
   lastSimTime: number;
@@ -62,7 +64,9 @@ function present(s: State, id: string, text: string, chip: readonly (Node | stri
   s.caption.hidden = true;
   void s.caption.offsetWidth;
   s.caption.hidden = false;
-  s.ctx.bus.emit('insight:shown', { id, text: s.caption.textContent ?? text });
+  const shown = s.caption.textContent ?? text;
+  s.announce.textContent = shown;
+  s.ctx.bus.emit('insight:shown', { id, text: shown });
 }
 
 function showInsight(s: State, i: Insight): void {
@@ -113,8 +117,10 @@ const insights: FeatureModule = {
     const text = h('span', { class: 'sl-insights-text' });
     const chip = h('span', { class: 'sl-insights-chip sl-num', hidden: true });
     const caption = h('p', { class: 'sl-insights-caption', hidden: true }, text, chip);
-    const root = h('div', { class: 'sl-insights', 'aria-live': 'polite', 'aria-atomic': 'true' }, caption);
+    const root = h('div', { class: 'sl-insights' }, caption);
+    const announce = h('div', { class: 'sl-insights-announce sl-visually-hidden', 'aria-live': 'polite', 'aria-atomic': 'true' });
     c.addDisposer(mount(c.dom.overlay, root));
+    c.addDisposer(mount(c.dom.overlay, announce));
 
     const s: State = {
       ctx: c,
@@ -122,6 +128,7 @@ const insights: FeatureModule = {
       caption,
       text,
       chip,
+      announce,
       engine: new InsightEngine(),
       rec: new LapRecord(1, 1),
       lastSimTime: Number.NEGATIVE_INFINITY,

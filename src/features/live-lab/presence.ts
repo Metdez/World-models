@@ -34,18 +34,16 @@ export interface ConnectParams {
   readonly code: string;
   readonly id: string;
   readonly role: RoomRole;
-  readonly hostKey?: string | null;
   readonly vehicleId: string;
   readonly suspensionId: string;
 }
 
-/** `wss://host/ws/<CODE>?id=&role=&k=&v=&s=&pv=` (contracts/net.ts). */
+/** `wss://host/ws/<CODE>?id=&role=&v=&s=&pv=` (contracts/net.ts; never a key: hosts authenticate in a frame). */
 export function socketUrl(p: ConnectParams): string {
   const url = new URL(`${WS_PREFIX}${p.code}`, p.origin);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('id', p.id);
   url.searchParams.set('role', p.role);
-  if (p.hostKey) url.searchParams.set('k', p.hostKey);
   url.searchParams.set('v', p.vehicleId);
   url.searchParams.set('s', p.suspensionId);
   url.searchParams.set('pv', String(PROTOCOL_VERSION));

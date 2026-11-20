@@ -86,7 +86,6 @@ export function connectRemote(opts: {
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('id', opts.clientId);
   url.searchParams.set('role', opts.role);
-  if (opts.role === 'host' && opts.hostKey) url.searchParams.set('k', opts.hostKey);
   url.searchParams.set('pv', String(PROTOCOL_VERSION));
 
   const ws = new ReconnectingWebSocket(url.toString(), [], {
@@ -98,6 +97,9 @@ export function connectRemote(opts: {
     shouldReconnectOnClose: (e) => statusForClose(e.code) === null,
   });
   opts.onStatus('connecting');
+  // The host key is the first frame after every (re)open, never part of the URL (which lands in request logs).
+  const key = opts.role === 'host' ? opts.hostKey : null;
+  if (key) ws.addEventListener('open', () => ws.send(JSON.stringify({ t: 'auth', k: key } satisfies ClientMessage)));
   ws.addEventListener('message', (e) => {
     if (typeof e.data !== 'string' || e.data[0] !== '{') return; // "pong"
     try {

@@ -85,7 +85,8 @@ export class Room extends DurableObject<Env> {
     }
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment(decision.attachment);
-    this.join(server, decision.attachment);
+    // A host is welcomed after its `auth` frame.
+    if (!decision.attachment.pending) this.join(server, decision.attachment);
     await this.touch();
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -123,7 +124,7 @@ export class Room extends DurableObject<Env> {
     const att = ws.deserializeAttachment() as Attachment | null;
     if (!att) return ws.close(CLOSE.badRequest, 'no-session');
 
-    const effects = reduceMessage(att, msg, { ctl: this.ctl, poll: this.poll, now, newPollId: () => crypto.randomUUID() });
+    const effects = reduceMessage(att, msg, { hostKey: this.hostKey, ctl: this.ctl, poll: this.poll, now, newPollId: () => crypto.randomUUID() });
     for (const effect of effects) await this.apply(ws, effect, now);
   }
 
@@ -185,6 +186,10 @@ export class Room extends DurableObject<Env> {
         this.broadcast({ t: 'poll', poll: effect.poll ? this.tallyNow(effect.poll) : null });
         return this.touch();
       }
+      case 'welcome':
+        return this.join(ws, ws.deserializeAttachment() as Attachment);
+      case 'close':
+        return ws.close(effect.code, effect.reason);
       case 'vote':
         this.sql('INSERT OR REPLACE INTO votes (poll_id, voter_id, choice) VALUES (?, ?, ?)', effect.pollId, effect.voterId, effect.choice);
         return this.markTally();

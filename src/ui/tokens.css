@@ -13,6 +13,7 @@
   --accent: #7cf0d4;
   --accent-dim: rgba(124, 240, 212, 0.25);
   --warn: #ffb454;
+  --focus-ring: var(--accent);
 
   /* type */
   --font-sans: 'Geist Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -66,5 +67,18 @@
     --dur-hud: 0ms;
     --dur-caption-in: 0ms;
     --dur-caption-out: 0ms;
+  }
+}
+
+/* Higher contrast on request: denser glass, brighter secondary text and hairlines, white focus ring. */
+@media (prefers-contrast: more) {
+  :root {
+    --glass: rgba(8, 9, 11, 0.9);
+    --hair: rgba(255, 255, 255, 0.32);
+    --hair-strong: rgba(255, 255, 255, 0.55);
+    --text-2: #d5d8dd;
+    --text-3: #aeb3bb;
+    --accent-dim: rgba(124, 240, 212, 0.6);
+    --focus-ring: #ffffff;
   }
 }

@@ -12,17 +12,15 @@ export const roleSchema = z.enum(['viewer', 'screen', 'host', 'audience']) satis
 export interface UpgradeQuery {
   readonly id: string;
   readonly role: RoomRole;
-  readonly k?: string;
   readonly v?: string;
   readonly s?: string;
   readonly pv: number;
 }
 
-/** `/ws/<CODE>?id=&role=&k=&v=&s=&pv=`; `pv` is checked separately so a stale client gets close 4400. */
+/** `/ws/<CODE>?id=&role=&v=&s=&pv=`; `pv` is checked separately so a stale client gets close 4400. */
 export const upgradeQuerySchema: z.ZodType<UpgradeQuery> = z.object({
   id: clientIdSchema,
   role: roleSchema,
-  k: hostKeySchema.exactOptional(),
   v: contentId.exactOptional(),
   s: contentId.exactOptional(),
   pv: z.coerce.number().int(),
@@ -30,7 +28,7 @@ export const upgradeQuerySchema: z.ZodType<UpgradeQuery> = z.object({
 
 export function parseUpgradeQuery(params: URLSearchParams): UpgradeQuery | null {
   const raw: Record<string, string> = {};
-  for (const key of ['id', 'role', 'k', 'v', 's', 'pv']) {
+  for (const key of ['id', 'role', 'v', 's', 'pv']) {
     const value = params.get(key);
     if (value !== null && value !== '') raw[key] = value;
   }
@@ -55,6 +53,7 @@ export const presenterControlsSchema: z.ZodType<PresenterControls> = z.strictObj
 const trimmed = (max: number) => z.string().trim().min(1).max(max);
 
 export const clientMessageSchema: z.ZodType<ClientMessage> = z.discriminatedUnion('t', [
+  z.strictObject({ t: z.literal('auth'), k: hostKeySchema }),
   z.strictObject({ t: z.literal('sync'), c0: z.number().finite() }),
   z.strictObject({ t: z.literal('pick'), vehicleId: contentId, suspensionId: contentId }),
   z.strictObject({ t: z.literal('ctl'), set: presenterControlsSchema }),

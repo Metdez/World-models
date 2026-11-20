@@ -60,6 +60,7 @@ export default {
     let active = false;
     let view: string | undefined;
     let farFloor = 0.22;
+    let focus: string | null = null;
     ctx.watch((s) => {
       // Close-up defaults the engineer layer on (on entering it); the user can switch it off again there.
       if (s.view === 'closeup' && view !== 'closeup' && s.overlay !== 'engineer') {
@@ -70,6 +71,8 @@ export default {
       view = s.view;
       // Close-up: only the focused axle's construction; the far one would cross the linkage through the body.
       farFloor = s.view === 'closeup' ? 0 : 0.22;
+      // ...and only the focused corner of it: the opposite wheel's lines would cross the frame.
+      focus = s.view === 'closeup' ? (s.focusCorner ?? 'fl') : null; // the camera films corner 0 when none is set
       const on = s.overlay === 'engineer';
       if (on && !active) construction.reset();
       active = on;
@@ -90,7 +93,7 @@ export default {
       eye.x = c.x;
       eye.y = -c.z;
       eye.z = c.y;
-      construction.draw(frame.t, ctx.sim.current, frame.dt, eye, farFloor);
+      construction.draw(frame.t, ctx.sim.current, frame.dt, eye, farFloor, focus);
       panelClock += frame.dt;
       if (panelClock >= PANEL_DT) {
         panelClock = 0;

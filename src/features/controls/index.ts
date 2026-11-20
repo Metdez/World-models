@@ -100,6 +100,12 @@ export default {
       for (const [k, v] of Object.entries(patch)) (c.store.setKey as (k: keyof AppState, v: unknown) => void)(k as keyof AppState, v);
     };
 
+    c.dom.stage.setAttribute('role', 'img');
+    c.addDisposer(() => {
+      c.dom.stage.removeAttribute('role');
+      c.dom.stage.removeAttribute('aria-label');
+    });
+
     // --- top-left: vehicle tag
     const name = h('div', { class: 'sl-controls-name' });
     const subtitle = h('span', {});
@@ -282,6 +288,10 @@ export default {
       if (lastView && s.view !== lastView) announce.textContent = `${VIEWS.find((v) => v.id === s.view)?.label ?? s.view} view`;
       lastSusp = s.suspensionId;
       lastView = s.view;
+      // The canvas is one picture to assistive tech; its name says what it shows (the HUD carries the numbers).
+      const viewLabel = VIEWS.find((v) => v.id === s.view)?.label ?? s.view;
+      const sceneLabel = `3D view, ${viewLabel}: ${vehicle?.name ?? 'vehicle'} with ${copy?.label ?? s.suspensionId} suspension lapping the proving ground`;
+      if (c.dom.stage.getAttribute('aria-label') !== sceneLabel) c.dom.stage.setAttribute('aria-label', sceneLabel);
 
       const other = otherClassVehicle(c, vehicle);
       vehicleBtn.hidden = other === undefined;

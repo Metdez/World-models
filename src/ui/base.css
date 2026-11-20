@@ -47,8 +47,24 @@ body {
 }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
+}
+
+/* Touch: every overlay button gets a 44 px hit area (WCAG 2.5.5) without changing the layout. */
+@media (pointer: coarse) {
+  :where(#overlay button) {
+    position: relative;
+  }
+  :where(#overlay button)::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
 }
 
 .sl-num {

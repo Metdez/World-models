@@ -194,8 +194,10 @@ export interface Construction {
   /**
    * `eye` (sim frame, optional): the axle nearer the camera is drawn at full strength, the other one dimmed down to
    * `farFloor` (0.22; 0 hides it, e.g. in the close-up where the focused wheel is the hero).
+   * `focus` (a corner id, car close-up): only that corner's construction, and its axle's ground line up to the
+   * centreline, so the opposite wheel's lines do not cross the frame.
    */
-  draw(t: TelemetryFrame, sim: OverlaySim, dt: number, eye?: XYZ, farFloor?: number): void;
+  draw(t: TelemetryFrame, sim: OverlaySim, dt: number, eye?: XYZ, farFloor?: number, focus?: string | null): void;
 }
 
 export function createConstruction(main: LineBatch, ghost: LineBatch): Construction {
@@ -436,18 +438,21 @@ export function createConstruction(main: LineBatch, ghost: LineBatch): Construct
     }
   };
 
-  const drawAxle = (ai: number, cl: CornerFrame, cr: CornerFrame, t: TelemetryFrame, sampleTrail: boolean): void => {
+  /** `half`: 0 = whole ground line, 1 = left patch → centre only, -1 = right patch → centre only. */
+  const drawAxle = (ai: number, cl: CornerFrame, cr: CornerFrame, t: TelemetryFrame, sampleTrail: boolean, half = 0): void => {
     const ax = t.axles[ai];
     // Ground line between the contact patches, centreline from the ground up through the roll centre.
     set(a, cl.contactPatch.x, cl.contactPatch.y, cl.contactPatch.z);
     set(b, cr.contactPatch.x, cr.contactPatch.y, cr.contactPatch.z);
     if (!finite3(a) || !finite3(b)) return;
     const gk = 0.8;
-    ghost.seg(a[0]!, a[1]!, a[2]!, b[0]!, b[1]!, b[2]!, GUIDE[0] * gk, GUIDE[1] * gk, GUIDE[2] * gk, GUIDE[0] * gk, GUIDE[1] * gk, GUIDE[2] * gk);
+    set(c, (a[0]! + b[0]!) / 2, (a[1]! + b[1]!) / 2, (a[2]! + b[2]!) / 2);
+    const g0 = half < 0 ? c : a;
+    const g1 = half > 0 ? c : b;
+    ghost.seg(g0[0]!, g0[1]!, g0[2]!, g1[0]!, g1[1]!, g1[2]!, GUIDE[0] * gk, GUIDE[1] * gk, GUIDE[2] * gk, GUIDE[0] * gk, GUIDE[1] * gk, GUIDE[2] * gk);
     if (!ax || !Number.isFinite(ax.rollCentreHeight)) return;
     set(q, ax.rollCentre.x, ax.rollCentre.y, ax.rollCentre.z);
     if (!finite3(q)) return;
-    set(c, (a[0]! + b[0]!) / 2, (a[1]! + b[1]!) / 2, (a[2]! + b[2]!) / 2);
     // centreline: dashed from the ground to a little above the RC (or above the ground, whichever is higher)
     const top = Math.max(dot(sub(p, q, c), ez), 0) + 0.12;
     out = ghost;
@@ -514,7 +519,7 @@ export function createConstruction(main: LineBatch, ghost: LineBatch): Construct
       trailLen[0] = trailLen[1] = 0;
       trailHead[0] = trailHead[1] = 0;
     },
-    draw(t, sim, dt, eye, farFloor = 0.22) {
+    draw(t, sim, dt, eye, farFloor = 0.22, focus = null) {
       const { x, y, z, w } = t.bodyRotation;
       set(ex, 1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y));
       set(ey, 2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x));
@@ -525,21 +530,25 @@ export function createConstruction(main: LineBatch, ghost: LineBatch): Construct
       const cs = t.corners;
       while (rigs.length < cs.length) rigs.push(newRig()); // grows once per layout
       axleGains(cs, eye, farFloor);
+      let focused = -1;
+      if (focus && cs.length === 4) for (let i = 0; i < cs.length; i++) if (cs[i]!.id === focus) focused = i;
       for (let i = 0; i < cs.length; i++) {
         const fc = cs[i]!;
         const rig = rigs[i]!;
         main.gain = ghost.gain = gain[fc.axle === 'front' ? 0 : 1]!;
         if (rig.order !== fc.pointOrder || rig.suspension !== sim.suspension) buildRig(rig, fc, sim);
-        drawCorner(i, fc, rig, sim, t);
+        if (focused < 0 || focused === i) drawCorner(i, fc, rig, sim, t);
       }
       trailClock += dt;
       const sampleTrail = trailClock >= RC_TRAIL_DT;
       if (sampleTrail) trailClock = 0;
       if (cs.length === 4) {
+        // corners are [fl, fr, rl, rr]: a focused left corner keeps the left half of its axle's ground line
+        const half = focused < 0 ? 0 : focused % 2 === 0 ? 1 : -1;
         main.gain = ghost.gain = gain[0]!;
-        drawAxle(0, cs[0]!, cs[1]!, t, sampleTrail);
+        if (focused < 2) drawAxle(0, cs[0]!, cs[1]!, t, sampleTrail, half);
         main.gain = ghost.gain = gain[1]!;
-        drawAxle(1, cs[2]!, cs[3]!, t, sampleTrail);
+        if (focused < 0 || focused >= 2) drawAxle(1, cs[2]!, cs[3]!, t, sampleTrail, half);
       }
       main.gain = ghost.gain = 1;
       main.end();

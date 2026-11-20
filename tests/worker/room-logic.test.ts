@@ -93,13 +93,12 @@ describe('decideJoin', () => {
     expect(decideJoin({ code: 'ABCDE', query: q(), hostKey: KEY, connections: 0 }).ok).toBe(true);
   });
 
-  it('requires a matching host key for role=host; LIVE has none (4401)', () => {
-    expect(decideJoin({ code: PUBLIC_ROOM, query: q({ role: 'host', k: KEY }), hostKey: null, connections: 0 })).toMatchObject({ close: CLOSE.forbidden });
-    expect(decideJoin({ code: 'ABCDE', query: q({ role: 'host' }), hostKey: KEY, connections: 0 })).toMatchObject({ close: CLOSE.forbidden });
-    expect(decideJoin({ code: 'ABCDE', query: q({ role: 'host', k: KEY.toUpperCase() }), hostKey: KEY, connections: 0 })).toMatchObject({
-      close: CLOSE.forbidden,
+  it('admits role=host only as pending (the key comes in the auth frame); LIVE has no host (4401)', () => {
+    expect(decideJoin({ code: PUBLIC_ROOM, query: q({ role: 'host' }), hostKey: null, connections: 0 })).toMatchObject({ close: CLOSE.forbidden });
+    expect(decideJoin({ code: 'ABCDE', query: q({ role: 'host', v: 'gt-coupe', s: 'macpherson' }), hostKey: KEY, connections: 0 })).toEqual({
+      ok: true,
+      attachment: { id: 'client-1', role: 'host', pending: true },
     });
-    expect(decideJoin({ code: 'ABCDE', query: q({ role: 'host', k: KEY }), hostKey: KEY, connections: 0 }).ok).toBe(true);
   });
 
   it('bounds the room size with a clear close code', () => {
@@ -158,16 +157,18 @@ describe('presence', () => {
 
   it('counts everyone but hosts and builds the vehicle:suspension distribution', () => {
     const p = presenceOf([a('1', 'viewer', 'macpherson'), a('2', 'viewer', 'macpherson'), a('3', 'screen', 'multilink'), a('4', 'audience'), a('5', 'host', 'x'), null]);
-    expect(p).toEqual({ viewers: 4, dist: { 'gt-coupe:macpherson': 2, 'gt-coupe:multilink': 1 } });
+    expect(p).toEqual({ viewers: 4, hosts: 1, dist: { 'gt-coupe:macpherson': 2, 'gt-coupe:multilink': 1 } });
+    expect(presenceOf([{ id: '6', role: 'host', pending: true }]).hosts).toBe(0);
   });
 
   it('detects unchanged snapshots (coalescing skips the broadcast)', () => {
-    const p = { viewers: 2, dist: { 'a:b': 1, 'a:c': 1 } };
+    const p = { viewers: 2, hosts: 0, dist: { 'a:b': 1, 'a:c': 1 } };
     expect(samePresence(null, p)).toBe(false);
-    expect(samePresence(p, { viewers: 2, dist: { 'a:c': 1, 'a:b': 1 } })).toBe(true);
-    expect(samePresence(p, { viewers: 2, dist: { 'a:b': 2 } })).toBe(false);
-    expect(samePresence(p, { viewers: 3, dist: p.dist })).toBe(false);
-    expect(samePresence(p, { viewers: 2, dist: { 'a:b': 1, 'a:d': 1 } })).toBe(false);
+    expect(samePresence(p, { viewers: 2, hosts: 0, dist: { 'a:c': 1, 'a:b': 1 } })).toBe(true);
+    expect(samePresence(p, { viewers: 2, hosts: 0, dist: { 'a:b': 2 } })).toBe(false);
+    expect(samePresence(p, { viewers: 3, hosts: 0, dist: p.dist })).toBe(false);
+    expect(samePresence(p, { viewers: 2, hosts: 0, dist: { 'a:b': 1, 'a:d': 1 } })).toBe(false);
+    expect(samePresence(p, { ...p, hosts: 1 })).toBe(false);
   });
 });
 
@@ -194,7 +195,16 @@ describe('reduceMessage', () => {
   const viewer: Attachment = { id: 'v1', role: 'viewer', vehicleId: 'gt-coupe', suspensionId: 'macpherson' };
   const host: Attachment = { id: 'h1', role: 'host' };
   const poll: PollRecord = { id: 'p1', question: 'Q?', options: ['A', 'B'], open: true };
-  const room = (over: Partial<RoomView> = {}): RoomView => ({ ctl: { seq: 4 }, poll: null, now: 1234, newPollId: () => 'p2', ...over });
+  const room = (over: Partial<RoomView> = {}): RoomView => ({ hostKey: KEY, ctl: { seq: 4 }, poll: null, now: 1234, newPollId: () => 'p2', ...over });
+
+  it('a pending host authenticates with its first frame; anything else (or a wrong key) is refused', () => {
+    const pending: Attachment = { id: 'h1', role: 'host', pending: true };
+    expect(reduceMessage(pending, { t: 'auth', k: KEY }, room())).toEqual([{ k: 'attach', attachment: { id: 'h1', role: 'host' } }, { k: 'welcome' }]);
+    expect(reduceMessage(pending, { t: 'auth', k: KEY.toUpperCase() }, room())).toEqual([{ k: 'close', code: CLOSE.forbidden, reason: 'forbidden' }]);
+    expect(reduceMessage(pending, { t: 'auth', k: KEY }, room({ hostKey: null }))).toEqual([{ k: 'close', code: CLOSE.forbidden, reason: 'forbidden' }]);
+    expect(reduceMessage(pending, { t: 'ctl', set: { xray: true } }, room())).toEqual([{ k: 'reply', msg: { t: 'err', code: 'forbidden' } }]);
+    expect(reduceMessage(viewer, { t: 'auth', k: KEY }, room())).toEqual([]);
+  });
 
   it('answers sync with the server stamp', () => {
     expect(reduceMessage(viewer, { t: 'sync', c0: 55.5 }, room())).toEqual([{ k: 'reply', msg: { t: 'sync', c0: 55.5, s1: 1234 } }]);
@@ -223,12 +233,12 @@ describe('reduceMessage', () => {
     expect(reduceMessage(host, { t: 'cue', cue: 'replay-section' }, room())).toEqual([{ k: 'cue', cue: 'replay-section' }]);
   });
 
-  it('host opens and closes polls; closing twice is a no-op', () => {
+  it('host opens, closes and then clears polls', () => {
     expect(reduceMessage(host, { t: 'poll', poll: { question: 'Q?', options: ['A', 'B'] } }, room())).toEqual([
       { k: 'poll', poll: { id: 'p2', question: 'Q?', options: ['A', 'B'], open: true } },
     ]);
     expect(reduceMessage(host, { t: 'poll', poll: null }, room({ poll }))).toEqual([{ k: 'poll', poll: { ...poll, open: false } }]);
-    expect(reduceMessage(host, { t: 'poll', poll: null }, room({ poll: { ...poll, open: false } }))).toEqual([]);
+    expect(reduceMessage(host, { t: 'poll', poll: null }, room({ poll: { ...poll, open: false } }))).toEqual([{ k: 'poll', poll: null }]);
     expect(reduceMessage(host, { t: 'poll', poll: null }, room())).toEqual([]);
   });
 

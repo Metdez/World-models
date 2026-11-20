@@ -21,6 +21,8 @@ import { isCurrentProtocol, type UpgradeQuery } from './schemas/room';
 export interface Attachment {
   readonly id: string;
   readonly role: RoomRole;
+  /** A host socket that has not sent its `auth` frame yet: no welcome, no privileges, not counted. */
+  readonly pending?: true;
   readonly vehicleId?: string;
   readonly suspensionId?: string;
 }
@@ -110,10 +112,10 @@ export function decideJoin({ code, query, hostKey, connections }: JoinInput): Jo
   if (!query) return { ok: false, close: CLOSE.badRequest, reason: 'bad-query' };
   if (!isCurrentProtocol(query)) return { ok: false, close: CLOSE.badRequest, reason: 'protocol' };
   if (code !== PUBLIC_ROOM && hostKey === null) return { ok: false, close: CLOSE.unknownRoom, reason: 'unknown-room' };
-  if (query.role === 'host' && (hostKey === null || !timingSafeEqual(query.k ?? '', hostKey))) {
-    return { ok: false, close: CLOSE.forbidden, reason: 'forbidden' };
-  }
+  // The key itself arrives in the first frame (`auth`); a room without one (LIVE) can never have a host.
+  if (query.role === 'host' && hostKey === null) return { ok: false, close: CLOSE.forbidden, reason: 'forbidden' };
   if (connections >= ROOM_LIMITS.maxConnections) return { ok: false, close: CLOSE.full, reason: 'room-full' };
+  if (query.role === 'host') return { ok: true, attachment: { id: query.id, role: 'host', pending: true } };
   const attachment: Attachment =
     query.v !== undefined && query.s !== undefined
       ? { id: query.id, role: query.role, vehicleId: query.v, suspensionId: query.s }
@@ -155,11 +157,13 @@ export function frameTooBig(text: string): boolean {
 
 export const distKey = (vehicleId: string, suspensionId: string): string => `${vehicleId}:${suspensionId}`;
 
-/** Viewers = every connection except hosts; dist counts those that reported a pick. */
+/** Viewers = every connection except hosts; dist counts those that reported a pick; hosts = authenticated hosts. */
 export function presenceOf(attachments: Iterable<Attachment | null>): PresenceSnapshot {
   let viewers = 0;
+  let hosts = 0;
   const dist: Record<string, number> = {};
   for (const a of attachments) {
+    if (a?.role === 'host' && !a.pending) hosts++;
     if (!a || a.role === 'host') continue;
     viewers++;
     if (a.vehicleId !== undefined && a.suspensionId !== undefined) {
@@ -167,11 +171,11 @@ export function presenceOf(attachments: Iterable<Attachment | null>): PresenceSn
       dist[key] = (dist[key] ?? 0) + 1;
     }
   }
-  return { viewers, dist };
+  return { viewers, hosts, dist };
 }
 
 export function samePresence(a: PresenceSnapshot | null, b: PresenceSnapshot): boolean {
-  if (!a || a.viewers !== b.viewers) return false;
+  if (!a || a.viewers !== b.viewers || a.hosts !== b.hosts) return false;
   const ka = Object.keys(a.dist);
   if (ka.length !== Object.keys(b.dist).length) return false;
   return ka.every((k) => a.dist[k] === b.dist[k]);
@@ -218,9 +222,14 @@ export type Effect =
   /** Persist the poll (null = none) and broadcast its tally now. */
   | { readonly k: 'poll'; readonly poll: PollRecord | null }
   /** Record the vote (one per client id per poll) and mark the tally dirty. */
-  | { readonly k: 'vote'; readonly pollId: string; readonly voterId: string; readonly choice: number };
+  | { readonly k: 'vote'; readonly pollId: string; readonly voterId: string; readonly choice: number }
+  /** Send this socket its welcome (a host after a good `auth`). */
+  | { readonly k: 'welcome' }
+  | { readonly k: 'close'; readonly code: number; readonly reason: string };
 
 export interface RoomView {
+  /** Stored host key (null: LIVE / unknown room). */
+  readonly hostKey: string | null;
   readonly ctl: PresenterState;
   readonly poll: PollRecord | null;
   readonly now: number;
@@ -230,7 +239,14 @@ export interface RoomView {
 const forbidden: Effect = { k: 'reply', msg: { t: 'err', code: 'forbidden' } };
 
 export function reduceMessage(att: Attachment, msg: ClientMessage, room: RoomView): readonly Effect[] {
+  if (att.pending) {
+    if (msg.t !== 'auth') return [forbidden];
+    if (room.hostKey === null || !timingSafeEqual(msg.k, room.hostKey)) return [{ k: 'close', code: CLOSE.forbidden, reason: 'forbidden' }];
+    return [{ k: 'attach', attachment: { id: att.id, role: 'host' } }, { k: 'welcome' }];
+  }
   switch (msg.t) {
+    case 'auth':
+      return [];
     case 'sync':
       return [{ k: 'reply', msg: { t: 'sync', c0: msg.c0, s1: room.now } }];
     case 'pick':
@@ -245,7 +261,10 @@ export function reduceMessage(att: Attachment, msg: ClientMessage, room: RoomVie
       return [{ k: 'cue', cue: msg.cue }];
     case 'poll':
       if (att.role !== 'host') return [forbidden];
-      if (msg.poll === null) return room.poll?.open ? [{ k: 'poll', poll: { ...room.poll, open: false } }] : [];
+      if (msg.poll === null) {
+        if (!room.poll) return [];
+        return [{ k: 'poll', poll: room.poll.open ? { ...room.poll, open: false } : null }];
+      }
       return [{ k: 'poll', poll: { id: room.newPollId(), question: msg.poll.question, options: msg.poll.options, open: true } }];
     case 'vote': {
       const p = room.poll;

@@ -97,6 +97,7 @@ export function createHostPanel(send: (message: ClientMessage) => void): HostPan
         { class: 'rm-grid' },
         winnerId ? button(`Run ${winner}`, () => set({ suspensionId: winnerId }), true) : null,
         button('New poll', ask, !winnerId),
+        button('Clear from screen', () => send({ t: 'poll', poll: null }), false),
       ),
     );
   }

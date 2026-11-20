@@ -21,6 +21,8 @@ export interface Governor {
   ratio: number;
   /** The one tier downgrade per session has happened. */
   downgraded: boolean;
+  /** Lowest ratio found too slow on this tier: climbing never returns to it, so the ratio cannot oscillate. */
+  ceiling: number;
 }
 
 export interface RatioBounds {
@@ -31,7 +33,7 @@ export interface RatioBounds {
 export type GovernorAction = 'none' | 'ratio' | 'downgrade';
 
 export function createGovernor(ratio: number): Governor {
-  return { ema: 1000 / 60, slowS: 0, fastS: 0, minS: 0, ratio, downgraded: false };
+  return { ema: 1000 / 60, slowS: 0, fastS: 0, minS: 0, ratio, downgraded: false, ceiling: Infinity };
 }
 
 /** Starting ratio for a tier: device ratio clamped into the tier's bounds. */
@@ -66,12 +68,14 @@ export function stepGovernor(g: Governor, dt: number, b: RatioBounds): GovernorA
     return 'downgrade';
   }
   if (g.slowS >= SLOW_HOLD_S && !atMin) {
+    g.ceiling = Math.min(g.ceiling, g.ratio);
     g.ratio = Math.max(b.minPixelRatio, round2(g.ratio - STEP_DOWN));
     g.slowS = 0;
     return 'ratio';
   }
-  if (g.fastS >= FAST_HOLD_S && g.ratio < b.maxPixelRatio - 1e-6) {
-    g.ratio = Math.min(b.maxPixelRatio, round2(g.ratio + STEP_UP));
+  const next = Math.min(b.maxPixelRatio, round2(g.ratio + STEP_UP));
+  if (g.fastS >= FAST_HOLD_S && g.ratio < b.maxPixelRatio - 1e-6 && next < g.ceiling - 1e-6) {
+    g.ratio = next;
     g.fastS = 0;
     return 'ratio';
   }

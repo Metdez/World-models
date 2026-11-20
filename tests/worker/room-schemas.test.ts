@@ -32,12 +32,11 @@ describe('parseUpgradeQuery', () => {
     expect(p('id=a&role=audience&k=&v=&s=&pv=1')).toEqual({ id: 'a', role: 'audience', pv: 1 });
   });
 
-  it('rejects missing/oversized ids, unknown roles, bad keys, non-numeric pv', () => {
+  it('rejects missing/oversized ids, unknown roles, non-numeric pv', () => {
     expect(p('role=viewer&pv=1')).toBeNull();
     expect(p(`id=${'a'.repeat(37)}&role=viewer&pv=1`)).toBeNull();
     expect(p('id=a b&role=viewer&pv=1')).toBeNull();
     expect(p('id=a&role=admin&pv=1')).toBeNull();
-    expect(p('id=a&role=host&k=short&pv=1')).toBeNull();
     expect(p('id=a&role=viewer&pv=x')).toBeNull();
     expect(p('id=a&role=viewer&s=Bad Id&pv=1')).toBeNull();
   });
@@ -50,6 +49,7 @@ describe('parseClientMessage', () => {
     const messages: ClientMessage[] = [
       { t: 'sync', c0: 1234.5 },
       { t: 'pick', vehicleId: 'gt-coupe', suspensionId: 'multilink' },
+      { t: 'auth', k: 'abcdefghijklmnopqrstuvwxyz012345' },
       { t: 'ctl', set: { vehicleId: 'gt-coupe', view: 'closeup', xray: true, overlay: 'engineer', timeScale: 0.25, amplification: 2.5, attract: false, section: 'carousel' } },
       { t: 'ctl', set: {} },
       { t: 'cue', cue: 'focus-front-left' },
@@ -70,6 +70,7 @@ describe('parseClientMessage', () => {
       { t: 'sync', c0: 'now' },
       { t: 'hello' },
       { t: 'pick', vehicleId: 'gt-coupe' },
+      { t: 'auth', k: 'short' },
       { t: 'pick', vehicleId: 'GT', suspensionId: 'x' },
       { t: 'pick', vehicleId: 'gt-coupe', suspensionId: 'x', x: 1, y: 2 },
       { t: 'ctl', set: { timeScale: 0 } },

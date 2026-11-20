@@ -28,8 +28,13 @@ export default {
     const proxy = new PerspectiveCamera(camera.fov, camera.aspect, camera.near, camera.far);
     const controls = new CameraControls(proxy, render.renderer.domElement);
     controls.enabled = false;
-    controls.minDistance = 2.5;
-    controls.maxDistance = 40;
+    // Zoom range per vehicle (set on boot and on every vehicle swap): never inside the body, never a speck.
+    const zoomRange = () => {
+      const bike = ctx.sim.current.vehicle.class === 'motorcycle';
+      controls.minDistance = bike ? 1.6 : 3.4;
+      controls.maxDistance = bike ? 9 : 16;
+    };
+    zoomRange();
     controls.maxPolarAngle = Math.PI * 0.49;
     controls.smoothTime = 0.2;
     controls.draggingSmoothTime = 0.1;
@@ -44,6 +49,9 @@ export default {
       if (Number.isNaN(exploreHeading)) {
         // Hand over from wherever the camera is now (research 13 §A4).
         void controls.setLookAt(camera.position.x, camera.position.y, camera.position.z, pivot.x, pivot.y, pivot.z, false);
+        // From a close-up the eye sits at the wheel: back off to a whole-vehicle distance along the same bearing.
+        const whole = controls.minDistance * 1.9;
+        if (controls.distance < whole) void controls.dollyTo(whole, false);
       } else {
         // The orbit turns with the car, so a 3/4 view stays 3/4 through corners.
         void controls.rotate(wrapAngle(frame.heading - exploreHeading), 0, false);
@@ -60,13 +68,15 @@ export default {
     const rig = new CameraRig(() => ctx.sim.current, explore);
     const instant = () => ctx.store.get().reducedMotion;
 
-    // Close-up switches x-ray on (and keeps it on: the eye sits at the bumper and looks through the body at the
-    // linkage); leaving restores it unless x-ray was already on before entering.
+    // A car's close-up switches x-ray on (and keeps it on: the eye sits at the bumper and looks through the body at
+    // the linkage); leaving restores it unless x-ray was already on before entering. A naked bike needs none: its
+    // close-up is a side view of the fork or the rear end, and x-ray would ghost the engine and frame away.
+    const needsXray = () => ctx.sim.current.vehicle.class !== 'motorcycle';
     let xrayAuto = false;
     let view = ctx.store.get().view;
     let corner = ctx.store.get().focusCorner;
     rig.setView(view, corner, true);
-    if (view === 'closeup' && !ctx.store.get().xray) {
+    if (view === 'closeup' && !ctx.store.get().xray && needsXray()) {
       xrayAuto = true;
       ctx.store.setKey('xray', true);
     }
@@ -79,7 +89,7 @@ export default {
         controls.enabled = view === 'explore';
         if (view !== 'explore') exploreHeading = Number.NaN;
         rig.setView(view, corner, instant());
-        if (entering && !s.xray) {
+        if (entering && !s.xray && needsXray()) {
           xrayAuto = true;
           ctx.store.setKey('xray', true);
         } else if (leaving && xrayAuto) {
@@ -89,7 +99,7 @@ export default {
         return;
       }
       corner = s.focusCorner;
-      if (view === 'closeup' && !s.xray) ctx.store.setKey('xray', true);
+      if (view === 'closeup' && !s.xray && needsXray()) ctx.store.setKey('xray', true);
     });
     controls.enabled = view === 'explore';
 
@@ -99,7 +109,20 @@ export default {
       else if (ctx.store.get().view === 'closeup') ctx.store.setKey('view', 'follow');
     });
     ctx.on('user:activity', () => rig.clearShot(instant()));
-    ctx.on('sim:vehicle', () => rig.layout(ctx.sim.frame));
+    ctx.on('sim:vehicle', () => {
+      rig.layout(ctx.sim.frame);
+      zoomRange();
+      if (view !== 'closeup') return;
+      // Swapped vehicle inside a close-up: x-ray follows the new vehicle's need (and stays the visitor's own choice).
+      const s = ctx.store.get();
+      if (needsXray() && !s.xray) {
+        xrayAuto = true;
+        ctx.store.setKey('xray', true);
+      } else if (!needsXray() && xrayAuto) {
+        xrayAuto = false;
+        if (s.xray) ctx.store.setKey('xray', false);
+      }
+    });
 
     const service: CameraService = {
       playShot: (shot) => rig.playShot(shot, instant()),

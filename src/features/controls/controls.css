@@ -555,3 +555,10 @@ button.sl-controls-help-row:hover {
     font-size: var(--fs-title);
   }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  #overlay > .sl-controls-loading,
+  .sl-controls-loading-fill {
+    transition: none;
+  }
+}

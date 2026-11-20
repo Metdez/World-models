@@ -12,7 +12,7 @@ export const API = {
   event: '/api/event',
 } as const;
 
-/** WebSocket upgrade path: `/ws/<CODE>?id=&role=&k=&v=&s=&pv=` */
+/** WebSocket upgrade path: `/ws/<CODE>?id=&role=&v=&s=&pv=` (a host's key goes in its first frame, `auth`). */
 export const WS_PREFIX = '/ws/';
 /** Short audience link: GET /r/<CODE> -> 302 /remote.html?room=<CODE> */
 export const REMOTE_PREFIX = '/r/';
@@ -21,7 +21,7 @@ export const REMOTE_PAGE = '/remote.html';
 export const PUBLIC_ROOM = 'LIVE';
 export const ROOM_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 export const ROOM_CODE_LENGTH = 5;
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 export const NET_LIMITS = {
   wsMessageBytes: 1024,
@@ -109,6 +109,8 @@ export interface PollState {
 }
 
 export type ClientMessage =
+  /** Host only, first frame after every open; welcome follows, wrong key closes 4401. Keeps the key out of URLs/logs. */
+  | { readonly t: 'auth'; readonly k: string }
   /** NTP-style probe: c0 = client performance.now() at send. */
   | { readonly t: 'sync'; readonly c0: number }
   /** Presence: what this viewer is running now. */
@@ -117,7 +119,7 @@ export type ClientMessage =
   | { readonly t: 'ctl'; readonly set: PresenterControls }
   /** Host only. */
   | { readonly t: 'cue'; readonly cue: PresenterCue }
-  /** Host only: open a poll (null closes the current one). */
+  /** Host only: open a poll (null closes the open poll, or clears a closed one). */
   | { readonly t: 'poll'; readonly poll: { readonly question: string; readonly options: readonly string[] } | null }
   /** Audience/viewer: one vote per client id per poll (re-vote replaces). */
   | { readonly t: 'vote'; readonly pollId: string; readonly choice: number };
@@ -125,6 +127,8 @@ export type ClientMessage =
 
 export interface PresenceSnapshot {
   readonly viewers: number;
+  /** Authenticated hosts (phone remotes) connected; never counted in `viewers`. */
+  readonly hosts: number;
   readonly dist: Readonly<Record<string, number>>;
 }
 

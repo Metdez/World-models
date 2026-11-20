@@ -30,9 +30,9 @@ describe('socketUrl', () => {
     expect(live.protocol).toBe('wss:');
     expect(live.pathname).toBe('/ws/LIVE');
     expect(Object.fromEntries(live.searchParams)).toEqual({ id: 'abc', role: 'viewer', v: 'gt-coupe', s: 'multilink', pv: String(PROTOCOL_VERSION) });
-    const local = new URL(socketUrl({ ...base, origin: 'http://localhost:4173', code: 'AB2CD', role: 'screen', hostKey: 'k'.repeat(32) }));
+    const local = new URL(socketUrl({ ...base, origin: 'http://localhost:4173', code: 'AB2CD', role: 'screen' }));
     expect(local.protocol).toBe('ws:');
-    expect(local.searchParams.get('k')).toBe('k'.repeat(32));
+    expect(local.searchParams.has('k')).toBe(false); // keys never travel in a URL (protocol 2)
   });
 });
 

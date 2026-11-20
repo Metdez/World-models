@@ -143,7 +143,7 @@ describe('Room DO', () => {
     expect(a.last('presence')).toBeUndefined();
 
     vi.advanceTimersByTime(NET_LIMITS.presenceFlushMs);
-    const expected = { t: 'presence', viewers: 2, dist: { 'gt-coupe:macpherson': 1, 'gt-coupe:multilink': 1 } };
+    const expected = { t: 'presence', viewers: 2, hosts: 0, dist: { 'gt-coupe:macpherson': 1, 'gt-coupe:multilink': 1 } };
     expect(a.last('presence')).toEqual(expected);
     expect(b.last('presence')).toEqual(expected);
 
@@ -156,7 +156,7 @@ describe('Room DO', () => {
     await say(b, { t: 'pick', vehicleId: 'gt-coupe', suspensionId: 'macpherson' });
     vi.advanceTimersByTime(NET_LIMITS.presenceFlushMs);
     expect(a.sent.filter((m) => m.t === 'presence')).toHaveLength(2);
-    expect(a.last('presence')).toEqual({ t: 'presence', viewers: 2, dist: { 'gt-coupe:macpherson': 2 } });
+    expect(a.last('presence')).toEqual({ t: 'presence', viewers: 2, hosts: 0, dist: { 'gt-coupe:macpherson': 2 } });
   });
 
   it('a burst of joins produces one presence broadcast', async () => {
@@ -164,7 +164,7 @@ describe('Room DO', () => {
     const first = connect({ id: 'x0', role: 'viewer' });
     for (let i = 1; i < 50; i++) connect({ id: `x${i}`, role: 'viewer' });
     vi.advanceTimersByTime(NET_LIMITS.presenceFlushMs);
-    expect(first.sent.filter((m) => m.t === 'presence')).toEqual([{ t: 'presence', viewers: 50, dist: {} }]);
+    expect(first.sent.filter((m) => m.t === 'presence')).toEqual([{ t: 'presence', viewers: 50, hosts: 0, dist: {} }]);
   });
 
   it('drops closed sockets from presence and excludes the host', async () => {
@@ -173,7 +173,7 @@ describe('Room DO', () => {
     const b = connect({ id: 'b', role: 'audience' });
     connect({ id: 'h', role: 'host' });
     vi.advanceTimersByTime(NET_LIMITS.presenceFlushMs);
-    expect(a.last('presence')?.viewers).toBe(2);
+    expect(a.last('presence')).toMatchObject({ viewers: 2, hosts: 1 });
     b.readyState = 3;
     await room.webSocketClose(b, 1001, 'gone');
     vi.advanceTimersByTime(NET_LIMITS.presenceFlushMs);
@@ -209,6 +209,30 @@ describe('Room DO', () => {
     // A screen joining later sees the persisted state in its welcome.
     const late = connect({ id: 'late', role: 'screen' });
     expect(late.sent[0]).toMatchObject({ t: 'welcome', ctl: { seq: 2, xray: false } });
+  });
+
+  it('a pending host is welcomed only after a good auth frame; a wrong key closes 4401', async () => {
+    const { room, connect, say, state } = await setup();
+    await room.init(HOST_KEY);
+    const screen = connect({ id: 's', role: 'screen' });
+    const pending = new FakeSocket();
+    state.acceptWebSocket(pending);
+    pending.serializeAttachment({ id: 'h', role: 'host', pending: true });
+    await say(pending, { t: 'ctl', set: { xray: true } });
+    expect(pending.last('err')).toEqual({ t: 'err', code: 'forbidden' });
+    await say(pending, { t: 'auth', k: HOST_KEY });
+    expect(pending.last('welcome')).toMatchObject({ role: 'host', id: 'h' });
+    vi.advanceTimersByTime(NET_LIMITS.presenceFlushMs);
+    expect(screen.last('presence')).toMatchObject({ viewers: 1, hosts: 1 });
+    await say(pending, { t: 'ctl', set: { xray: true } });
+    expect(screen.last('ctl')).toMatchObject({ state: { xray: true } });
+
+    const intruder = new FakeSocket();
+    state.acceptWebSocket(intruder);
+    intruder.serializeAttachment({ id: 'x', role: 'host', pending: true });
+    await say(intruder, { t: 'auth', k: 'x'.repeat(32) });
+    expect(intruder.closed).toEqual({ code: CLOSE.forbidden, reason: 'forbidden' });
+    expect(intruder.last('welcome')).toBeUndefined();
   });
 
   it('runs a poll: one vote per client (re-vote replaces), tally coalesced to 2 Hz, close keeps results', async () => {

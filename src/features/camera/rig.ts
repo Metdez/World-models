@@ -75,6 +75,10 @@ export const BIKE_CHASE: ChaseFraming = { dist: [3.5, 4.5], height: [1.3, 1.55],
 /** Size of a bike's director shots (orbit, front view) relative to the car's. */
 export const BIKE_SHOT_SCALE = 0.62;
 
+/** Hero orbit: start azimuth in the car frame (x forward, z right; negative = left of the nose) and turn rate, rad/s. */
+export const ORBIT_START = -0.55;
+export const ORBIT_RATE = 0.12;
+
 /** Default FOV per shot kind, deg (DirectorShot.fov overrides). */
 const DEFAULT_FOV: Record<ShotKind, number> = { chase: 50, orbit: 38, closeup: 42, trackside: 20, overhead: 34, 'front-view': 30 };
 
@@ -199,7 +203,8 @@ export interface CornerGeometry {
   readonly side: 1 | -1 | 0;
   readonly front: boolean;
   readonly radius: number;
-  /** Motorcycle close-ups: the side to film from, +1 left (default), -1 right (a single-sided arm on the right). */
+  /** Motorcycle close-ups: a fixed side to film from, +1 left, -1 right (a single-sided arm's own side); unset = the
+   * rig picks the outside of the lean. */
   readonly filmSide?: 1 | -1;
 }
 
@@ -216,15 +221,19 @@ export const CLOSEUP = {
   bikeFront: { eye: [0.3, 0.95, 1.95], aim: [-0.13, 0.28] },
   bikeRear: { eye: [0.2, 0.95, 2.05], aim: [0.27, 0.14] },
   bikeFov: 40,
+  /** Lean toward the lens (rad) past which the bike close-up crosses to the outside of the lean. */
+  bikeSwitchLean: 0.17,
+  /** Share of a lean away from the lens the eye follows (it swings up and keeps square to the bike's side). */
+  bikeFollowLean: 0.85,
 } as const;
 
-/** Close-up eye/aim in the body frame for one corner. Returns the FOV. */
-export function closeupLocal(c: CornerGeometry, eye: Vector3, aim: Vector3): number {
+/** Close-up eye/aim in the body frame for one corner. Returns the FOV. `side`: a bike's film side when not fixed. */
+export function closeupLocal(c: CornerGeometry, eye: Vector3, aim: Vector3, side: 1 | -1 = 1): number {
   const dir = c.front ? 1 : -1;
   if (c.halfTrack === 0) {
-    // Left is three -z: film a centreline corner from the left. x offsets are from the axle (aim y above the hub).
+    // Left is three -z. x offsets are from the axle (aim y above the hub).
     const f = c.front ? CLOSEUP.bikeFront : CLOSEUP.bikeRear;
-    eye.set(c.x + f.eye[0], f.eye[1], -(c.filmSide ?? 1) * f.eye[2]);
+    eye.set(c.x + f.eye[0], f.eye[1], -(c.filmSide ?? side) * f.eye[2]);
     aim.set(c.x + f.aim[0], c.radius + f.aim[1], 0);
     return CLOSEUP.bikeFov;
   }
@@ -249,7 +258,7 @@ export function cornerGeometry(sim: Simulation, t: TelemetryFrame): CornerGeomet
       side: c.side,
       front,
       radius: axle.tyre.radius,
-      filmSide: front ? 1 : rearSide,
+      ...(!front && rearSide < 0 ? { filmSide: -1 as const } : {}),
     };
   });
 }
@@ -301,6 +310,10 @@ export class CameraRig {
   private readonly bodyUp = new Vector3();
   private readonly unroll = new Quaternion();
   private shotScale = 1;
+  /** Bike close-up film side (+1 left): the outside of the lean, with hysteresis. */
+  private bikeSide: 1 | -1 = 1;
+  /** Callers asked for cuts (reduced motion): the rig's own switches follow suit. */
+  private cuts = false;
   /** Suspension the corner layout was read for (a bike's film side depends on its swingarm). */
   private layoutFor = '';
   private lastLapTime = Number.NaN;
@@ -328,10 +341,12 @@ export class CameraRig {
     this.view = view;
     this.corner = corner;
     this.shot = null;
+    this.cuts = instant;
     this.begin(instant);
   }
 
   playShot(shot: DirectorShot, instant: boolean): void {
+    this.cuts = instant;
     this.shot = {
       kind: shot.kind,
       corner: shot.corner ?? null,
@@ -341,13 +356,10 @@ export class CameraRig {
       azimuth: 0,
     };
     if (shot.kind === 'trackside') this.placeTripod(shot.durationS);
-    if (shot.kind === 'orbit') {
-      // Start the orbit where the camera already is (seen from the car) so the move reads as one gesture.
-      this.frame.pointToLocal(this.out.pos, this.eye);
-      this.shot.azimuth = Math.atan2(this.eye.z, this.eye.x);
-    }
-    // Trackside is a tripod cut (film grammar); everything else glides.
-    this.begin(instant || shot.kind === 'trackside');
+    // The hero orbit opens on a front three-quarter (left side, ~30° off the nose) and turns toward the profile.
+    if (shot.kind === 'orbit') this.shot.azimuth = ORBIT_START;
+    // Trackside and the hero orbit open on a cut (film grammar); everything else glides.
+    this.begin(instant || shot.kind === 'trackside' || shot.kind === 'orbit');
   }
 
   clearShot(instant: boolean): void {
@@ -411,7 +423,7 @@ export class CameraRig {
         this.closeupPose(t, this.shot ? this.shot.corner : this.corner, out);
         break;
       case 'orbit': {
-        const az = (this.shot?.azimuth ?? 0) + (this.shot?.age ?? 0) * 0.16;
+        const az = (this.shot?.azimuth ?? 0) - (this.shot?.age ?? 0) * ORBIT_RATE;
         const r = 7.2 * this.shotScale;
         this.local(r * Math.cos(az), 1.9 * this.shotScale, r * Math.sin(az), 0, 0.55, 0, out);
         out.fov = DEFAULT_FOV.orbit;
@@ -459,14 +471,26 @@ export class CameraRig {
     const c = this.corners[index];
     simToThree(t.bodyPosition.x, t.bodyPosition.y, t.bodyPosition.z, this.bodyPos);
     simQuatToThree(t.bodyRotation, this.bodyQuat);
-    // A bike leans as a whole (not a suspension motion): film it in its un-leaned frame, so the camera neither rolls
-    // with a 40 degree lean nor swings under the road on the lean side, while pitch and heave stay rigid.
-    if (c && c.halfTrack === 0) this.bodyQuat.multiply(this.unroll.setFromAxisAngle(FORWARD, -t.roll));
     if (!c) {
       this.chasePose(this.sim(), out);
       return;
     }
-    out.fov = closeupLocal(c, this.eye, this.aim);
+    if (c.halfTrack === 0) {
+      // A bike leans as a whole. Leaning toward the lens it would show its underside, so the camera crosses to the
+      // outside of the lean (hysteresis: once per corner). There it follows most of the lean about the ground line:
+      // the eye swings up and stays square to the bike's side. A fixed side (single-sided arm) keeps the un-leaned
+      // frame, so the camera never sinks under the road. The horizon stays level either way (world up below).
+      const side = c.filmSide ?? this.bikeSide;
+      if (c.filmSide === undefined && t.roll * side < -CLOSEUP.bikeSwitchLean) {
+        this.bikeSide = side > 0 ? -1 : 1;
+        this.begin(this.cuts);
+      }
+      const s = c.filmSide ?? this.bikeSide;
+      // Sim roll > 0 leans right (away from a left-side camera, s = +1).
+      const keep = c.filmSide === undefined ? Math.max(0, t.roll * s) * s * CLOSEUP.bikeFollowLean : 0;
+      this.bodyQuat.multiply(this.unroll.setFromAxisAngle(FORWARD, keep - t.roll));
+    }
+    out.fov = closeupLocal(c, this.eye, this.aim, this.bikeSide);
     this.eye.applyQuaternion(this.bodyQuat).add(this.bodyPos);
     this.aim.applyQuaternion(this.bodyQuat).add(this.bodyPos);
     out.pos.copy(this.eye);

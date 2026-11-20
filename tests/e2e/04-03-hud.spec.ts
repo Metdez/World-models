@@ -54,7 +54,8 @@ test.describe('04-03 telemetry panel + insights', () => {
     const caption = page.locator('.sl-insights-caption');
     await expect(caption).toBeVisible();
     await expect(page.locator('.sl-insights-text')).toHaveText(/rolls toward the outside/);
-    await expect(page.locator('.sl-insights')).toHaveAttribute('aria-live', 'polite');
+    await expect(page.locator('.sl-insights-announce')).toHaveAttribute('aria-live', 'polite'); // 07-03: caption announced once, chip silent
+    await expect(page.locator('.sl-insights-announce')).toHaveText(/rolls toward the outside/);
     // the section chip reads the live TRUE frame (15 Hz), like the card: nowhere near the x2.5 pose
     expect(Math.abs(num(await page.locator('.sl-insights-chip').textContent()) - Math.abs(f.roll * RAD))).toBeLessThan(0.11);
 

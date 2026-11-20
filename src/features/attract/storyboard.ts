@@ -10,7 +10,8 @@ import type { Phenomenon } from '../../contracts/track';
 export type AttractPatch = Partial<Pick<AppState, 'xray' | 'overlay' | 'timeScale' | 'amplification'>>;
 
 export interface Beat {
-  /** Wall-clock seconds (independent of slow motion). */
+  /** Seconds of sim time at normal speed: the director advances by the sim's own progress divided by the time
+   * scale, so a seek with `lead` lands on its section on any machine, however slow the frames. */
   readonly duration: number;
   readonly caption: string;
   /** Show the product title above the caption. */
@@ -82,7 +83,8 @@ export const STORYBOARD: readonly Beat[] = [
     shot: { kind: 'closeup', corner: 'f' },
     at: 'brake-dive',
     lead: 1.5,
-    patch: { ...CLEAN, xray: true },
+    // A naked bike shows its fork solid: x-ray would ghost the engine and frame away.
+    patch: CLEAN,
     swap: 0,
     bike: true,
   },

@@ -1,8 +1,8 @@
 /**
  * Presenter (ARCHITECTURE §9.2, §12.4), big screen only (`?screen=1`): shows the room code + QR and applies the host's
  * `ctl` state (seq-ordered, only what changed) and cues. Before the host has taken control the card shows the
- * presenter QR (host key in the `#k=` fragment, never in a query string); after the first host command it flips to
- * the audience QR (`/r/CODE`). The presenter can flip back or collapse the card.
+ * presenter QR (host key in the `#k=` fragment, never in a query string); once a host connects (presence `hosts`) or
+ * sends a command it flips to the audience QR (`/r/CODE`). The presenter can flip back or collapse the card.
  */
 import type { FeatureContext, FeatureModule } from '../../contracts/app';
 import type { PresenterState } from '../../contracts/net';
@@ -36,12 +36,20 @@ function init(ctx: FeatureContext): void {
     return true;
   };
 
+  let hosts = 0;
   ctx.addDisposer(
     room.on('welcome', (m) => {
       if (last && m.ctl.seq < last.seq) last = null; // the room was recreated: start over
       apply(m.ctl);
-      if (m.ctl.seq > 0) setMode('audience'); // a host already drove this room
+      hosts = m.presence.hosts;
+      if (m.ctl.seq > 0 || hosts > 0) setMode('audience'); // a host already drove / is driving this room
       show();
+    }),
+  );
+  ctx.addDisposer(
+    room.on('presence', (m) => {
+      if (m.hosts > 0 && hosts === 0) setMode('audience'); // the presenter's phone just connected
+      hosts = m.hosts;
     }),
   );
   ctx.addDisposer(

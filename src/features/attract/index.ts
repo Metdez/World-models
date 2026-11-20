@@ -63,6 +63,8 @@ export default {
     // The bike beat swaps the vehicle; a vehicle swap resets the suspension, so the visitor's is re-applied a frame
     // after the vehicle comes back (a write made while the store is notifying would be overtaken by the kernel's).
     let restoreSuspension: string | null = null;
+    /** Lap time seen last frame (NaN = re-anchor: a seek or a vehicle swap happened). */
+    let lastLap = Number.NaN;
     const startBeat = (beat: Beat) => {
       const ownVehicle = snapshot?.vehicleId ?? store.get().vehicleId;
       const bike = beat.bike ? ctx.registries.vehicles.list().find((v) => v.class === 'motorcycle')?.id : undefined;
@@ -77,6 +79,7 @@ export default {
         if (section) bus.emit('sim:seek-to', { lapTime: (((sim.lapTimeAt(section.s0) - (beat.lead ?? 0)) % d) + d) % d });
       }
       for (const [key, value] of Object.entries(beat.patch) as [keyof Beat['patch'], never][]) set(key, value);
+      lastLap = Number.NaN;
       const own = snapshot?.suspensionId ?? store.get().suspensionId;
       const list = sim.vehicle.suspensions;
       const i = list.indexOf(own);
@@ -131,17 +134,25 @@ export default {
       if (active) exit();
     });
 
-    // Idle start: never in e2e, never when ?attract=0.
-    const idleStarts = !ctx.flags.e2e && ctx.flags.attract !== false;
+    // Idle start: never in e2e, never when ?attract=0, and under reduced motion only when ?attract=1 asks for it
+    // (its storyboard is camera fly-throughs); the presenter can still start it.
+    const idleStarts = !ctx.flags.e2e && ctx.flags.attract !== false && (!store.get().reducedMotion || ctx.flags.attract === true);
 
-    frameHandler = ({ dt }) => {
+    frameHandler = ({ dt, t }) => {
       let opacity = 0;
       if (restoreSuspension !== null) {
         set('suspensionId', restoreSuspension);
         restoreSuspension = null;
       }
       if (active) {
-        const index = timeline.step(dt);
+        // Director time = the sim's own progress (dropped backlogs, live corrections and slow frames included) at
+        // normal speed, so every seek lands on its bump exactly `lead` seconds into the beat on any machine.
+        const d = ctx.sim.current.lapDuration;
+        const scale = store.get().timeScale;
+        const moved = Number.isNaN(lastLap) ? 0 : ((((t.lapTime - lastLap) % d) + d) % d) / (scale > 0 ? scale : 1);
+        lastLap = t.lapTime;
+        // a wrap-around jump larger than a frame could ever step is a seek from elsewhere: re-anchor
+        const index = timeline.step(moved < 1 ? moved : 0);
         if (index >= 0) startBeat(STORYBOARD[index]!);
         opacity = fadeAt(STORYBOARD, timeline.time);
         const amp = store.get().amplification;

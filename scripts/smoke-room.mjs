@@ -7,7 +7,7 @@ const loadIdx = args.indexOf('--load');
 const load = loadIdx >= 0 ? Number(args[loadIdx + 1]) : 0;
 const base = (args.find((a, i) => !a.startsWith('--') && i !== loadIdx + 1) ?? 'https://suspension-lab.zh-a16.workers.dev').replace(/\/$/, '');
 const wsBase = base.replace(/^http/, 'ws');
-const PV = 1; // PROTOCOL_VERSION (src/contracts/net.ts)
+const PV = 2; // PROTOCOL_VERSION (src/contracts/net.ts)
 const LAP_S = 83.72; // proving loop lap (02-04); only used to express clock error as lap time
 const V = 'gt-coupe';
 
@@ -32,8 +32,9 @@ const uid = () => `smoke-${process.pid}-${nextId++}`;
 function client(code, { role = 'viewer', s, k, pv = PV, id = uid() } = {}) {
   const q = new URLSearchParams({ id, role, pv: String(pv) });
   if (s) q.set('v', V), q.set('s', s);
-  if (k) q.set('k', k);
   const ws = new WebSocket(`${wsBase}/ws/${code}?${q}`);
+  // A host's key never goes in the URL: it is the first frame after every open (protocol 2).
+  if (k) ws.addEventListener('open', () => ws.send(JSON.stringify({ t: 'auth', k })));
   const messages = [];
   const waiters = new Set();
   const c = {
@@ -169,7 +170,7 @@ if (room) {
     return `offset ${a.offset.toFixed(1)} / ${b.offset.toFixed(1)} ms (http ${h.offset.toFixed(1)}), min RTT ${a.rtt.toFixed(0)} ms, lap-time diff ${(lapDiff * 1000).toFixed(1)} ms of ${LAP_S} s`;
   });
 
-  await check('host: wrong key 4401, viewer ctl forbidden, host ctl reaches the screen with seq', async () => {
+  await check('host: key in the first frame (wrong key 4401), viewer ctl forbidden, host ctl reaches the screen with seq', async () => {
     const bad = client(room.code, { role: 'host', k: 'x'.repeat(32) });
     const cl = await bad.done;
     assert(cl.code === 4401, `wrong key closed ${cl.code}`);
@@ -182,14 +183,14 @@ if (room) {
     assert(ctl.state.seq === 1 && ctl.state.xray === true && ctl.state.suspensionId === 'multilink', JSON.stringify(ctl));
     host.send({ t: 'cue', cue: 'focus-car' });
     const cue = await screen.next((m) => m.t === 'cue', 5000, 'cue');
-    // host is not counted: v1, v2, screen
-    await presence(v1, (p) => p.viewers === 3, 'presence 3 (host excluded)');
+    // host is not counted as a viewer but is signalled: v1, v2, screen + 1 host
+    await presence(v1, (p) => p.viewers === 3 && p.hosts === 1, 'presence 3 + 1 host');
     globalThis.host = host;
     globalThis.screen = screen;
-    return `ctl seq ${ctl.state.seq}, cue seq ${cue.seq}, viewers 3 (host excluded)`;
+    return `ctl seq ${ctl.state.seq}, cue seq ${cue.seq}, viewers 3 (host excluded), hosts 1`;
   });
 
-  await check('poll: host opens, audience votes once each (re-vote replaces), tally broadcast', async () => {
+  await check('poll: host opens, audience votes once each (re-vote replaces), tally broadcast, close, clear', async () => {
     const { host } = globalThis;
     const a1 = await client(room.code, { role: 'audience' }).ready;
     const a2 = await client(room.code, { role: 'audience' }).ready;
@@ -201,9 +202,11 @@ if (room) {
     const t = await host.waitFor((m) => m.t === 'poll' && m.poll?.counts.join() === '0,2,0', 5000, 'tally 0,2,0');
     host.send({ t: 'poll', poll: null });
     const closed = await a2.next((m) => m.t === 'poll' && m.poll && !m.poll.open, 5000, 'poll closed');
+    host.send({ t: 'poll', poll: null });
+    await a2.next((m) => m.t === 'poll' && m.poll === null, 5000, 'poll cleared');
     a1.close();
     a2.close();
-    return `counts ${t.poll.counts.join('/')}, closed with ${closed.poll.counts.join('/')}`;
+    return `counts ${t.poll.counts.join('/')}, closed with ${closed.poll.counts.join('/')}, then cleared`;
   });
 
   await check('validation: bad message -> err, oversize -> 1009, flooding -> err rate', async () => {
