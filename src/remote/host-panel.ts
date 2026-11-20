@@ -1,8 +1,11 @@
 /** Presenter's phone panel: every control writes a `ctl`/`cue`/`poll` message; the big screen applies it. */
 import type { ClientMessage, PollState, PresenterControls, PresenterState } from '../contracts/net';
+import { initialState } from '../contracts/store';
 import { h } from '../ui/dom';
 import { AMPLIFY, CAMERA_CUES, SECTIONS, SPEEDS, VEHICLES, VIEWS, suspensionForOption, suspensionPoll, vehicleOf } from './catalogue';
 import { card, pollRows, segmented, shares, toggle, votesText } from './widgets';
+
+const START = initialState();
 
 export interface HostPanel {
   readonly el: HTMLElement;
@@ -30,9 +33,9 @@ export function createHostPanel(send: (message: ClientMessage) => void): HostPan
   const view = segmented('View', VIEWS, (id) => set({ view: id }));
   const speed = segmented('Speed', SPEEDS, (id) => set({ timeScale: id }));
   const xray = toggle('X-ray', 'See the linkage', (on) => set({ xray: on }));
-  const amplify = toggle('Amplify', `Motion ×${AMPLIFY}, labelled on screen`, (on) => set({ amplification: on ? AMPLIFY : 1 }));
+  const amplify = toggle('Amplify', `Motion ×${AMPLIFY}, labelled`, (on) => set({ amplification: on ? AMPLIFY : 1 }));
   const attract = toggle('Attract', 'Self-running show', (on) => set({ attract: on }));
-  const lines = toggle('Engineer lines', 'Roll centres, loads', (on) => set({ overlay: on ? 'engineer' : 'clean' }));
+  const lines = toggle('Overlays', 'Roll centres, loads', (on) => set({ overlay: on ? 'engineer' : 'clean' }));
 
   const sectionButtons = SECTIONS.map((s) => {
     const b = h('button', { type: 'button', class: 'rm-chip', 'aria-pressed': 'false' }, h('span', {}, s.label), h('span', { class: 'rm-chip-sub' }, 'Replay'));
@@ -99,16 +102,17 @@ export function createHostPanel(send: (message: ClientMessage) => void): HostPan
   }
 
   function render(): void {
+    // Fields the presenter has not set yet show the app's start state (contracts/store initialState).
     const v = vehicleOf(ctl.vehicleId);
-    vehicle.set(ctl.vehicleId);
+    vehicle.set(v.id);
     if (suspensionFor !== v.id) {
       suspensionFor = v.id;
       suspension = segmented('Suspension', v.suspensions, (id) => set({ suspensionId: id }));
       suspensionSlot.replaceChildren(suspension.el);
     }
-    suspension.set(ctl.suspensionId);
-    view.set(ctl.view);
-    speed.set(ctl.timeScale);
+    suspension.set(ctl.suspensionId ?? (v.id === START.vehicleId ? START.suspensionId : v.suspensions[0]!.id));
+    view.set(ctl.view ?? START.view);
+    speed.set(ctl.timeScale ?? START.timeScale);
     xray.set(ctl.xray);
     lines.set(ctl.overlay === 'engineer');
     amplify.set((ctl.amplification ?? 1) > 1);

@@ -1,6 +1,6 @@
 /* Insight caption (research 14 D7/D8): one line, bottom-centre above the suspension control. Tokens only. */
 .sl-insights {
-  --sl-insights-controls: 76px; /* clearance for the suspension segmented control below */
+  --sl-insights-controls: 96px; /* clearance for the suspension control and its descriptor below */
   position: absolute;
   left: 50%;
   bottom: calc(var(--margin) + var(--sl-insights-controls));

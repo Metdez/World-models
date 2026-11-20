@@ -9,6 +9,7 @@
  */
 import type { CarSuspensionDefinition, SuspensionDefinition } from '../../contracts/suspension';
 import type { CornerFrame, TelemetryFrame } from '../../contracts/telemetry';
+import type { XYZ } from '../../contracts/units';
 import type { VehicleDefinition } from '../../contracts/vehicle';
 import type { LineBatch } from './lines';
 
@@ -21,6 +22,8 @@ export interface OverlaySim {
 
 /** Construction lines are clamped to this length from where they start, m (ICs can sit at 1000 m). */
 export const LINE_MAX = 2.6;
+/** Length of arm-plane lines when the IC is out of reach, m. */
+const ARM_HINT = 0.9;
 /** The last part of a clamped line fades out over this fraction of LINE_MAX. */
 const FADE = 0.35;
 const RC_TRAIL = 28;
@@ -29,11 +32,11 @@ const RC_TRAIL_DT = 1 / 24;
 const LOAD_SCALE = 0.3 / 4000;
 
 // Linear-rgb stroke colours (additive layer: values > 1 survive the AgX tone map as clean, bright strokes).
-const FORCE = [0.25, 1.35, 1.0] as const; // accent mint: contact patch → IC → RC
-const IC = [1.6, 0.36, 0.26] as const; // coral: arm planes → IC
+const FORCE = [0.36, 1.9, 1.4] as const; // accent mint: contact patch → IC → RC
+const IC = [1.25, 0.3, 0.22] as const; // coral: arm planes → IC
 const RC = [1.5, 1.5, 1.5] as const;
 const GUIDE = [0.42, 0.45, 0.5] as const; // ground line, centreline
-const GHOST = [0.62, 0.74, 0.9] as const; // normal-blended ghost layer
+const GHOST = [0.3, 0.38, 0.48] as const; // additive ghost layer
 const GRIP_OK = [0.7, 0.85, 0.95] as const;
 const GRIP_WARN = [1.6, 0.72, 0.16] as const; // --warn
 const GRIP_OVER = [1.7, 0.2, 0.16] as const;
@@ -188,7 +191,8 @@ export function buildRig(rig: CornerRig, c: CornerFrame, sim: OverlaySim): void 
 export interface Construction {
   /** Clears the RC trails (vehicle/suspension change, seek). */
   reset(): void;
-  draw(t: TelemetryFrame, sim: OverlaySim, dt: number): void;
+  /** `eye` (sim frame, optional): the axle nearer the camera is drawn at full strength, the other one dimmed. */
+  draw(t: TelemetryFrame, sim: OverlaySim, dt: number, eye?: XYZ): void;
 }
 
 export function createConstruction(main: LineBatch, ghost: LineBatch): Construction {
@@ -217,10 +221,10 @@ export function createConstruction(main: LineBatch, ghost: LineBatch): Construct
   let trailClock = 0;
 
   /** Stroke from s0 to s1 along (o, unit dir); `dash` 0 = solid; fades when the line was clamped at `max`. */
-  const stroke = (o: V, dir: V, s0: number, s1: number, col: readonly number[], dash: number, max: number, clamped: boolean): void => {
+  const stroke = (o: V, dir: V, s0: number, s1: number, col: readonly number[], dash: number, max: number, clamped: boolean, gap = 0.7): void => {
     if (!(s1 > s0)) return;
     const step = dash > 0 ? Math.max(dash, (s1 - s0) / 48) : (s1 - s0) / (clamped ? 6 : 1);
-    for (let s = s0; s < s1 - 1e-6; s += step * (dash > 0 ? 1.7 : 1)) {
+    for (let s = s0; s < s1 - 1e-6; s += step * (dash > 0 ? 1 + gap : 1)) {
       const e = Math.min(s + step, s1);
       const fa = fadeAt(s, max, clamped);
       const fb = fadeAt(e, max, clamped);
@@ -252,16 +256,16 @@ export function createConstruction(main: LineBatch, ghost: LineBatch): Construct
   };
 
   /** Ray from `from` toward `to`, clamped at LINE_MAX (faded). Solid up to `solid` (distance), dashed beyond. */
-  const ray = (from: V, to: V, col: readonly number[], dashFrom: number): void => {
+  const ray = (from: V, to: V, col: readonly number[], dashFrom: number, dash = 0.03, gap = 0.7, max = LINE_MAX): void => {
     sub(d, to, from);
     const l = len(d);
     if (!(l > 1e-4) || !Number.isFinite(l)) return;
     norm(d, d);
-    const clamped = l > LINE_MAX;
-    const end = Math.min(l, LINE_MAX);
+    const clamped = l > max;
+    const end = Math.min(l, max);
     const split = Math.min(dashFrom, end);
-    stroke(from, d, 0, split, col, 0, LINE_MAX, clamped);
-    stroke(from, d, split, end, col, 0.03, LINE_MAX, clamped);
+    stroke(from, d, 0, split, col, 0, max, clamped);
+    stroke(from, d, split, end, col, dash, max, clamped, gap);
   };
 
   const frame3 = (f: readonly [V, V, V], pts: ArrayLike<number>, i0: number, i1: number, i2: number): boolean => {
@@ -284,6 +288,8 @@ export function createConstruction(main: LineBatch, ghost: LineBatch): Construct
     // Arm / strut planes cut by the front-view plane (normal = body forward, through the contact patch).
     if (hasIc) {
       const h2 = dot(ex, cp);
+      // An IC beyond reach cannot show convergence: its arm lines only hint at the direction (short, faded).
+      const armMax = Math.hypot(ic[0]! - cp[0]!, ic[1]! - cp[1]!, ic[2]! - cp[2]!) > LINE_MAX ? ARM_HINT : LINE_MAX;
       for (let k = 0; k < rig.planeCount; k++) {
         const o = 4 * k;
         const kind = rig.planes[o]!;
@@ -306,7 +312,7 @@ export function createConstruction(main: LineBatch, ghost: LineBatch): Construct
         const t1 = closestT(p, d, ic);
         set(a, p[0]! + d[0]! * t0, p[1]! + d[1]! * t0, p[2]! + d[2]! * t0);
         set(b, p[0]! + d[0]! * t1, p[1]! + d[1]! * t1, p[2]! + d[2]! * t1);
-        ray(a, b, IC, 0);
+        ray(a, b, IC, 0, 0.016, 1.6, armMax);
       }
       // Contact patch → IC: solid; the roll centre lies on its continuation (dashed past the IC).
       const ax = t.axles[fc.axle === 'front' ? 0 : 1];
@@ -472,12 +478,34 @@ export function createConstruction(main: LineBatch, ghost: LineBatch): Construct
     }
   };
 
+  const gain = [1, 1];
+  const centre = new Float64Array(6);
+  const axleGains = (cs: readonly CornerFrame[], eye: XYZ | undefined): void => {
+    gain[0] = gain[1] = 1;
+    if (!eye) return;
+    centre.fill(0);
+    for (let i = 0; i < cs.length; i++) {
+      const o = cs[i]!.axle === 'front' ? 0 : 3;
+      const w = cs[i]!.wheelPosition;
+      centre[o] = centre[o]! + w.x;
+      centre[o + 1] = centre[o + 1]! + w.y;
+      centre[o + 2] = centre[o + 2]! + w.z;
+    }
+    // equal corner counts per axle, so the sums compare like the means
+    const d0 = Math.hypot(centre[0]! - eye.x * cs.length / 2, centre[1]! - eye.y * cs.length / 2, centre[2]! - eye.z * cs.length / 2);
+    const d1 = Math.hypot(centre[3]! - eye.x * cs.length / 2, centre[4]! - eye.y * cs.length / 2, centre[5]! - eye.z * cs.length / 2);
+    if (!(d0 > 0 && d1 > 0)) return;
+    // the far axle fades with the distance ratio: both full from the side, ~0.3 from straight ahead / behind
+    const far = 0.22 + 0.78 * Math.min(d0, d1) ** 6 / Math.max(d0, d1) ** 6;
+    gain[d0 <= d1 ? 1 : 0] = far;
+  };
+
   return {
     reset() {
       trailLen[0] = trailLen[1] = 0;
       trailHead[0] = trailHead[1] = 0;
     },
-    draw(t, sim, dt) {
+    draw(t, sim, dt, eye) {
       const { x, y, z, w } = t.bodyRotation;
       set(ex, 1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y));
       set(ey, 2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x));
@@ -487,9 +515,11 @@ export function createConstruction(main: LineBatch, ghost: LineBatch): Construct
       ghost.begin();
       const cs = t.corners;
       while (rigs.length < cs.length) rigs.push(newRig()); // grows once per layout
+      axleGains(cs, eye);
       for (let i = 0; i < cs.length; i++) {
         const fc = cs[i]!;
         const rig = rigs[i]!;
+        main.gain = ghost.gain = gain[fc.axle === 'front' ? 0 : 1]!;
         if (rig.order !== fc.pointOrder || rig.suspension !== sim.suspension) buildRig(rig, fc, sim);
         drawCorner(i, fc, rig, sim, t);
       }
@@ -497,9 +527,12 @@ export function createConstruction(main: LineBatch, ghost: LineBatch): Construct
       const sampleTrail = trailClock >= RC_TRAIL_DT;
       if (sampleTrail) trailClock = 0;
       if (cs.length === 4) {
+        main.gain = gain[0]!;
         drawAxle(0, cs[0]!, cs[1]!, t, sampleTrail);
+        main.gain = gain[1]!;
         drawAxle(1, cs[2]!, cs[3]!, t, sampleTrail);
       }
+      main.gain = ghost.gain = 1;
       main.end();
       ghost.end();
     },

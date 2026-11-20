@@ -167,9 +167,9 @@ export const CAMBER_RANGE = (6 * Math.PI) / 180;
 /** Per-corner glyph: camber arc with needle + static tick, travel bar between the stops, load square. */
 export function drawCorner(s: Surface, p: Palette, dpr: number, c: CornerGlyph): void {
   const g = begin(s, dpr);
-  const cx = 15;
-  const cy = s.h - 7;
-  const r = 12;
+  const cx = 16;
+  const cy = s.h - 6;
+  const r = 14;
   const lean = c.side === 0 ? 1 : c.side;
   g.lineWidth = 1;
   g.strokeStyle = p.hair;
@@ -202,7 +202,7 @@ export function drawCorner(s: Surface, p: Palette, dpr: number, c: CornerGlyph):
   g.fill();
 
   // travel bar: droop at the bottom, bump at the top, zero = static ride height
-  const bx = 36;
+  const bx = 41;
   const top = 3;
   const bottom = s.h - 3;
   const y0 = barY(0, c, top, bottom);
@@ -226,7 +226,7 @@ export function drawCorner(s: Surface, p: Palette, dpr: number, c: CornerGlyph):
   g.stroke();
 
   // load square: opacity follows load / static load (half-filled at static), outlined amber when unloaded
-  const q = 9;
+  const q = 10;
   const qx = s.w - q - 1.5;
   const qy = (s.h - q) / 2;
   g.globalAlpha = clamp(c.loadRatio / 2, 0, 1);

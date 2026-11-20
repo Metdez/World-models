@@ -58,13 +58,13 @@ export const macpherson: CarSuspensionDefinition = {
   axles: {
     front: axle(
       {
-        lbj: [0, 0.8, 0.155],
-        strutTop: [-0.085, 0.64, 0.86],
-        strutLower: [-0.06, 0.665, 0.52],
+        lbj: [0, 0.797, 0.155],
+        strutTop: [-0.085, 0.625, 0.86],
+        strutLower: [-0.06, 0.645, 0.52],
         lcaFront: [0.2, 0.38, 0.182],
         lcaRear: [-0.22, 0.4, 0.2038],
         tieRodOuter: [-0.14, 0.76, 0.24],
-        tieRodInner: [-0.16, 0.3367, 0.2729],
+        tieRodInner: [-0.16, 0.3342, 0.2741],
         arbPickup: [0.04, 0.64, 0.17],
       },
       true,
@@ -72,13 +72,13 @@ export const macpherson: CarSuspensionDefinition = {
     ),
     rear: axle(
       {
-        lbj: [0, 0.8, 0.155],
-        strutTop: [-0.01, 0.64, 0.86],
-        strutLower: [0, 0.665, 0.52],
+        lbj: [0, 0.797, 0.155],
+        strutTop: [-0.01, 0.625, 0.86],
+        strutLower: [0, 0.645, 0.52],
         lcaFront: [0.2, 0.38, 0.198],
         lcaRear: [-0.22, 0.4, 0.1812],
         tieRodOuter: [-0.14, 0.76, 0.24],
-        tieRodInner: [-0.16, 0.3152, 0.2696],
+        tieRodInner: [-0.16, 0.3131, 0.2708],
         arbPickup: [0.04, 0.64, 0.18],
       },
       false,

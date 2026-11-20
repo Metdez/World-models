@@ -19,6 +19,7 @@ function axle(
   corner: typeof GT_CORNER.front | typeof GT_CORNER.rear,
   roles: { lowerFront: ComponentRole; lowerRear: ComponentRole },
   springLink: 'lowerFront' | 'lowerRear',
+  springFraction: number,
 ): AxleLinkage {
   return {
     points: { wheelCentre: corner.wheelCentre, ...points },
@@ -31,7 +32,7 @@ function axle(
       { kind: 'distance', upright: 'tieRodOuter', chassis: 'tieRodInner', role: 'tie-rod', member: 'tieRod' },
     ],
     ...(steered ? { steer: 'tieRodInner' } : {}),
-    spring: { upper: 'springTop', lower: { on: 'link', member: springLink, fraction: 0.8 } },
+    spring: { upper: 'springTop', lower: { on: 'link', member: springLink, fraction: springFraction } },
     antiRollBarMount: { member: springLink, point: 'arbPickup' },
     alignment: corner.alignment,
     travel: GT_CORNER.travel,
@@ -72,13 +73,14 @@ export const multilink: CarSuspensionDefinition = {
         lowerRearOuter: [-0.04, 0.79, 0.15],
         tieRodOuter: [-0.14, 0.785, 0.24],
         tieRodInner: [-0.15, 0.4488, 0.2099],
-        springTop: [-0.035, 0.62, 0.75],
+        springTop: [-0.035, 0.58, 0.75],
         arbPickup: [0.028, 0.628, 0.138],
       },
       true,
       GT_CORNER.front,
       { lowerFront: 'lateral-link', lowerRear: 'trailing-link' },
       'lowerFront',
+      0.8,
     ),
     rear: axle(
       {
@@ -99,6 +101,7 @@ export const multilink: CarSuspensionDefinition = {
       GT_CORNER.rear,
       { lowerFront: 'trailing-link', lowerRear: 'lateral-link' },
       'lowerRear',
+      0.8,
     ),
   },
   extras: { damperFriction: 20, unsprungMassDelta: 0 },

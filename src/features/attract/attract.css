@@ -1,0 +1,71 @@
+/* Attract mode: cinematic caption at the top centre (the insight caption owns the bottom). Tokens only. */
+.sl-attract {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--margin) + 6vh);
+  transform: translateX(-50%);
+  width: min(720px, calc(100% - 2 * var(--margin)));
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-2);
+  text-align: center;
+  pointer-events: none;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.55);
+}
+
+.sl-attract[hidden],
+.sl-attract [hidden] {
+  display: none;
+}
+
+.sl-attract-title {
+  color: var(--accent);
+  font: 600 var(--fs-label) / 1 var(--font-sans);
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+}
+
+.sl-attract-caption {
+  color: var(--text-1);
+  font: 500 var(--fs-display) / var(--lh-display) var(--font-sans);
+  letter-spacing: var(--ls-display);
+}
+
+.sl-attract-note {
+  color: var(--warn);
+  font: 500 var(--fs-label) / 1.3 var(--font-mono);
+  letter-spacing: var(--ls-label);
+}
+
+.sl-attract-note:empty {
+  display: none;
+}
+
+.sl-attract-in {
+  animation: sl-attract-in var(--dur-caption-in) var(--ease) both;
+}
+
+@keyframes sl-attract-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.sl-attract-fade {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-0);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* base.css opts overlay children in (#overlay > *); these never take input. */
+#overlay > .sl-attract,
+#overlay > .sl-attract-fade {
+  pointer-events: none;
+}

@@ -1,10 +1,15 @@
 /* Phone remote. Tokens only (src/ui/tokens.css); thumb-sized targets (>= 48 px); 360 px wide minimum. */
-html,
+/* The document scrolls (html), not body: a scrolling body would make the sticky header stick to body instead. */
+html {
+  height: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
 body {
   height: auto;
   min-height: 100%;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: visible;
 }
 
 body {
@@ -235,7 +240,6 @@ body:not([data-status='live']) .rm-panel {
   gap: 2px;
   min-height: 76px;
   padding: var(--sp-3);
-  padding-right: 52px;
   background: var(--bg-0);
   border: 1px solid var(--hair);
   border-radius: var(--radius-chip);
@@ -247,6 +251,7 @@ body:not([data-status='live']) .rm-panel {
 }
 
 .rm-toggle-label {
+  padding-right: 40px;
   font-size: var(--fs-body);
   font-weight: 500;
 }

@@ -23,7 +23,7 @@ export default {
   init(ctx) {
     const render = ctx.services.get(RENDER);
     const main = createLineBatch({ capacity: 1600, width: 2, casing: 5.5, renderOrder: 40, name: 'teaching-overlays:construction' });
-    const ghost = createLineBatch({ capacity: 600, width: 1.5, casing: 0, opacity: 0.55, renderOrder: 38, name: 'teaching-overlays:ghost' });
+    const ghost = createLineBatch({ capacity: 600, width: 1.5, casing: 0, renderOrder: 38, name: 'teaching-overlays:ghost' });
     const group = new Group();
     group.name = 'teaching-overlays';
     group.visible = false;
@@ -69,13 +69,19 @@ export default {
     });
 
     const size = new Vector2();
+    const eye = { x: 0, y: 0, z: 0 };
     let panelClock = PANEL_DT;
     tick = (frame) => {
       if (!active) return;
       render.renderer.getSize(size);
       main.setResolution(size.x, size.y);
       ghost.setResolution(size.x, size.y);
-      construction.draw(frame.t, ctx.sim.current, frame.dt);
+      // last frame's camera (the camera phase runs after this one): three (x, y, z) -> sim (x, -z, y)
+      const c = render.camera.position;
+      eye.x = c.x;
+      eye.y = -c.z;
+      eye.z = c.y;
+      construction.draw(frame.t, ctx.sim.current, frame.dt, eye);
       panelClock += frame.dt;
       if (panelClock >= PANEL_DT) {
         panelClock = 0;

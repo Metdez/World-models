@@ -1,0 +1,443 @@
+/**
+ * `cafe-racer` VehicleVisual: a Thruxton-style cafe racer built entirely from code (no asset, no badges).
+ * Body (frame, parallel-twin engine, sculpted tank with knee cut-outs, seat and hump, exhausts, rear-sets) is
+ * rigid with the sprung body and posed from bodyPosition/bodyRotation: the sim leans the body about the vehicle-frame
+ * origin on the ground, i.e. about the contact line. Wheels are posed from wheelPosition/wheelRotation and spun by
+ * CornerFrame.spin; the chain runs follow the rear sprocket. The front end (fork, yokes, bars, headlight) and all
+ * suspension parts belong to the `moto-planar` suspension visual.
+ *
+ * Draw calls: paint, body palette, x-ray ghost (hidden when off), 2 wheels, 2 chain runs.
+ * Coordinates: authored in three.js vehicle space (x fwd, y up, z = right = -sim y), metres.
+ */
+import { BoxGeometry, Group, Matrix4, Mesh, Quaternion, Shape, Vector2, Vector3, type BufferGeometry, type Material, type MeshStandardMaterial } from 'three';
+import type { VehicleVisual, VehicleVisualDefinition } from '../../../contracts/services';
+import type { TelemetryFrame } from '../../../contracts/telemetry';
+import { simQuatToThree, simToThree, type Vec3 } from '../../../contracts/units';
+import type { MotorcycleDefinition, VehicleDefinition } from '../../../contracts/vehicle';
+import { bakedDisc, bakedTube, mergeParts } from '../../../kit3d/tube';
+import { createMotoPalette, disposeMotoPalette, motoPaint, type MotoFinish } from './palette';
+import { addDither, createGhostMaterial, createPaintMaterial, type PaintSpec } from './shaders';
+import {
+  basis,
+  bentTube,
+  curve,
+  ellipse,
+  endRound,
+  finStack,
+  lathe,
+  loft,
+  rod,
+  roundedRect,
+  se,
+  slab,
+  spokedWheel,
+  sprocketGeometry,
+  taperedTube,
+  yToZ,
+} from './shapes';
+
+export const CAFE_RACER_VISUAL_ID = 'cafe-racer';
+
+/** Chain line (three z; left side = sim +y). Shared with the suspension visual's sprocket side. */
+export const CHAIN_Z = -0.105;
+
+/** Default paint: deep oxblood metallic with twin ivory stripes and gold pinstripes. */
+export const DEFAULT_PAINT: PaintSpec = {
+  color: 0x4a0710,
+  stripe: 0xe9e3d4,
+  pinstripe: 0xb8913f,
+  stripeWidth: 0.018,
+  stripeGap: 0.011,
+  stripeFrom: 0.84,
+};
+
+export interface CafeRacerOptions {
+  /** Frame hardpoints (sim vehicle frame). Pass the default suspension's values so the head tube lines up. */
+  readonly steeringHead?: Vec3;
+  readonly rake?: number;
+  readonly swingarmPivot?: Vec3;
+  readonly paint?: PaintSpec;
+}
+
+export interface CafeRacerVisual extends VehicleVisual {
+  /** Debug/test: draw-call meshes and the wheel hubs. */
+  inspect(): { meshes: readonly Mesh[]; hubs: { readonly f: Group; readonly r: Group } };
+}
+
+const V = (x = 0, y = 0, z = 0) => new Vector3(x, y, z);
+
+/** Rim (bead-seat) radius for a tyre: 17 in, or 18 in when the sidewall would be tall. */
+function rimRadius(tyreRadius: number): number {
+  return tyreRadius - 0.2159 > 0.105 ? 0.2286 : 0.2159;
+}
+
+export function buildCafeRacer(vehicle: MotorcycleDefinition, options: CafeRacerOptions = {}): CafeRacerVisual {
+  const xf = vehicle.cgToFront;
+  const xr = -(vehicle.wheelbase - vehicle.cgToFront);
+  const Rf = vehicle.front.tyre.radius;
+  const Rr = vehicle.rear.tyre.radius;
+  const sh = options.steeringHead ?? [xf - 0.3, 0, 0.91];
+  const pv = options.swingarmPivot ?? [xr + 0.565, 0, 0.36];
+  const rake = options.rake ?? (24 * Math.PI) / 180;
+  const H = V(sh[0], sh[2]);
+  const P = V(pv[0], pv[2]);
+  const axisDown = V(Math.sin(rake), -Math.cos(rake));
+  const Hb = H.clone().addScaledVector(axisDown, 0.17);
+  const [sx, sy] = vehicle.chain.sprocketCentre;
+
+  const palette: BufferGeometry[] = [];
+  const paintParts: BufferGeometry[] = [];
+  const pal = (g: BufferGeometry, finish: MotoFinish) => palette.push(motoPaint(g.index ? g.toNonIndexed() : g, finish));
+  const both = (make: (side: 1 | -1) => void) => {
+    make(1);
+    make(-1);
+  };
+
+  // ------------------------------------------------------------------ frame (gloss black twin cradle)
+  const fr = 0.0145;
+  both((s) => {
+    const z = (v: number) => s * v;
+    pal(bentTube([V(H.x - 0.03, H.y - 0.035, z(0.03)), V(H.x - 0.16, H.y - 0.1, z(0.075)), V(0.0, 0.775, z(0.1)), V(-0.2, 0.752, z(0.105)), V(-0.5, 0.735, z(0.105)), V(-0.8, 0.752, z(0.085)), V(-0.845, 0.762, z(0.05))], fr, 80), 'frame');
+    pal(bentTube([V(Hb.x - 0.03, Hb.y + 0.03, z(0.03)), V(Hb.x - 0.05, Hb.y - 0.08, z(0.06)), V(0.33, 0.36, z(0.085)), V(0.3, 0.2, z(0.09)), V(0.2, 0.135, z(0.095)), V(0.0, 0.128, z(0.1)), V(-0.11, 0.15, z(0.1)), V(P.x + 0.005, P.y - 0.08, z(0.105))], fr, 80), 'frame');
+    pal(bentTube([V(P.x + 0.005, P.y - 0.09, z(0.105)), V(P.x - 0.012, P.y + 0.12, z(0.108)), V(-0.19, 0.66, z(0.106)), V(-0.205, 0.752, z(0.105))], fr, 32), 'frame');
+    pal(bentTube([V(P.x - 0.02, P.y + 0.12, z(0.11)), V(-0.4, 0.62, z(0.11)), V(-0.6, 0.738, z(0.104))], fr * 0.85, 32), 'frame');
+    // Swingarm pivot plate (forged alloy) and its bolt boss.
+    pal(slab(roundedRect(0.1, 0.19, 0.045), 0.012, 0.003, basis(V(P.x + 0.012, P.y - 0.02, z(0.122)), V(1, 0, 0), V(0, 0, 1)), 'alloy', 'polished'), 'alloy');
+    // Rear-set hanger, peg and lever.
+    const peg = V(P.x - 0.115, P.y - 0.03, z(0.17));
+    pal(slab(roundedRect(0.16, 0.05, 0.022), 0.01, 0.002, new Matrix4().makeRotationZ(-0.75).setPosition(P.x - 0.06, P.y + 0.01, z(0.135)), 'alloy', 'polished'), 'alloy');
+    pal(rod(V(peg.x, peg.y, z(0.13)), V(peg.x, peg.y, z(0.25)), 0.011, 'alloy', 0.011, 16), 'alloy');
+    for (let k = 0; k < 6; k++) pal(bakedDisc(V(peg.x, peg.y, z(0.165 + k * 0.014)), V(0, 0, 1), 0.0125, 0.004, 16), 'black');
+    pal(rod(V(peg.x + 0.005, peg.y - 0.005, z(0.152)), V(peg.x + 0.17, peg.y - 0.03, z(0.152)), 0.006, 'alloy'), 'alloy');
+    pal(rod(V(peg.x + 0.17, peg.y - 0.03, z(0.14)), V(peg.x + 0.17, peg.y - 0.03, z(0.175)), 0.007, 'black'), 'black');
+  });
+  // Cross tubes: behind the head, under the seat, tail loop.
+  pal(bakedTube(V(H.x - 0.14, H.y - 0.09, 0.07), V(H.x - 0.14, H.y - 0.09, -0.07), fr, fr, 12), 'frame');
+  pal(bakedTube(V(-0.42, 0.742, 0.105), V(-0.42, 0.742, -0.105), fr * 0.85, fr * 0.85, 12), 'frame');
+  pal(bakedTube(V(-0.845, 0.762, 0.05), V(-0.845, 0.762, -0.05), fr * 0.85, fr * 0.85, 12), 'frame');
+  pal(bakedTube(V(P.x + 0.005, P.y + 0.12, 0.108), V(P.x + 0.005, P.y + 0.12, -0.108), fr, fr, 12), 'frame');
+  // Head-stock gusset where the rails meet the head tube.
+  pal(slab(roundedRect(0.12, 0.08, 0.03), 0.07, 0.01, basis(V(H.x - 0.06, H.y - 0.09, 0), V(1, -0.35, 0), V(0, 0, 1)), 'frame'), 'frame');
+
+  // ------------------------------------------------------------------ engine (air-cooled parallel twin)
+  const crank = new Shape(([
+    [P.x + 0.035, 0.25],
+    [P.x + 0.03, 0.47],
+    [-0.02, 0.505],
+    [0.17, 0.505],
+    [0.255, 0.445],
+    [0.262, 0.27],
+    [0.2, 0.165],
+    [0.0, 0.148],
+    [P.x + 0.1, 0.17],
+  ] as const).map(([x, y]) => new Vector2(x, y)));
+  pal(slab(crank, 0.29, 0.022, new Matrix4(), 'engine'), 'engine');
+  // Right: clutch cover with a polished rim; left: alternator cover and the sprocket cover.
+  pal(slab(ellipse(0.112, 0.088), 0.03, 0.01, new Matrix4().makeTranslation(-0.015, 0.33, 0.158), 'engine', 'fin'), 'engine');
+  pal(slab(ellipse(0.04, 0.04), 0.012, 0.004, new Matrix4().makeTranslation(-0.015, 0.33, 0.178), 'polished', 'fin'), 'polished');
+  pal(slab(ellipse(0.096, 0.096), 0.03, 0.01, new Matrix4().makeTranslation(0.135, 0.3, -0.158), 'engine', 'fin'), 'engine');
+  pal(slab(ellipse(0.03, 0.03), 0.012, 0.004, new Matrix4().makeTranslation(0.135, 0.3, -0.178), 'polished', 'fin'), 'polished');
+  pal(slab(roundedRect(0.13, 0.1, 0.04), 0.02, 0.008, new Matrix4().makeTranslation(sx + 0.03, sy + 0.01, -0.152), 'engine', 'fin'), 'engine');
+  pal(yToZ(sprocketGeometry(vehicle.chain.frontRadius, 0)).translate(sx, sy, CHAIN_Z), 'steel');
+  // Cylinder block, head and cam cover on an axis tilted forward.
+  const tilt = (8 * Math.PI) / 180;
+  const cyl = new Matrix4().makeRotationZ(-tilt).setPosition(0.07, 0.49, 0);
+  const block = finStack(16, 0.0, 0.205, { depth: 0.15, width: 0.27, thickness: 0.0034 }, { depth: 0.112, width: 0.225 }, 0.25, 'engine', 'fin');
+  const head = finStack(5, 0.205, 0.285, { depth: 0.17, width: 0.29, thickness: 0.0045 }, { depth: 0.15, width: 0.255 }, 0, 'engine', 'fin');
+  const cam = slab(roundedRect(0.135, 0.275, 0.05), 0.045, 0.014, new Matrix4().makeBasis(V(1, 0, 0), V(0, 0, -1), V(0, 1, 0)).setPosition(0, 0.305, 0), 'engine', 'fin');
+  for (const g of [block, head, cam]) pal(g.applyMatrix4(cyl), 'engine');
+  const local = (x: number, y: number, z: number) => V(x, y, z).applyMatrix4(cyl);
+  both((s) => {
+    // Faux carburettor throttle bodies behind the head.
+    const a = local(-0.075, 0.245, s * 0.068);
+    const b = local(-0.19, 0.235, s * 0.072);
+    pal(rod(a, b, 0.03, 'alloy', 0.034, 18), 'alloy');
+    pal(rod(b, local(-0.215, 0.232, s * 0.073), 0.041, 'polished', 0.041, 20), 'polished');
+    pal(rod(local(-0.215, 0.232, s * 0.073), local(-0.23, 0.23, s * 0.073), 0.036, 'black', 0.03, 20), 'black');
+    pal(rod(local(-0.13, 0.27, s * 0.07), local(-0.13, 0.31, s * 0.07), 0.016, 'alloy'), 'alloy');
+  });
+
+  // ------------------------------------------------------------------ exhausts (2-into-2, upswept peashooters)
+  both((s) => {
+    const z = (v: number) => s * v;
+    const port = local(0.09, 0.235, z(0.07));
+    const header = [port, local(0.14, 0.215, z(0.075)), V(0.3, 0.5, z(0.11)), V(0.315, 0.32, z(0.13)), V(0.25, 0.19, z(0.15)), V(0.08, 0.172, z(0.165)), V(-0.13, 0.2, z(0.2)), V(-0.28, 0.236, z(0.215))];
+    pal(bentTube(header, 0.021, 96, 14), 'chrome');
+    pal(rod(port, local(0.115, 0.226, z(0.072)), 0.027, 'heat', 0.027, 16), 'heat');
+    const a = V(-0.3, 0.24, z(0.217));
+    const b = V(-0.87, 0.365, z(0.217));
+    pal(taperedTube([a, a.clone().lerp(b, 0.5), b], 0.034, 0.05, 24, 24), 'chrome');
+    const dir = b.clone().sub(a).normalize();
+    pal(rod(a.clone().addScaledVector(dir, -0.03), a.clone().addScaledVector(dir, 0.04), 0.038, 'polished', 0.038, 20), 'polished');
+    pal(rod(b.clone().addScaledVector(dir, -0.012), b.clone().addScaledVector(dir, 0.004), 0.053, 'polished', 0.053, 24), 'polished');
+    pal(rod(b.clone().addScaledVector(dir, 0.002), b.clone().addScaledVector(dir, 0.005), 0.044, 'black', 0.044, 24), 'black');
+    // Silencer hanger to the rear-set plate.
+    pal(rod(V(-0.42, 0.27, z(0.2)), V(P.x - 0.11, P.y - 0.02, z(0.165)), 0.006, 'black'), 'black');
+  });
+
+  // ------------------------------------------------------------------ tank (sculpted, knee cut-outs)
+  const tankF = H.x - 0.035;
+  const tankB = -0.2;
+  const tTop = curve([[0, 0.925], [0.2, 0.985], [0.45, 0.988], [0.75, 0.945], [1, 0.865]]);
+  const tBot = curve([[0, 0.8], [0.5, 0.772], [1, 0.79]]);
+  const tW = curve([[0, 0.112], [0.25, 0.154], [0.5, 0.166], [0.75, 0.152], [1, 0.108]]);
+  const tankSurface = (s: number, t: number, out: Vector3) => {
+    const e = endRound(s, 0.13) * endRound(1 - s, 0.09);
+    const c = Math.cos(t);
+    const sn = Math.sin(t);
+    const top = tTop(s);
+    const bot = tBot(s);
+    const mid = (top + bot) / 2;
+    const hh = (top - bot) / 2;
+    const ey = se(sn, sn > 0 ? 2.3 : 4);
+    const ex = se(c, 2.6);
+    let w = tW(s) * (1 - 0.14 * Math.max(0, -ey));
+    // Knee cut-outs: a soft dish low on the rear flanks.
+    const bump = (u: number) => (Math.abs(u) < 1 ? (1 - u * u) * (1 - u * u) : 0);
+    w -= 0.032 * bump((s - 0.74) / 0.2) * bump((ey + 0.2) / 0.62);
+    out.set(tankF - (tankF - tankB) * s, mid + hh * ey * e, w * ex * e);
+  };
+  paintParts.push(loft(64, 48, tankSurface));
+  // Monza flip cap and its hinge.
+  const capS = 0.3;
+  const capTop = tTop(capS);
+  const capX = tankF - (tankF - tankB) * capS;
+  pal(lathe([[0, 0.012], [0.04, 0.012], [0.046, 0.006], [0.046, 0], [0.03, -0.006]], 40).translate(capX, capTop + 0.002, 0), 'polished');
+  pal(rod(V(capX - 0.05, capTop + 0.004, -0.012), V(capX - 0.05, capTop + 0.004, 0.012), 0.006, 'polished'), 'polished');
+  // Rubber knee pads in the cut-outs.
+  both((s) => {
+    const p = V();
+    tankSurface(0.74, s > 0 ? -0.28 : Math.PI + 0.28, p);
+    pal(slab(ellipse(0.055, 0.032), 0.008, 0.003, new Matrix4().makeRotationY(s > 0 ? 0 : Math.PI).setPosition(p.x, p.y, p.z + s * 0.002), 'grip', 'black'), 'grip');
+  });
+  // Tank straps/mount rubber under the rear.
+  pal(rod(V(tankB + 0.03, 0.79, 0.07), V(tankB + 0.03, 0.79, -0.07), 0.012, 'black'), 'black');
+
+  // ------------------------------------------------------------------ seat (pleated leather) and hump
+  const seatF = -0.17;
+  const seatB = -0.585;
+  const sTop = curve([[0, 0.8], [0.15, 0.815], [0.55, 0.81], [1, 0.822]]);
+  const sW = curve([[0, 0.095], [0.3, 0.126], [1, 0.118]]);
+  const seatSurface = (s: number, t: number, out: Vector3) => {
+    const e = endRound(s, 0.12) * endRound(1 - s, 0.06);
+    const c = Math.cos(t);
+    const sn = Math.sin(t);
+    const top = sTop(s);
+    const bot = 0.732;
+    const ey = se(sn, sn > 0 ? 3.2 : 8);
+    out.set(seatF - (seatF - seatB) * s, (top + bot) / 2 + ((top - bot) / 2) * ey * e, sW(s) * se(c, 3.2) * e);
+  };
+  palette.push(motoPaint(loft(40, 40, seatSurface).toNonIndexed(), 'leather'));
+  both((s) => {
+    const pts: Vector3[] = [];
+    for (let i = 0; i <= 16; i++) {
+      const p = V();
+      seatSurface(0.04 + (0.92 * i) / 16, s > 0 ? -0.42 : Math.PI + 0.42, p);
+      pts.push(p);
+    }
+    pal(bentTube(pts, 0.0035, 48, 6), 'piping');
+  });
+  for (let k = 0; k < 7; k++) {
+    const sk = 0.22 + k * 0.085;
+    const pts: Vector3[] = [];
+    for (let i = 0; i <= 10; i++) {
+      const p = V();
+      seatSurface(sk, Math.PI * (0.15 + (0.7 * i) / 10), p);
+      pts.push(p.setY(p.y + 0.0015));
+    }
+    pal(bentTube(pts, 0.0026, 20, 5), 'leather');
+  }
+  const humpF = -0.555;
+  const humpB = -0.86;
+  const hTop = curve([[0, 0.85], [0.12, 0.898], [0.32, 0.908], [0.7, 0.862], [1, 0.8]]);
+  const hBot = curve([[0, 0.73], [1, 0.762]]);
+  const hW = curve([[0, 0.118], [0.3, 0.112], [1, 0.064]]);
+  paintParts.push(
+    loft(40, 40, (s, t, out) => {
+      const e = endRound(s, 0.05) * endRound(1 - s, 0.28);
+      const sn = Math.sin(t);
+      const ey = se(sn, sn > 0 ? 2.6 : 5);
+      const top = hTop(s);
+      const bot = hBot(s);
+      out.set(humpF - (humpF - humpB) * s, (top + bot) / 2 + ((top - bot) / 2) * ey * e, hW(s) * se(Math.cos(t), 2.8) * e);
+    }),
+  );
+  // Tail light under the hump, plate hanger.
+  pal(slab(ellipse(0.034, 0.019), 0.02, 0.006, new Matrix4().makeRotationY(Math.PI / 2).setPosition(humpB + 0.015, 0.772, 0), 'tail', 'black'), 'tail');
+  pal(bentTube([V(-0.83, 0.75, 0), V(-0.89, 0.7, 0), V(-0.93, 0.62, 0)], 0.012, 16, 10), 'black');
+
+  // ------------------------------------------------------------------ side panels, battery box
+  both((s) => {
+    paintParts.push(slab(ellipse(0.118, 0.074), 0.018, 0.007, new Matrix4().makeTranslation(-0.31, 0.62, s * 0.133), 'frame').deleteAttribute('uv'));
+  });
+  pal(slab(roundedRect(0.26, 0.22, 0.04), 0.2, 0.02, new Matrix4().makeRotationX(0).setPosition(-0.31, 0.62, 0), 'black'), 'black');
+
+  // ------------------------------------------------------------------ meshes
+  const xray = { uXray: { value: 0 } };
+  const paintMat = createPaintMaterial(options.paint ?? DEFAULT_PAINT, xray);
+  const bodyMat = createMotoPalette('moto-body');
+  addDither(bodyMat, xray, 'moto-body');
+  const wheelMat = createMotoPalette('moto-wheels');
+  const ghostMat = createGhostMaterial(xray);
+  const materials: Material[] = [paintMat, ghostMat];
+  const geometries: BufferGeometry[] = [];
+
+  const root = new Group();
+  root.name = `vehicle:${CAFE_RACER_VISUAL_ID}`;
+  const body = new Group();
+  body.name = 'body';
+  root.add(body);
+  const meshes: Mesh[] = [];
+  const add = (parent: Group, g: BufferGeometry, m: Material, name: string, shadow = true): Mesh => {
+    const mesh = new Mesh(g, m);
+    mesh.name = name;
+    mesh.castShadow = shadow;
+    mesh.receiveShadow = shadow;
+    parent.add(mesh);
+    meshes.push(mesh);
+    if (!geometries.includes(g)) geometries.push(g);
+    return mesh;
+  };
+  const paintGeometry = mergeParts(paintParts.map((g) => (g.index ? g.toNonIndexed() : g)).map((g) => stripUv(g)));
+  const paintMesh = add(body, paintGeometry, paintMat, 'body:paint');
+  const bodyMesh = add(body, mergeParts(palette), bodyMat, 'body:palette');
+  const ghost = add(body, paintGeometry, ghostMat, 'xray-ghost', false);
+  ghost.renderOrder = 10;
+  ghost.visible = false;
+  const shadowCasters = [paintMesh, bodyMesh];
+
+  const wheel = (id: 'f' | 'r', tyre: MotorcycleDefinition['front']['tyre'], spokes: number, hubHalf: number, sprocket: boolean) => {
+    const hub = new Group();
+    hub.name = `hub:${id}`;
+    const spin = new Group();
+    spin.name = `spin:${id}`;
+    hub.add(spin);
+    root.add(hub);
+    const g = spokedWheel({
+      radius: tyre.radius,
+      width: tyre.width,
+      crown: tyre.crownRadius ?? tyre.width / 2,
+      rimRadius: rimRadius(tyre.radius),
+      rimWidth: tyre.width * 0.74,
+      hubHalf,
+      hubRadius: 0.05,
+      spokes,
+      ...(sprocket ? { sprocket: { z: CHAIN_Z, radius: vehicle.chain.rearRadius } } : {}),
+    });
+    add(spin, g, wheelMat, `${id}:wheel`);
+    hub.position.set(id === 'f' ? xf : xr, tyre.radius, 0);
+    return { hub, spin };
+  };
+  const front = wheel('f', vehicle.front.tyre, 36, 0.05, false);
+  const rear = wheel('r', vehicle.rear.tyre, 40, 0.068, true);
+
+  // Chain: a run of links (side plates + rollers) at rest length, stretched per frame along the tangent.
+  const chainRest = Math.hypot(xr - sx, Rr - sy);
+  const chainRun = (): Mesh => {
+    const links: BufferGeometry[] = [];
+    const pitch = 0.01588;
+    const n = Math.floor(chainRest / pitch);
+    for (let i = 0; i < n; i++) {
+      const y = (i + 0.5) * pitch;
+      for (const zz of [-0.0055, 0.0055]) links.push(motoPaint(new BoxGeometry(0.012, pitch * 0.92, 0.0016).translate(0, y, zz), 'chain'));
+      links.push(motoPaint(bakedDisc(V(0, y - pitch / 2, 0), V(0, 0, 1), 0.0045, 0.011, 8), 'steel'));
+    }
+    const m = add(body, mergeParts(links), bodyMat, 'chain');
+    return m;
+  };
+  const chainTop = chainRun();
+  const chainBottom = chainRun();
+  updateChain(chainTop, chainBottom, V(sx, sy, CHAIN_Z), V(xr, Rr, CHAIN_Z), vehicle.chain.frontRadius, vehicle.chain.rearRadius, chainRest);
+
+  const _q = new Quaternion();
+  const _a = new Vector3();
+  const _b = new Vector3();
+  const sprocket = V(sx, sy, CHAIN_Z);
+  const hubs = { f: front, r: rear } as const;
+
+  return {
+    root,
+    update(t: TelemetryFrame): void {
+      simToThree(t.bodyPosition.x, t.bodyPosition.y, t.bodyPosition.z, body.position);
+      simQuatToThree(t.bodyRotation, body.quaternion);
+      for (let i = 0; i < t.corners.length; i++) {
+        const c = t.corners[i]!;
+        const w = c.id === 'f' ? front : c.id === 'r' ? rear : undefined;
+        if (!w) continue;
+        simToThree(c.wheelPosition.x, c.wheelPosition.y, c.wheelPosition.z, w.hub.position);
+        simQuatToThree(c.wheelRotation, w.hub.quaternion);
+        // Rolling forward is + about the axle (sim +y = three -z).
+        w.spin.rotation.z = -c.spin;
+      }
+      // Rear sprocket centre in the body frame (the chain lives in the body).
+      _q.copy(body.quaternion).invert();
+      _a.copy(rear.hub.position).sub(body.position).applyQuaternion(_q);
+      _b.set(_a.x, _a.y, CHAIN_Z);
+      updateChain(chainTop, chainBottom, sprocket, _b, vehicle.chain.frontRadius, vehicle.chain.rearRadius, chainRest);
+    },
+    setXray(amount: number): void {
+      xray.uXray.value = amount;
+      ghost.visible = amount > 0.001;
+      for (const m of shadowCasters) m.castShadow = amount < 0.5;
+    },
+    inspect() {
+      return { meshes, hubs: { f: hubs.f.hub, r: hubs.r.hub } };
+    },
+    dispose(): void {
+      root.removeFromParent();
+      for (const g of geometries) g.dispose();
+      for (const m of materials) m.dispose();
+      for (const m of [bodyMat, wheelMat] as MeshStandardMaterial[]) disposeMotoPalette(m);
+    },
+  };
+}
+
+function stripUv(g: BufferGeometry): BufferGeometry {
+  if (g.getAttribute('uv')) g.deleteAttribute('uv');
+  return g;
+}
+
+const _d = new Vector3();
+const _n = new Vector3();
+const _p = new Vector3();
+const UP = new Vector3(0, 1, 0);
+
+/**
+ * Places the two chain runs on the external tangents of the sprockets (body x–y plane, at z of the chain line).
+ * Each run's geometry is authored along +Y at `rest` length; it is stretched to the tangent length. No allocation.
+ */
+function updateChain(top: Mesh, bottom: Mesh, a: Vector3, b: Vector3, ra: number, rb: number, rest: number): void {
+  _d.subVectors(b, a);
+  _d.z = 0;
+  const L = _d.length();
+  if (L < 1e-6) return;
+  _d.multiplyScalar(1 / L);
+  const k = (ra - rb) / L;
+  const q = Math.sqrt(Math.max(0, 1 - k * k));
+  for (const [mesh, sign] of [
+    [top, 1],
+    [bottom, -1],
+  ] as const) {
+    // Unit normal m with m.d = k: m = k d + sign q d_perp, d_perp = (-d.y, d.x) or its opposite (pick the upper one).
+    let px = -_d.y;
+    let py = _d.x;
+    if (py < 0) {
+      px = -px;
+      py = -py;
+    }
+    _n.set(k * _d.x + sign * q * px, k * _d.y + sign * q * py, 0);
+    mesh.position.set(a.x + ra * _n.x, a.y + ra * _n.y, a.z);
+    _p.set(b.x + rb * _n.x - mesh.position.x, b.y + rb * _n.y - mesh.position.y, 0);
+    const len = _p.length();
+    mesh.quaternion.setFromUnitVectors(UP, _p.multiplyScalar(1 / len));
+    mesh.scale.set(1, len / rest, 1);
+  }
+}
+
+export const cafeRacerVisual: VehicleVisualDefinition = {
+  id: CAFE_RACER_VISUAL_ID,
+  load(vehicle: VehicleDefinition): Promise<VehicleVisual> {
+    if (vehicle.class !== 'motorcycle') return Promise.reject(new Error(`${CAFE_RACER_VISUAL_ID}: motorcycle visual, got vehicle class "${vehicle.class}"`));
+    return Promise.resolve(buildCafeRacer(vehicle));
+  },
+};

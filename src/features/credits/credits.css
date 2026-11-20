@@ -1,0 +1,130 @@
+/* Credits panel (plan 04-02). Tokens only. A quiet right-hand sheet; the scene stays visible beside it. */
+#overlay > .sl-credits {
+  position: absolute;
+  z-index: 50;
+  top: var(--margin);
+  right: var(--margin);
+  bottom: var(--margin);
+  width: min(460px, calc(100vw - 2 * var(--margin)));
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-1);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-panel);
+  color: var(--text-2);
+  animation: sl-credits-in var(--dur-caption-in) var(--ease);
+}
+#overlay > .sl-credits[hidden] {
+  display: none;
+}
+
+.sl-credits-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-4) var(--sp-4) var(--sp-3) var(--sp-5);
+  border-bottom: 1px solid var(--hair);
+}
+.sl-credits-title {
+  margin: 0;
+  font-size: var(--fs-title);
+  line-height: var(--lh-title);
+  font-weight: 500;
+  color: var(--text-1);
+}
+.sl-credits-close {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.sl-credits-close:hover {
+  color: var(--text-1);
+  background: var(--hair);
+}
+
+.sl-credits-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--sp-4) var(--sp-5) var(--sp-5);
+  scrollbar-width: thin;
+  scrollbar-color: var(--hair-strong) transparent;
+}
+.sl-credits-lede {
+  margin: 0 0 var(--sp-2);
+  font-size: 13px;
+  line-height: var(--lh-body);
+  color: var(--text-2);
+}
+.sl-credits-h {
+  margin: var(--sp-5) 0 var(--sp-2);
+  color: var(--text-3);
+}
+.sl-credits-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.sl-credits-item {
+  padding: var(--sp-3) 0;
+  border-top: 1px solid var(--hair);
+}
+.sl-credits-name {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  color: var(--text-1);
+}
+.sl-credits-lic {
+  flex: none;
+  font: 400 var(--fs-label) / 1 var(--font-mono);
+  color: var(--text-3);
+}
+.sl-credits-text {
+  margin: var(--sp-1) 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.sl-credits a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--hair-strong);
+  text-underline-offset: 2px;
+}
+.sl-credits a:hover {
+  color: var(--text-1);
+  text-decoration-color: var(--accent);
+}
+.sl-credits-notice {
+  margin: var(--sp-2) 0 var(--sp-4);
+  padding: var(--sp-3);
+  white-space: pre-wrap;
+  font: 400 10.5px / 1.5 var(--font-mono);
+  color: var(--text-2);
+  background: var(--bg-0);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-chip);
+}
+
+@keyframes sl-credits-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}

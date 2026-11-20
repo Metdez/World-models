@@ -9,6 +9,7 @@ import type { KinematicsCurves, VehicleKinematics } from '../../contracts/suspen
 import type { TelemetryFrame } from '../../contracts/telemetry';
 import { RAD_TO_DEG } from '../../contracts/units';
 import { h } from '../../ui/dom';
+import { fmt } from '../../ui/format';
 
 export type TraceMetric = 'camber' | 'motionRatio';
 
@@ -96,6 +97,8 @@ export function drawNumber(g: GlyphTarget, value: number, decimals: number, xRig
 
 const W = 248;
 const PAD = 12;
+/** Left gutter for the value labels. */
+const GUT = 30;
 const HEAD = 22;
 const ROW = 16;
 const PLOT_H = 66;
@@ -154,7 +157,7 @@ export function createTracePanel(): TracePanel {
   const top = (ai: number) => HEAD + ai * (ROW + PLOT_H + GAP) + ROW;
   const px = (ai: number, x: number) => {
     const r = ranges[ai]!;
-    return PAD + ((x - r[0]) / (r[1] - r[0])) * (W - 2 * PAD);
+    return PAD + GUT + ((x - r[0]) / (r[1] - r[0])) * (W - 2 * PAD - GUT);
   };
   const py = (ai: number, y: number) => {
     const r = ranges[ai]!;
@@ -216,7 +219,7 @@ export function createTracePanel(): TracePanel {
         // frame: zero travel + zero value guides, plot box hairlines
         sg.strokeStyle = pal.hair;
         sg.lineWidth = 1;
-        sg.strokeRect(PAD + 0.5, y0 + 0.5, W - 2 * PAD - 1, PLOT_H - 1);
+        sg.strokeRect(PAD + GUT + 0.5, y0 + 0.5, W - 2 * PAD - GUT - 1, PLOT_H - 1);
         sg.setLineDash([2, 3]);
         sg.beginPath();
         if (r[0] < 0 && r[1] > 0) {
@@ -225,20 +228,22 @@ export function createTracePanel(): TracePanel {
         }
         const zeroY = m === 'camber' ? 0 : 1;
         if (r[2] < zeroY && r[3] > zeroY) {
-          sg.moveTo(PAD, Math.round(py(ai, zeroY)) + 0.5);
+          sg.moveTo(PAD + GUT, Math.round(py(ai, zeroY)) + 0.5);
           sg.lineTo(W - PAD, Math.round(py(ai, zeroY)) + 0.5);
         }
         sg.stroke();
-        // axis words + range values (from the curves, not hand-typed)
+        // axis word + range values (from the curves, not hand-typed)
         sg.font = `500 9px ${pal.sans}`;
         sg.fillStyle = pal.text3;
-        sg.textAlign = 'left';
-        sg.fillText('droop', PAD + 3, y0 + PLOT_H - 3);
         sg.textAlign = 'right';
-        sg.fillText('bump', W - PAD - 3, y0 + PLOT_H - 3);
+        sg.fillText('bump →', W - PAD - 3, y0 + PLOT_H - 3);
         sg.font = `500 9px ${pal.mono}`;
         const unit = m === 'camber' ? '°' : '';
-        sg.fillText(`${(r[3] - (r[3] - r[2]) * 0.08).toFixed(1).replace('-', '−')}${unit}`, W - PAD - 3, y0 + 10);
+        const label = (v: number) => `${fmt(v, 1)}${unit}`;
+        sg.fillText(label(r[3]), PAD + GUT - 4, y0 + 8);
+        sg.fillText(label(r[2]), PAD + GUT - 4, y0 + PLOT_H);
+        const zy = py(ai, zeroY);
+        if (zy > y0 + 16 && zy < y0 + PLOT_H - 14) sg.fillText(label(zeroY), PAD + GUT - 4, zy + 3);
         // previous suspension: faint dashed
         const prev = previous?.[ai];
         if (prev) {

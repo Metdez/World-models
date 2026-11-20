@@ -125,9 +125,9 @@ describe('painters', () => {
     expect(gg.canvas.width).toBe(168);
     expect(gg.calls.filter((c) => c.startsWith('arc')).length).toBe(3); // two rings + the dot
 
-    const corner = fakeSurface(60, 26);
+    const corner = fakeSurface(64, 30);
     drawCorner(corner, P, 1, { camber: -0.03, staticCamber: -0.02, side: 0, travel: 0.02, bump: 0.08, droop: 0.08, loadRatio: 1.2, stop: 0 });
-    expect(corner.calls).toContain('fillRect(49.5,8.5,9.0,9.0)');
+    expect(corner.calls).toContain('fillRect(52.5,10.0,10.0,10.0)');
 
     const h = new History(2, 100, 'a', 10, 100);
     for (let s = 0; s < 10; s++) h.push(frame(MOTO, s, -0.02 - s * 0.001));

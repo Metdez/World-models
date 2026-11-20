@@ -77,7 +77,7 @@ function init(ctx: FeatureContext): void {
   );
   ctx.addDisposer(mount(ctx.dom.overlay, root));
 
-  let mode: Mode = room.hostKey ? 'host' : 'audience';
+  let mode: Mode = 'host'; // falls back to the audience code when this screen has no host key
   let folded = false;
   let shown = false;
   let rendered = '';
@@ -94,9 +94,9 @@ function init(ctx: FeatureContext): void {
     fold.textContent = folded ? `Join · ${c}` : 'Hide';
     title.textContent = m === 'host' ? 'Presenter remote' : 'Join the lab';
     code.textContent = c;
-    url.textContent = m === 'host' ? 'Private link for the presenter' : links.audience.replace(/^https?:\/\//, '');
+    url.textContent = m === 'host' ? 'Presenter only' : links.audience.replace(/^https?:\/\//, '');
     note.textContent = m === 'host' ? 'Scan to take control. The audience code appears once you do.' : 'Scan to vote on what runs next.';
-    flip.textContent = m === 'host' ? 'Show audience code' : 'Presenter remote';
+    flip.textContent = m === 'host' ? 'Audience code' : 'Presenter remote';
     flip.hidden = !links.host;
     const target = m === 'host' ? links.host! : links.audience;
     if (target !== rendered) {

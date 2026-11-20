@@ -29,6 +29,8 @@ export interface LineBatch {
   readonly capacity: number;
   /** Positions of the colour layer (three frame, 6 floats per segment), for tests. */
   readonly positions: Float32Array;
+  /** Multiplies every colour written by seg() (emphasis/fade of a whole group). */
+  gain: number;
   begin(): void;
   /** One segment from SIM-frame endpoints a → b with per-end colours (linear rgb; additive layers: 0 = invisible). */
   seg(ax: number, ay: number, az: number, bx: number, by: number, bz: number, r0: number, g0: number, b0: number, r1: number, g1: number, b1: number): void;
@@ -93,6 +95,7 @@ export function createLineBatch(opts: LineBatchOptions): LineBatch {
     },
     capacity: cap,
     positions,
+    gain: 1,
     begin() {
       n = 0;
     },
@@ -101,6 +104,13 @@ export function createLineBatch(opts: LineBatchOptions): LineBatch {
       // Never let a non-finite value reach the GPU (it would blank the whole instanced draw on some drivers).
       if (!Number.isFinite(ax + ay + az + bx + by + bz)) return;
       const o = n * 6;
+      const k = batch.gain;
+      r0 *= k;
+      g0 *= k;
+      b0 *= k;
+      r1 *= k;
+      g1 *= k;
+      b1 *= k;
       // sim (x, y, z) -> three (x, z, -y), units.ts simToThree
       positions[o] = ax;
       positions[o + 1] = az;

@@ -5,7 +5,7 @@ import type { DirectorShot, ShotKind } from '../../src/contracts/services';
 import type { SimCatalog, Simulation } from '../../src/contracts/sim';
 import { createTelemetryFrame, type TelemetryFrame } from '../../src/contracts/telemetry';
 import { damp, dampAngle, smootherstep, wrapAngle } from '../../src/features/camera/damp';
-import { BLEND_S, CameraRig, CHASE, closeupLocal, CLOSEUP, PIVOT_Y } from '../../src/features/camera/rig';
+import { BLEND_S, CameraRig, CHASE, CLOSEUP, closeupLocal, PIVOT_Y } from '../../src/features/camera/rig';
 import { gtCoupe } from '../../src/sim-core/content/gt-coupe';
 import { createSimulation } from '../../src/sim-core/index';
 
@@ -145,17 +145,19 @@ describe('blends', () => {
 });
 
 describe('close-up and director shots', () => {
-  it('frames each wheel well from outboard, ahead of a front axle and behind a rear one', () => {
+  it('frames each corner from ahead of a front axle / behind a rear one, looking out at the wheel', () => {
     const eye = new Vector3();
     const aim = new Vector3();
     const fov = closeupLocal({ x: 1.4, halfTrack: 0.8, side: 1, front: true, radius: 0.35 }, eye, aim);
     expect(fov).toBe(CLOSEUP.fov);
     expect(eye.x).toBeGreaterThan(1.4);
-    expect(eye.z).toBeLessThan(-0.8); // left = three -z, outboard of the tyre
-    expect(aim.z).toBeGreaterThan(eye.z);
+    expect(eye.y).toBeGreaterThan(0.35); // above the hub, looking down onto the arms
+    expect(eye.z).toBeLessThan(0); // left = three -z
+    expect(aim.z).toBeCloseTo(-0.8, 9); // the wheel plane
     closeupLocal({ x: -1.5, halfTrack: 0.8, side: -1, front: false, radius: 0.35 }, eye, aim);
     expect(eye.x).toBeLessThan(-1.5);
-    expect(eye.z).toBeGreaterThan(0.8);
+    expect(eye.z).toBeGreaterThan(0);
+    expect(aim.z).toBeCloseTo(0.8, 9);
   });
 
   it('handles a 2-corner (motorcycle) frame for every view and shot', () => {
@@ -169,7 +171,11 @@ describe('close-up and director shots', () => {
     const car = sim.sample(1, 1);
     Object.assign(moto.bodyPosition, car.bodyPosition);
     Object.assign(moto.bodyRotation, car.bodyRotation);
-    const { rig, frame } = start(sim, 5, moto);
+    // A bike-like vehicle (no track) on the car's path: the close-up switches to a side view of the fork/swingarm.
+    const bike = Object.create(sim, {
+      vehicle: { value: { ...gtCoupe, class: 'motorcycle', front: { tyre: gtCoupe.front.tyre }, rear: { tyre: gtCoupe.rear.tyre } } },
+    }) as Simulation;
+    const { rig, frame } = start(bike, 5, moto);
     const kinds: ShotKind[] = ['chase', 'orbit', 'closeup', 'trackside', 'overhead', 'front-view'];
     for (const corner of ['f', 'r'] as const) {
       rig.setView('closeup', corner, false);

@@ -48,9 +48,9 @@ export const CHASE = {
   /** Heading lag: reveals the car's flank in corners (lag ≈ yaw rate / lambda). */
   headingLambda: 2.2,
   maxHeadingLag: 0.55,
-  dist: [6.2, 7.8] as const,
-  height: [1.55, 1.95] as const,
-  fov: [46, 56] as const,
+  dist: [5.4, 6.9] as const,
+  height: [1.45, 1.8] as const,
+  fov: [45, 54] as const,
   speedLambda: 1.2,
   /** Look-ahead along the known driving line, s, and how far the aim leans toward it. */
   aheadS: 0.6,
@@ -185,26 +185,32 @@ export interface CornerGeometry {
 }
 
 export const CLOSEUP = {
-  /** Eye ahead of (front) / behind (rear) the axle, outboard of the tyre, at hub height. */
-  along: 1.45,
-  outboard: 0.85,
-  /** Minimum lateral eye offset (a motorcycle has no track), m. */
-  minLateral: 1.4,
-  eyeY: 0.5,
-  /** Aim point inboard of the wheel centre: where the arms meet the upright. */
-  inboard: 0.42,
+  /** Car: eye ahead of (front) / behind (rear) the axle, above the hub, near the centreline, looking out and down
+   * through the x-rayed bumper at the corner, so the arms, spring, damper, tie rod and bar read against the tyre. */
+  along: 1.27,
+  eyeY: 0.95,
+  eyeLateral: 0.15,
   aimY: 0.92,
-  fov: 42,
+  fov: 48,
+  /** Motorcycle (no track): a side view of the fork or swingarm. */
+  bikeAlong: 0.9,
+  bikeLateral: 1.7,
+  bikeEyeY: 0.7,
+  bikeFov: 42,
 } as const;
 
-/** Close-up eye/aim in the body frame for one corner, framed into the wheel well. Returns the FOV. */
+/** Close-up eye/aim in the body frame for one corner. Returns the FOV. */
 export function closeupLocal(c: CornerGeometry, eye: Vector3, aim: Vector3): number {
   const dir = c.front ? 1 : -1;
-  // Left is three -z; a centreline corner is filmed from the left.
+  if (c.halfTrack === 0) {
+    // Left is three -z: film a centreline corner from the left.
+    eye.set(c.x + dir * CLOSEUP.bikeAlong, CLOSEUP.bikeEyeY, -CLOSEUP.bikeLateral);
+    aim.set(c.x, c.radius, 0);
+    return CLOSEUP.bikeFov;
+  }
   const lat = c.side === 0 ? 1 : c.side;
-  const lateral = Math.max(c.halfTrack + CLOSEUP.outboard, CLOSEUP.minLateral);
-  eye.set(c.x + dir * CLOSEUP.along, CLOSEUP.eyeY, -lat * lateral);
-  aim.set(c.x + dir * 0.05, c.radius * CLOSEUP.aimY, -lat * Math.max(c.halfTrack - CLOSEUP.inboard, 0));
+  eye.set(c.x + dir * CLOSEUP.along, CLOSEUP.eyeY, -lat * CLOSEUP.eyeLateral);
+  aim.set(c.x, c.radius * CLOSEUP.aimY, -lat * c.halfTrack);
   return CLOSEUP.fov;
 }
 

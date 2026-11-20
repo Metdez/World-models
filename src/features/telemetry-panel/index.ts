@@ -142,7 +142,7 @@ function buildCorners(s: State): void {
     return {
       button,
       value,
-      glyph: surface(canvas, 60, 26),
+      glyph: surface(canvas, 64, 30),
       state: { camber: 0, staticCamber: 0, side: c.side, travel: 0, bump: 0.1, droop: 0.1, loadRatio: 1, stop: 0 },
     };
   });
@@ -204,7 +204,7 @@ function draw(s: State): void {
 
 function writeNumbers(s: State): void {
   const t = s.ctx.sim.frame;
-  text(s, 0, s.latG, Math.abs(gUnits(t.ay)), 2, '');
+  text(s, 0, s.latG, Math.abs(gUnits(t.ay)), 2, ' g');
   text(s, 1, s.roll, Math.abs(deg(t.roll)), 1, '°');
   const metric = METRICS[s.metric]!;
   const d = DISPLAY[metric];
@@ -245,8 +245,8 @@ const telemetryPanel: FeatureModule = {
           h(
             'div',
             { class: 'sl-telemetry-panel-heroes' },
-            h('span', { class: 'sl-telemetry-panel-stat' }, latG, h('span', { class: 'sl-label' }, 'g lat')),
-            h('span', { class: 'sl-telemetry-panel-stat' }, roll, h('span', { class: 'sl-label' }, 'roll')),
+            h('span', { class: 'sl-telemetry-panel-stat' }, h('span', { class: 'sl-label' }, 'Lateral'), latG),
+            h('span', { class: 'sl-telemetry-panel-stat' }, h('span', { class: 'sl-label' }, 'Roll'), roll),
           ),
         ),
         cornerGrid,
@@ -315,7 +315,7 @@ const telemetryPanel: FeatureModule = {
     if (!s || s.root.hidden) return;
     const t = frame.t;
     // Driven by simulation time: paused = frozen, slow motion = denser trace, e2e advance() = deterministic.
-    if (t.simTime - s.lastSimTime < SAMPLE_DT) return;
+    if (t.simTime - s.lastSimTime < SAMPLE_DT - 1e-9) return;
     s.lastSimTime = t.simTime;
     s.history.push(t);
     s.trail.push(gUnits(t.ay), gUnits(t.ax));

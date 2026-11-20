@@ -1,3 +1,97 @@
+/**
+ * Credits panel (plan 04-02, ARCHITECTURE §15): asset attributions from the manifest (generated from
+ * assets-src/ATTRIBUTION.json) plus code/data credits. Opens on `store.creditsOpen` (HUD link, shortcut card).
+ */
 import type { FeatureModule } from '../../contracts/app';
-/** STUB — owner: plan 04-02. Keep id/requires/phase/defaultEnabled; replace the body. */
-export default { id: 'credits', requires: [], phase: 'overlay' } satisfies FeatureModule;
+import { h, mount } from '../../ui/dom';
+import { CODE_CREDITS, LICENSE_TEXTS } from './code-credits';
+import './credits.css';
+import { attributionText, licenseName } from './text';
+
+const CLOSE_ICON =
+  '<svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg>';
+
+/** Plain text with its URLs as links; textContent stays exactly `text`. */
+function linkify(text: string): (Node | string)[] {
+  return text.split(/(https?:\/\/[^\s)]+?)(?=[.]?(?:\s|\)|$))/).map((part, i) =>
+    i % 2 === 1 ? h('a', { href: part, target: '_blank', rel: 'noopener noreferrer' }, part) : part,
+  );
+}
+
+export default {
+  id: 'credits',
+  requires: [],
+  phase: 'overlay',
+
+  init(c) {
+    const close = h('button', { type: 'button', class: 'sl-credits-close', 'aria-label': 'Close credits' });
+    close.innerHTML = CLOSE_ICON;
+    const body = h('div', { class: 'sl-credits-body' });
+    const panel = h(
+      'aside',
+      { class: 'sl-credits', role: 'dialog', 'aria-labelledby': 'sl-credits-title', hidden: true },
+      h('header', { class: 'sl-credits-head' }, h('h2', { class: 'sl-credits-title', id: 'sl-credits-title' }, 'Credits'), close),
+      body,
+    );
+    c.addDisposer(mount(c.dom.overlay, panel));
+
+    const render = () => {
+      const assets = c.assets.manifest.attributions.map((a) =>
+        h(
+          'li',
+          { class: 'sl-credits-item' },
+          h('div', { class: 'sl-credits-name' }, a.title, h('span', { class: 'sl-credits-lic' }, licenseName(a.license))),
+          h('p', { class: 'sl-credits-text' }, ...linkify(attributionText(a))),
+        ),
+      );
+      const code = CODE_CREDITS.map((k) =>
+        h(
+          'li',
+          { class: 'sl-credits-item' },
+          h('div', { class: 'sl-credits-name' }, h('a', { href: k.url, target: '_blank', rel: 'noopener noreferrer' }, k.name), h('span', { class: 'sl-credits-lic' }, k.license)),
+          h('p', { class: 'sl-credits-text' }, `${k.use}. ${k.copyright}.`),
+        ),
+      );
+      body.replaceChildren(
+        h(
+          'p',
+          { class: 'sl-credits-lede' },
+          'Suspension Lab is built on the work of others. Vehicle meshes are used for their shape only; no manufacturer data is implied. Vehicle parameters are representative.',
+        ),
+        h('h3', { class: 'sl-credits-h sl-label' }, 'Assets'),
+        assets.length ? h('ul', { class: 'sl-credits-list' }, ...assets) : h('p', { class: 'sl-credits-text' }, 'Asset list unavailable.'),
+        h('h3', { class: 'sl-credits-h sl-label' }, 'Code, data and fonts'),
+        h('ul', { class: 'sl-credits-list' }, ...code),
+        h('h3', { class: 'sl-credits-h sl-label' }, 'Licence notices'),
+        h('p', { class: 'sl-credits-text' }, 'Project Chrono (BSD-3-Clause):'),
+        h('pre', { class: 'sl-credits-notice' }, LICENSE_TEXTS['BSD-3-Clause']!),
+        h('p', { class: 'sl-credits-text' }, 'MIT licence, for every entry marked MIT, with its copyright line above:'),
+        h('pre', { class: 'sl-credits-notice' }, LICENSE_TEXTS.MIT!),
+        h('p', { class: 'sl-credits-text' }, ...linkify('Geist fonts: SIL Open Font License 1.1 (https://openfontlicense.org). postprocessing: zlib licence. n8ao: ISC licence.')),
+      );
+    };
+
+    let opener: Element | null = null;
+    let rendered = false;
+    close.addEventListener('click', () => c.store.setKey('creditsOpen', false));
+    panel.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      c.store.setKey('creditsOpen', false);
+    });
+    c.watch((s) => {
+      if (s.creditsOpen === !panel.hidden) return;
+      if (s.creditsOpen) {
+        if (!rendered) render();
+        rendered = true;
+        opener = document.activeElement;
+        panel.hidden = false;
+        close.focus();
+      } else {
+        panel.hidden = true;
+        if (opener instanceof HTMLElement && opener.isConnected && panel.contains(document.activeElement)) opener.focus();
+        opener = null;
+      }
+    });
+  },
+} satisfies FeatureModule;

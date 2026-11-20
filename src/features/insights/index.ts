@@ -14,8 +14,9 @@ import './insights.css';
 
 const SAMPLE_DT = 1 / 30;
 const SETTLE_S = 1;
-const VISIBLE_MS = 6000;
-const LEAVE_MS = 300;
+/** Visible time and exit fade, in SIMULATION seconds: a paused or slowed lab keeps the caption readable. */
+const VISIBLE_S = 6;
+const LEAVE_S = 0.3;
 
 interface Swap {
   readonly previous: string;
@@ -36,7 +37,8 @@ interface State {
   section: number;
   swap: Swap | null;
   quiet: boolean;
-  timer: ReturnType<typeof setTimeout> | undefined;
+  /** Simulation time the caption starts leaving; +LEAVE_S it is hidden. */
+  hideAt: number;
 }
 
 let st: State | undefined;
@@ -46,7 +48,7 @@ function phenomenonAt(c: FeatureContext, index: number): Phenomenon | undefined 
 }
 
 function present(s: State, id: string, text: string, chip: readonly (Node | string)[], warn: boolean): void {
-  clearTimeout(s.timer);
+  s.hideAt = s.ctx.sim.frame.simTime + VISIBLE_S;
   s.text.textContent = text;
   s.chip.replaceChildren(...chip);
   s.chip.hidden = chip.length === 0;
@@ -56,10 +58,6 @@ function present(s: State, id: string, text: string, chip: readonly (Node | stri
   s.caption.hidden = true;
   void s.caption.offsetWidth;
   s.caption.hidden = false;
-  s.timer = setTimeout(() => {
-    s.caption.classList.add('is-leaving');
-    s.timer = setTimeout(() => (s.caption.hidden = true), LEAVE_MS);
-  }, VISIBLE_MS);
   s.ctx.bus.emit('insight:shown', { id, text: s.caption.textContent ?? text });
 }
 
@@ -124,7 +122,7 @@ const insights: FeatureModule = {
       section: -1,
       swap: null,
       quiet: false,
-      timer: undefined,
+      hideAt: Number.POSITIVE_INFINITY,
     };
     st = s;
     resetVehicle(s);
@@ -151,7 +149,6 @@ const insights: FeatureModule = {
       root.hidden = s.quiet;
     });
     c.addDisposer(() => {
-      clearTimeout(s.timer);
       st = undefined;
     });
   },
@@ -160,7 +157,14 @@ const insights: FeatureModule = {
     const s = st;
     if (!s) return;
     const t = frame.t;
-    if (t.simTime - s.lastSimTime < SAMPLE_DT) return;
+    if (t.simTime >= s.hideAt) {
+      s.caption.classList.add('is-leaving');
+      if (t.simTime >= s.hideAt + LEAVE_S) {
+        s.caption.hidden = true;
+        s.hideAt = Number.POSITIVE_INFINITY;
+      }
+    }
+    if (t.simTime - s.lastSimTime < SAMPLE_DT - 1e-9) return;
     s.lastSimTime = t.simTime;
     s.rec.write(t.suspensionId, t);
     if (t.sectionIndex !== s.section) {
