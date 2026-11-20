@@ -7,6 +7,8 @@
 - `a7a8325` terrain, props, feature init
 - `e5fd99b` tests + e2e + 4-chunk culling
 - `f64371d` removes the scratch harness that a WIP snapshot swept in
+- `2910b84` one road shader, gated markings
+- `5fdf6fe` road-first / field-last render order
 - this summary
 
 ## Built (`src/features/track/`)
@@ -38,7 +40,12 @@ Every vertex is `BuiltTrack.toWorld(s, l)` passed through `simToThree`, with y =
 
 **Closing row:** the row at s = L repeats row 0. Its normals are welded to row 0's, and every along-track texture/stripe period is rounded to a whole number per lap, so the closure has no seam.
 
-**Material groups** (bands): asphalt, cobbles (asphalt band inside the pavé), kerb, apron (2 m shoulder), grass. The ribbon is drawn as 4 chunks along s that share one vertex buffer (own index and groups, own bounding sphere), so off-screen parts are frustum-culled. That is at most 17 groups + terrain + cones + boards = 20 draw calls per pass.
+**Material groups:**
+- `road` = asphalt + kerbs + apron (2 m shoulder), one shader that switches on |l|;
+- `cobbles` (the asphalt band inside the pavé);
+- `grass`.
+
+The ribbon is drawn as 4 chunks along s that share one vertex buffer (each with its own index, groups and bounding sphere), so off-screen parts are frustum-culled. That is at most 9 groups + terrain + cones + boards = **≤ 12 draw calls per pass**. The road draws first (renderOrder −1) and the field last (+1), so hidden ground fails the depth test early. In SwiftShader that roughly halved the high-tier frame.
 
 **Mesh sizes:**
 
@@ -52,21 +59,21 @@ Every vertex is `BuiltTrack.toWorld(s, l)` passed through `simToThree`, with y =
 
 Each variant has its own `customProgramCacheKey`.
 
-**Asphalt** (CC0 `asphalt_track` diffuse + normal):
-- far-scale mottle against tiling;
+**Road** (CC0 `asphalt_track` diffuse + normal); on the asphalt:
 - darker, smoother rubbered wheel tracks along the driving line (`aPaint.x`);
 - AA'd (`fwidth`) white edge lines, section-start ticks, a start-line chequer at the `start-line` prop;
 - yellow bars before and after the washboard, bump, pavé and humps, and a yellow ring around the pothole;
-- paint wears in the wheel tracks and is smoother than the asphalt.
+- paint wears in the wheel tracks and is smoother than the asphalt;
+- the marking loop runs only where a per-vertex gate (`vMark`, within 1.5 m of a mark along s) says so.
 
-**Kerbs:** AA red/white stripes (2 m period, whole number per lap) on corners tighter than about R150–260 m and on the strike side of the raised kerb strike, with a crisp start. Elsewhere the kerbs are plain concrete grey.
+**Kerbs** (same shader): AA red/white stripes (2 m period, whole number per lap) on corners tighter than about R150–260 m and on the strike side of the raised kerb strike, with a crisp start. Elsewhere the kerbs are plain light grey.
 
 **Other surfaces:**
-- Apron: the asphalt texture, lighter.
+- Apron (same shader): the asphalt, lighter and duller.
 - Cobbles: CC0 `cobblestone_floor_08` diffuse + normal at a 1.1 m tile.
 - Grass: CC0 `grass_ground` mapped in world space, so the runoff grass and the terrain match. It is recoloured to a mown green and two far scales break the tiling.
 
-Roughness and AO maps are skipped to stay inside the VRAM budget: 6 textures, about 32 MB with mips. Anisotropy follows `store.quality`.
+Roughness and AO maps, and the concrete set, are skipped to stay inside the VRAM budget: 5 textures, about 27 MB with mips, and about 4 MB downloaded. Anisotropy follows `store.quality`.
 
 ### `terrain.ts`
 
@@ -93,25 +100,31 @@ Contributes the proving loop as before, then on init:
 1. **Placeholder shortcut.** `index.ts` hides the renderer placeholder's ground disc and centreline line by
    name/type (`scene.getObjectByName('placeholder')`). They would z-fight the road while no vehicle visual is
    registered. This is commented as a shortcut and goes when the placeholder is deleted (03-02 SUMMARY note 6).
-2. **Frame budget at high is exceeded by the full frame, not by the track.**
-   - At t = 14 the high tier measures **265 calls** with the DB11 + suspension visuals, and 111 without `vehicle-view`.
-   - N8AO's prepass renders every mesh a second time, so every feature's calls double at high.
-   - The track's share is ≤ 20 per pass (node-tested ≤ 30).
-   - The 03-02 high-tier e2e asserts ≤ 250 for the full frame, so it may fail once the car is in. That is the
-     car's (90-call) share × 2 passes plus shadow. My e2e asserts that the frame without the vehicle leaves the
-     car its 90 (111 ≤ 160).
-3. **Horizon haze line.**
+2. **Frame budget.**
+   - At high, t = 14 measures **213 draw calls** with the DB11 + suspension visuals; without `vehicle-view` it
+     measured 53–95 across runs.
+   - The N8AO prepass renders every mesh a second time, so every feature's calls double at high.
+   - The track uses ≤ 12 per pass, node-tested ≤ 30.
+   - Triangles: 1.20 M at high, of which the track is ≤ 338 k ribbon + 66 k terrain per pass when everything is
+     in view.
+3. **SwiftShader cost / e2e timing.**
+   - The textured, lit ground covers most of the screen, so under SwiftShader a high-tier frame takes about
+     1.4 s (about 2.5 s before the render-order fix, measured at load average ≈ 7).
+   - In the full suite, the 60 s high-tier specs of 03-02 and 03-04 pass in 52–60 s on an otherwise idle
+     server. They timed out while other executors loaded the machine (load average 7–8).
+   - **Recommend `test.setTimeout(120_000)` in those high-tier specs**, as 03-03 did.
+4. **Horizon haze line.**
    - The terrain runs to 4.5 km, but the environment's linear fog colour (HDRI 2–8° band, sky-ish) is lighter
      than the HDRI's own ground just above the horizon, so a thin light line shows where the fogged ground meets
      the background.
    - Fixing it is an environment change (fog colour sampled just below the horizon, or exponential fog); I can't
      edit `environment/`.
-4. **Pavé stones are pyramids.** The mesh is exact at stone centres (and on the 0.8 m rails / base rows). Between
+5. **Pavé stones are pyramids.** The mesh is exact at stone centres (and on the 0.8 m rails / base rows). Between
    them it interpolates linearly, so the mesh deviates from the true surface by up to about the joint depth plus
    stone amplitude (≈ 1 cm) in places. The cobblestone texture carries the look.
-5. **Roughness** shorter than the tier's row spacing is not resolved between vertices. A node test asserts
+6. **Roughness** shorter than the tier's row spacing is not resolved between vertices. A node test asserts
    < 12 mm on both wheel paths of the driving line over the whole lap (high tier).
-6. No code lifted. Assets: the four CC0 Poly Haven texture sets already in the manifest and CREDITS.
+7. No code lifted. Assets: the four CC0 Poly Haven texture sets already in the manifest and CREDITS.
 
 ## Known gaps
 - Looks tuned by eye under SwiftShader only. A real-GPU pass should check the asphalt sheen at low sun and the
@@ -123,24 +136,43 @@ Contributes the proving loop as before, then on init:
 ## Verification (real output)
 ```
 $ npm run check
-✔ no dependency violations found (128 modules, 362 dependencies cruised)
- Test Files  33 passed (33)
-      Tests  355 passed (355)
+✔ no dependency violations found (150 modules, 430 dependencies cruised)
+ Test Files  43 passed | 1 skipped (44)
+      Tests  473 passed | 11 skipped (484)
 $ npx vitest run tests/features/track.test.ts
       Tests  11 passed (11)
-  (vertex == toWorld/roadHeight for low+high tiers; plan area == L × 36 m to 1e-3 with no negative triangles;
-   closing row == row 0; chunk budget ≤ 30; dense feature rows; mesh-vs-roadHeight on wheel paths < 12 mm;
-   terrain under paved bands)
-$ npx playwright test tests/e2e/03-01-track.spec.ts --trace off
-high t=14 draw calls: full frame 265, without the vehicle 111; triangles 1197814 / 744146
-  ✓ high tier (shadow, AO, fine ribbon) compiles cleanly; without the car the frame leaves the car its budget (57.1s)
-  ✓ track textures load, the road renders around the lap with zero console errors and warnings  (earlier run, 3.0m)
 ```
-Full `npm run e2e`: see the final report. Concurrent executors rebuilding `dist/` under a running `vite preview`
-make every later spec time out in `waitForReady`.
+The track test checks:
+- vertex == toWorld/roadHeight for the low and high tiers;
+- plan area == L × 36 m to 1e-3, with no negative triangles;
+- closing row == row 0;
+- the chunks share the buffers and stay inside the draw budget;
+- dense feature rows;
+- mesh vs roadHeight on the wheel paths < 12 mm;
+- terrain under the paved bands.
+
+```
+$ npm run build            ✓ built
+$ npx playwright test (PLAYWRIGHT_BASE_URL = private snapshot of this build, see below)
+  ✓ 03-01-track › track textures load, the road renders around the lap with zero console errors and warnings (1.6m)
+high t=14 draw calls: full frame 213, without the vehicle 95; triangles 1197814 / 744146
+  ✓ 03-01-track › high tier (shadow, AO, fine ribbon) compiles cleanly; without the car the frame leaves the car its budget (28.8s)
+  ✓ smoke × 3
+  ✓ 03-02-env × 3, 03-04-parts × 3 (52–60 s each, default 60 s timeout, after the render-order fix)
+```
+Full suite before the render-order fix: 15 passed, 6 failed, 1 skipped.
+- 03-02 high and closeup, 03-04 × 3: 60 s timeouts at load average 7.5.
+- 06-02 chips: a 60 s timeout in `locator.press`. That spec isn't mine.
+
+**Why a private snapshot:**
+- Other executors rebuild `dist/` while a `vite preview` is running. The preview then serves `index.html` for the
+  new hashed chunks, and every later spec times out in `waitForReady`. This happened to two full runs.
+- So e2e ran against a private copy of `dist/` served by `wrangler dev -c <copy>/suspension_lab/wrangler.json`
+  (the same workerd and Worker).
 
 Screenshots (DPR 1, inspected) are in the session scratchpad `shots/`:
-- app chase camera: `03-01-app-t{1,15,30,50,62,82}.png`, `03-01-app-high-t14.png`;
+- final build: `03-01-final-t{12,30}-high.png`, `03-01-final-t62-med.png`, `03-01-v2-t{8,19}-high.png`;
+- e2e: `03-01-app-t{1,15,30,50,62,82}.png`, `03-01-app-high-t14.png`;
 - scratch free-camera harness (not committed): `03-01-h-{overview,hairpin,bump,pothole,strike,pave,wash,dlc,carousel,seam,start}.png`.
 
 Fixed during review:
@@ -149,4 +181,5 @@ Fixed during review:
 - plain kerbs were too bright;
 - the apron looked like gravel;
 - kerb-strike stripes showed on both sides;
-- the kerb paint start was smeared.
+- the kerb paint start was smeared;
+- the SwiftShader cost was too high (render order, one road shader, gated markings).
