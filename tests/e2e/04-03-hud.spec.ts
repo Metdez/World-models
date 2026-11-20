@@ -55,7 +55,8 @@ test.describe('04-03 telemetry panel + insights', () => {
     await expect(caption).toBeVisible();
     await expect(page.locator('.sl-insights-text')).toHaveText(/rolls toward the outside/);
     await expect(page.locator('.sl-insights')).toHaveAttribute('aria-live', 'polite');
-    expect(Math.abs(num(await page.locator('.sl-insights-chip').textContent()) - Math.abs(f.roll * RAD))).toBeLessThan(0.11);
+    // composed when it fired (a moment earlier): steady roll, so within a few tenths, and nowhere near the x2.5 pose
+    expect(Math.abs(num(await page.locator('.sl-insights-chip').textContent()) - Math.abs(f.roll * RAD))).toBeLessThan(0.3);
 
     // swap: after a 1 s settle, the delta chip compares the same place on the lap; the ghost legend names the old one
     await page.evaluate(() => globalThis.__app!.set('suspensionId', 'double-wishbone'));
@@ -93,10 +94,15 @@ test.describe('04-03 telemetry panel + insights', () => {
     await page.screenshot({ path: join(SHOTS, '04-03-carousel.png'), timeout: 300_000 });
 
     await page.evaluate(() => globalThis.__app!.set('suspensionId', 'double-wishbone'));
-    await run(page, 75);
+    await run(page, 40);
     await expect(page.locator('.sl-insights-chip-label')).toBeVisible();
-    await page.screenshot({ path: join(SHOTS, '04-03-swap-ghost-delta.png'), timeout: 300_000 });
-    await page.locator('.sl-telemetry-panel').screenshot({ path: join(SHOTS, '04-03-panel.png'), timeout: 300_000 });
+    await page.screenshot({ path: join(SHOTS, '04-03-swap-delta.png'), timeout: 300_000 });
+
+    // replay the same stretch: the ghost is the strut's trace at the same track positions
+    await page.evaluate((t) => globalThis.__app!.seek(t), Number(T0));
+    await run(page, 150);
+    await expect(page.locator('.sl-telemetry-panel-legend.is-ghost')).toBeVisible();
+    await page.locator('.sl-telemetry-panel').screenshot({ path: join(SHOTS, '04-03-panel-ghost.png'), timeout: 300_000 });
     await expectHealthyBoot(page, errors);
   });
 });

@@ -24,7 +24,7 @@ export const motoTelelever: MotorcycleSuspensionDefinition = {
     descriptor: 'Wishbone-located fork and single-sided swingarm',
     strengths: [
       'Geometry resists brake dive, so the chassis stays nearly level',
-      'Trail grows under braking instead of shrinking',
+      'The wheel path adds trail as it compresses, so trail falls far less under braking',
       'The fork tubes carry no spring, so slider stiction barely matters',
     ],
     costs: [

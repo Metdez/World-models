@@ -41,7 +41,7 @@
 
 .sl-telemetry-panel-top {
   display: grid;
-  grid-template-columns: 84px 1fr;
+  grid-template-columns: 88px 1fr;
   gap: var(--sp-3);
   align-items: start;
 }
@@ -59,6 +59,7 @@
 .sl-telemetry-panel-heroes {
   display: grid;
   gap: var(--sp-1);
+  padding: 0 2px;
 }
 .sl-telemetry-panel-stat {
   display: flex;

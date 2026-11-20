@@ -169,6 +169,28 @@ export function roundedRect(w: number, h: number, r: number): Shape {
   return s;
 }
 
+/** Convex polygon with corners rounded by radius r (quadratic corners). */
+export function roundedPoly(points: readonly (readonly [number, number])[], r: number): Shape {
+  const s = new Shape();
+  const n = points.length;
+  for (let i = 0; i < n; i++) {
+    const [px, py] = points[i]!;
+    const [ax, ay] = points[(i + n - 1) % n]!;
+    const [bx, by] = points[(i + 1) % n]!;
+    const la = Math.hypot(ax - px, ay - py);
+    const lb = Math.hypot(bx - px, by - py);
+    const ra = Math.min(r, la / 2) / la;
+    const rb = Math.min(r, lb / 2) / lb;
+    const x0 = px + (ax - px) * ra;
+    const y0 = py + (ay - py) * ra;
+    if (i === 0) s.moveTo(x0, y0);
+    else s.lineTo(x0, y0);
+    s.quadraticCurveTo(px, py, px + (bx - px) * rb, py + (by - py) * rb);
+  }
+  s.closePath();
+  return s;
+}
+
 /** Ellipse shape. */
 export function ellipse(rx: number, ry: number): Shape {
   const s = new Shape();
@@ -289,8 +311,8 @@ function tyreProfile(s: WheelSpec): { crown: [number, number][]; walls: [number,
 export function spokedWheel(s: WheelSpec): BufferGeometry {
   const parts: BufferGeometry[] = [];
   const { crown, walls } = tyreProfile(s);
-  parts.push(motoPaint(lathe(crown, 72, 0), 'tread'));
-  parts.push(motoPaint(lathe(walls[0]!, 72, 0), 'sidewall'), motoPaint(lathe(walls[1]!, 72, 0), 'sidewall'));
+  parts.push(motoPaint(lathe(crown, 60, 0), 'tread'));
+  parts.push(motoPaint(lathe(walls[0]!, 60, 0), 'sidewall'), motoPaint(lathe(walls[1]!, 60, 0), 'sidewall'));
   // Tread grooves: shallow dark rings would vanish; instead a slightly darker centre band via a thin ring.
   const R = s.rimRadius;
   const wr = s.rimWidth / 2;
@@ -308,7 +330,7 @@ export function spokedWheel(s: WheelSpec): BufferGeometry {
     [R - 0.004, -wr - 0.006],
     [R + 0.012, -wr - 0.005],
   ];
-  parts.push(motoPaint(lathe(rim, 72, 0.5), 'polished'));
+  parts.push(motoPaint(lathe(rim, 60, 0.5), 'polished'));
   const h = s.hubHalf;
   const hr = s.hubRadius;
   const hub: [number, number][] = [

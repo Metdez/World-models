@@ -124,6 +124,16 @@ describe('kinematics (research 08 §4)', () => {
     expect(-slope).toBeCloseTo((R - s.front.offset * Math.sin(e)) / Math.cos(e) ** 2, 3);
   });
 
+  it('with the frame held level, telescopic trail is constant through travel; the Telelever path adds trail', () => {
+    const trailAt = (s: MotorcycleSuspensionDefinition, w: number) => {
+      const m = sol(s);
+      const r = row(m.front, w);
+      return trailOf(r, [s.front.steeringHead[0], s.front.steeringHead[2]], 0, 0, r[WZ]! - (v.front.tyre.radius - m.front.tyreDeflection));
+    };
+    expect(trailAt(motoClassic, 0.04)).toBeCloseTo(trailAt(motoClassic, 0), 9);
+    expect(trailAt(motoTelelever, 0.04) - trailAt(motoTelelever, 0)).toBeGreaterThan(0.005);
+  });
+
   it('telescopic forks are pro-dive (AD < 0, = −β·(L/h)·tan ε); the Telelever is anti-dive (AD > 0)', () => {
     for (const s of [motoClassic, motoModern]) {
       const ad = sol(s).kinematics.front.summary.antiPitch;

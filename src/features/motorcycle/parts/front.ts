@@ -114,7 +114,7 @@ export function buildFront(def: TelescopicFront | TeleleverFront, vehicle: Motor
     const clampTop = L(-0.0, side);
     steer.push(cos(bakedTube(L(0.005, side), L(0.055, side), 0.034, 0.034, 20), 'black'));
     const root = L(0.03, side).addScaledVector(Z, side * 0.03);
-    const end = root.clone().add(new Vector3(-0.15, -0.035, side * 0.27));
+    const end = root.clone().add(new Vector3(-0.13, -0.035, side * 0.22));
     steer.push(cos(bakedTube(root, end, 0.0112, 0.0112, 14), 'frame'));
     const dir = end.clone().sub(root).normalize();
     const g0 = end.clone().addScaledVector(dir, -0.125);
@@ -264,7 +264,7 @@ export function buildFront(def: TelescopicFront | TeleleverFront, vehicle: Motor
   }
   fprof.push(fprof[0]!);
   // Arc from just ahead of the top to behind the fork: lathe angle phi maps to (phi - pi/2) about +Z after yToZ.
-  const a0 = Math.PI * 0.2;
+  const a0 = Math.PI * 0.27;
   const a1 = Math.PI * 0.86;
   const fender = yToZ(lathe(fprof, 40, 0.5, a0 + Math.PI / 2, a1 - a0));
   const fenderParts: BufferGeometry[] = [cos(fender.translate(axle.x, axle.y, 0), 'polished')];

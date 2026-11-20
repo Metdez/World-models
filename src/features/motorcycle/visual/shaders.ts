@@ -46,7 +46,7 @@ const FLAKE_FADE_M = 6;
  * the object-space position, so the tank and the seat hump line up without UVs.
  */
 export function createPaintMaterial(spec: PaintSpec, xray: XrayUniform): MeshPhysicalMaterial {
-  const m = new MeshPhysicalMaterial({ color: new Color(spec.color), metalness: 0.55, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.03 });
+  const m = new MeshPhysicalMaterial({ color: new Color(spec.color), metalness: 0.45, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.03 });
   m.name = 'moto-paint';
   const uniforms = {
     uStripe: { value: new Color(spec.stripe) },

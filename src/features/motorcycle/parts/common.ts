@@ -2,9 +2,9 @@
  * Shared pieces of the `moto-planar` suspension visual: frame conversion, planar rotation helpers, the coil-over
  * (kit3d damper + shader spring) sized from its mount distance, and the floating brake disc + caliper.
  */
-import { Group, Mesh, Vector3, type BufferGeometry, type Material, type MeshStandardMaterial } from 'three';
+import { CircleGeometry, CylinderGeometry, Group, Mesh, RingGeometry, Vector3, type BufferGeometry, type Material, type MeshStandardMaterial } from 'three';
 import type { Vec3 } from '../../../contracts/units';
-import { brakeDiscGeometry, caliperGeometry } from '../../../kit3d/brake';
+import { caliperGeometry } from '../../../kit3d/brake';
 import { createDamper, disposeDamper, type Damper } from '../../../kit3d/damper';
 import { paint, type Finish } from '../../../kit3d/materials';
 import { makeSpringMaterial, springGeometry, updateSpring, type CoilSpec, type SpringUniforms } from '../../../kit3d/spring';
@@ -72,7 +72,7 @@ export function createCoilOver(damperMaterial: Material, springBase: MeshStandar
   };
   const springMaterial = springBase.clone();
   const { uniforms, depth } = makeSpringMaterial(springMaterial, coil);
-  const geometry = springGeometry(coil, 30, 10);
+  const geometry = springGeometry(coil, 22, 8);
   const spring = new Mesh(geometry, springMaterial);
   spring.customDepthMaterial = depth;
   spring.castShadow = true;
@@ -115,12 +115,27 @@ export interface DiscSpec {
  * Built with +Y outboard then turned so outboard points away from the wheel centre (sign of z).
  */
 export function floatingDisc(d: DiscSpec): BufferGeometry {
-  const ring = paint(
-    brakeDiscGeometry({ outerRadius: d.radius, innerRadius: d.radius - d.band, thickness: 0.005, hatDepth: 0.003, holes: 14, holeRadius: 0.0032 }),
-    'disc',
-  );
-  const parts: BufferGeometry[] = [ring];
+  // Friction ring: two faces, outer and inner edges (cheap; the kit3d drilled disc triangulates every hole).
   const inner = d.radius - d.band;
+  const t = 0.0025;
+  const ring = [
+    new RingGeometry(inner, d.radius, 64, 1).rotateX(-Math.PI / 2).translate(0, t, 0),
+    new RingGeometry(inner, d.radius, 64, 1).rotateX(Math.PI / 2).translate(0, -t, 0),
+    new CylinderGeometry(d.radius, d.radius, 2 * t, 64, 1, true),
+    new CylinderGeometry(inner, inner, 2 * t, 64, 1, true).scale(-1, 1, 1),
+  ].map((g) => paint(g, 'disc'));
+  const parts: BufferGeometry[] = [...ring];
+  // Drilled holes: two staggered rows of dark dimples on both faces.
+  for (let row = 0; row < 2; row++) {
+    const rr = inner + d.band * (0.33 + 0.34 * row);
+    for (let i = 0; i < 14; i++) {
+      const a = ((i + row * 0.5) / 14) * Math.PI * 2;
+      for (const side of [-1, 1]) {
+        const g = new CircleGeometry(0.0032, 8).rotateX(-side * (Math.PI / 2));
+        parts.push(paint(g.translate(Math.cos(a) * rr, side * (t + 0.0003), Math.sin(a) * rr), 'rubber'));
+      }
+    }
+  }
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * Math.PI * 2;
     const c = Math.cos(a);

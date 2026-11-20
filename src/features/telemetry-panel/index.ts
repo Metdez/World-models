@@ -245,7 +245,7 @@ const telemetryPanel: FeatureModule = {
           h(
             'div',
             { class: 'sl-telemetry-panel-heroes' },
-            h('span', { class: 'sl-telemetry-panel-stat' }, h('span', { class: 'sl-label' }, 'Lateral'), latG),
+            h('span', { class: 'sl-telemetry-panel-stat' }, h('span', { class: 'sl-label', title: 'Lateral acceleration' }, 'Lat'), latG),
             h('span', { class: 'sl-telemetry-panel-stat' }, h('span', { class: 'sl-label' }, 'Roll'), roll),
           ),
         ),
