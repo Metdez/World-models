@@ -1,3 +1,4 @@
-// Public sim-core API (ARCHITECTURE §7.1). Phase 1 stub: plan 02-04 replaces this file with
-// createSimulation (simulation.ts), buildTrack and solveAxleKinematics.
-export { createStubSimulation as createSimulation } from './stub/circle';
+// Public sim-core API (ARCHITECTURE §7.1). Content is imported by path (src/sim-core/content/*), never through here.
+export { createSimulation } from './simulation';
+export { buildTrack } from './track/build';
+export { solveAxleKinematics } from './kinematics/table';
