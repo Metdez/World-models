@@ -1,0 +1,142 @@
+/* Presenter room card (big screen). Tokens only. Top-right, below the D5 icon row (vehicle toggle + fullscreen). */
+.sl-presenter {
+  position: absolute;
+  top: calc(var(--margin) + 56px);
+  right: var(--margin);
+  width: 212px;
+  padding: var(--sp-3);
+  display: grid;
+  gap: var(--sp-3);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-panel);
+  color: var(--text-1);
+}
+
+.sl-presenter[hidden],
+.sl-presenter [hidden] {
+  display: none;
+}
+
+.sl-presenter-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.sl-presenter-title {
+  color: var(--text-2);
+}
+
+.sl-presenter[data-mode='host'] .sl-presenter-title {
+  color: var(--warn);
+}
+
+.sl-presenter-fold,
+.sl-presenter-flip {
+  appearance: none;
+  border: 1px solid var(--hair);
+  background: transparent;
+  color: var(--text-2);
+  font: 500 var(--fs-label) / 1 var(--font-sans);
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  border-radius: var(--radius-pill);
+  padding: var(--sp-1) var(--sp-2);
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+
+.sl-presenter-fold:hover,
+.sl-presenter-flip:hover {
+  color: var(--text-1);
+  border-color: var(--hair-strong);
+}
+
+.sl-presenter-body {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.sl-presenter-qr {
+  padding: var(--sp-2);
+  border-radius: var(--radius-chip);
+  background: var(--text-1);
+  line-height: 0;
+}
+
+.sl-qr {
+  width: 100%;
+  height: auto;
+  fill: var(--bg-0);
+}
+
+.sl-qr-bg {
+  fill: var(--text-1);
+}
+
+.sl-presenter[data-mode='host'] .sl-presenter-qr {
+  box-shadow: 0 0 0 2px var(--warn);
+}
+
+.sl-presenter-meta {
+  display: grid;
+  gap: 2px;
+  text-align: center;
+}
+
+.sl-presenter-code {
+  font: 500 var(--fs-num-lg) / 1.1 var(--font-mono);
+  letter-spacing: 0.18em;
+  margin-right: -0.18em;
+  color: var(--text-1);
+}
+
+.sl-presenter-url {
+  font: 400 var(--fs-label) / 1.3 var(--font-mono);
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+
+.sl-presenter-note {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-label);
+  line-height: var(--lh-body);
+  text-align: center;
+}
+
+.sl-presenter-flip {
+  justify-self: center;
+}
+
+.sl-presenter[data-folded] {
+  width: auto;
+  padding: var(--sp-2);
+  border-radius: var(--radius-pill);
+}
+
+.sl-presenter[data-folded] .sl-presenter-body,
+.sl-presenter[data-folded] .sl-presenter-title {
+  display: none;
+}
+
+.sl-presenter[data-folded] .sl-presenter-fold {
+  border: 0;
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  letter-spacing: 0.06em;
+}
+
+@media (max-width: 720px) {
+  .sl-presenter {
+    width: 168px;
+    top: calc(var(--margin) + 48px);
+  }
+}
