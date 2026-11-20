@@ -18,7 +18,7 @@ import type { SuspensionDefinition } from '../../src/contracts/suspension';
 import type { TelemetryFrame } from '../../src/contracts/telemetry';
 import { simToThree } from '../../src/contracts/units';
 import { bakeMerge } from '../../src/features/car/db11/bake';
-import { BODY_FINISH } from '../../src/features/car/db11/materials';
+import { BODY_FINISH, createPaletteMaterial, disposePalette, paletteOf, paletteUv, type Finish } from '../../src/features/car/db11/materials';
 import { buildDb11, HIDDEN_NODES } from '../../src/features/car/db11/visual';
 import { buildSpatialLinkage } from '../../src/features/linkage-parts/visual';
 import { createVehicleView, forceVisible, XRAY_FADE_S } from '../../src/features/vehicle-view/runtime';
@@ -72,11 +72,12 @@ describe('db11 visual', { timeout: 120_000 }, async () => {
     const meshes = meshesOf(root);
     const standIns = meshes.filter((m) => m.userData.replacedBySuspension === true);
     console.info(`  db11 meshes: ${meshes.length} (${standIns.length} brake stand-ins, 1 x-ray ghost)`);
-    // With a suspension visual mounted the brakes are hidden and the ghost only draws in x-ray: car <= 30 draws.
-    expect(meshes.length - standIns.length - 1).toBeLessThanOrEqual(30);
+    // With a suspension visual mounted the brakes are hidden and the ghost only draws in x-ray: car <= 12 draws.
+    expect(meshes.length - standIns.length - 1).toBeLessThanOrEqual(12);
+    expect(standIns).toHaveLength(8);
     for (const id of ['fl', 'fr', 'rl', 'rr']) {
-      for (const part of ['tyre', 'rim-face', 'rim-dark', 'brake:disc', 'brake:caliper']) expect(byName(`hub:${id}`).getObjectByName(`${id}:${part}`), `${id}:${part}`).toBeDefined();
-      expect(byName(`spin:${id}`).getObjectByName(`${id}:brake:caliper`), 'caliper does not spin').toBeUndefined();
+      for (const part of ['wheel', 'disc']) expect(byName(`spin:${id}`).getObjectByName(`${id}:${part}`), `${id}:${part}`).toBeDefined();
+      expect(byName(`hub:${id}`).getObjectByName(`${id}:caliper`)?.parent?.name, 'caliper steers but does not spin').toBe(`hub:${id}`);
     }
   });
 
@@ -87,7 +88,7 @@ describe('db11 visual', { timeout: 120_000 }, async () => {
       ['rl', gtCoupe.cgToFront - gtCoupe.wheelbase, -gtCoupe.rear.track / 2],
       ['rr', gtCoupe.cgToFront - gtCoupe.wheelbase, gtCoupe.rear.track / 2],
     ] as const) {
-      const tyre = byName(`${id}:tyre`) as Mesh;
+      const tyre = byName(`${id}:wheel`) as Mesh;
       tyre.geometry.computeBoundingBox();
       const c = tyre.geometry.boundingBox!.getCenter(new Vector3());
       // Tyre geometry is centred on its hub (the hub is placed at the GLB wheel centre in the car frame).
@@ -128,7 +129,7 @@ describe('db11 visual', { timeout: 120_000 }, async () => {
         // Road: the contact patch lies on the drawn road (02-04). The drawn tyre has its unloaded radius, so it
         // dips into the road by the static+dynamic deflection, but never floats above it.
         const patch = simToThree(c.contactPatch.x, c.contactPatch.y, c.contactPatch.z, new Vector3());
-        const gap = lowestY(byName(`${c.id}:tyre`) as Mesh) - patch.y;
+        const gap = lowestY(byName(`${c.id}:wheel`) as Mesh) - patch.y;
         if (c.load > 0) {
           worstGap = Math.max(worstGap, gap);
           worstSink = Math.min(worstSink, gap);
@@ -191,7 +192,7 @@ describe('db11 visual', { timeout: 120_000 }, async () => {
     expect(churn / 20000).toBeLessThan(512);
   });
 
-  it('reports procedural suspension parts against the REAL wheel mesh (rim barrel + tyre)', () => {
+  it('reports procedural suspension parts against the REAL wheel mesh (tyre + rim)', () => {
     const report: string[] = [];
     for (const def of [macpherson, doubleWishbone, multilink]) {
       const sim = createSimulation({ catalog, trackId: 'proving-loop', vehicleId: gtCoupe.id, suspensionId: def.id });
@@ -207,7 +208,7 @@ describe('db11 visual', { timeout: 120_000 }, async () => {
         for (const [corner, info] of Object.entries(sv.inspect())) {
           const hub = byName(`hub:${corner}`);
           const inv = new Matrix4().copy(hub.matrixWorld).invert();
-          for (const part of ['tyre', 'rim-dark', 'rim-face']) {
+          for (const part of ['wheel']) {
             const g = (byName(`${corner}:${part}`) as Mesh).geometry;
             const spinM = byName(`spin:${corner}`).matrix;
             for (const cap of info.capsules) {
@@ -243,6 +244,23 @@ function segmentToPoints(a: Vector3, b: Vector3, g: BufferGeometry, m: Matrix4):
   }
   return min;
 }
+
+describe('palette materials', () => {
+  it('read colour, roughness (G) and metalness (B) of each plain finish from its texel', () => {
+    const m = createPaletteMaterial('bright');
+    expect([m.metalness, m.roughness]).toEqual([1, 1]); // the maps multiply these factors
+    const texel = (f: Finish) => {
+      const img = m.roughnessMap!.image as { data: Uint8Array; width: number };
+      const i = Math.floor(paletteUv(f)[0] * img.width);
+      return [img.data[i * 4 + 1]! / 255, img.data[i * 4 + 2]! / 255];
+    };
+    expect(texel('chrome')[1]).toBe(1);
+    expect(texel('tyre')[1]).toBe(0);
+    expect(texel('tyre')[0]).toBeCloseTo(0.88, 2);
+    expect(paletteOf('paint')).toBeNull();
+    disposePalette(m);
+  });
+});
 
 describe('bakeMerge', () => {
   it('dequantises into one indexed geometry and keeps faces outward under a mirror', () => {

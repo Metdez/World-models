@@ -4,6 +4,8 @@ export interface BakePart {
   readonly geometry: BufferGeometry;
   /** Geometry space -> target space. */
   readonly matrix: Matrix4;
+  /** Constant UV for every vertex of this part (palette texel); written when any part has one. */
+  readonly uv?: readonly [number, number];
 }
 
 const v = new Vector3();
@@ -25,10 +27,12 @@ export function bakeMerge(parts: readonly BakePart[]): BufferGeometry {
   const pos = new Float32Array(vertices * 3);
   const nor = new Float32Array(vertices * 3);
   const idx = vertices > 65535 ? new Uint32Array(indices) : new Uint16Array(indices);
+  const uvs = parts.some((p) => p.uv) ? new Float32Array(vertices * 2) : null;
   let vo = 0;
   let io = 0;
-  for (const { geometry: g, matrix } of parts) {
+  for (const { geometry: g, matrix, uv } of parts) {
     const p = g.getAttribute('position');
+    if (uvs && uv) for (let i = 0; i < p.count; i++) uvs.set(uv, (vo + i) * 2);
     const n = g.getAttribute('normal');
     nm.getNormalMatrix(matrix);
     for (let i = 0; i < p.count; i++) {
@@ -57,6 +61,7 @@ export function bakeMerge(parts: readonly BakePart[]): BufferGeometry {
   const out = new BufferGeometry();
   out.setAttribute('position', new BufferAttribute(pos, 3));
   out.setAttribute('normal', new BufferAttribute(nor, 3));
+  if (uvs) out.setAttribute('uv', new BufferAttribute(uvs, 2));
   out.setIndex(new BufferAttribute(idx, 1));
   out.computeBoundingBox();
   out.computeBoundingSphere();

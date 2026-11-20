@@ -10,7 +10,7 @@ import type { TelemetryFrame } from '../../../contracts/telemetry';
 import { CAR_CORNERS, simQuatToThree, simToThree } from '../../../contracts/units';
 import type { CarDefinition, VehicleDefinition } from '../../../contracts/vehicle';
 import { bakeMerge, type BakePart } from './bake';
-import { BODY_FINISH, WHEEL_FINISH, createFinishMaterial, type Finish } from './materials';
+import { BODY_FINISH, WHEEL_FINISH, createFinishMaterial, createPaletteMaterial, disposePalette, paletteOf, paletteUv, type Finish } from './materials';
 import { addBodyShader, createGhostMaterial } from './shaders';
 
 export const DB11_VISUAL_ID = 'db11';
@@ -36,8 +36,6 @@ const BRAKE_NODES = /^(amdb11_brakedisc|amdb11_caliper)/;
 const CALIPER_NODES = /^amdb11_caliper/;
 /** Headlight cover glass: a clear lens, not tinted window glass. */
 const LENS_NODES = /^amdb11_headlightglass/;
-/** Finishes enclosed by the body shell: their shadows are never seen, so they skip the shadow pass. */
-const ENCLOSED: ReadonlySet<string> = new Set(['leather', 'leather-dark', 'interior', 'engine', 'engine-red']);
 /** Finishes of the outer skin: the x-ray ghost shell is made of these. */
 const SHELL: ReadonlySet<Finish> = new Set(['paint', 'gloss-black', 'glass', 'lens', 'tail-lens']);
 
@@ -98,6 +96,11 @@ export function buildDb11(gltfScene: Object3D, vehicle: CarDefinition): VehicleV
   const fixedParts = hubCentres.map(() => ({}) as Record<string, BakePart[]>);
   const brakeFinishes = hubCentres.map(() => new Set<string>());
   const unmapped = new Set<string>();
+  // Plain finishes go into a palette mesh (key 'palette:dark' / 'palette:bright') with their texel as UV.
+  const part = (finish: Finish, geometry: BufferGeometry, matrix: Matrix4): [string, BakePart] => {
+    const kind = paletteOf(finish);
+    return kind ? [`palette:${kind}`, { geometry, matrix, uv: paletteUv(finish) }] : [finish, { geometry, matrix }];
+  };
   for (const m of meshes) {
     const node = topNodeName(m);
     const matName = (m.material as Material).name;
@@ -117,10 +120,11 @@ export function buildDb11(gltfScene: Object3D, vehicle: CarDefinition): VehicleV
       }
       const local = new Matrix4().makeTranslation(-hubCentres[i]!.x, -hubCentres[i]!.y, -hubCentres[i]!.z).multiply(M);
       const target = CALIPER_NODES.test(node) ? fixedParts[i]! : spinParts[i]!;
-      // Brake parts get their own finish key so they can be hidden independently of the rim.
-      const key = BRAKE_NODES.test(node) ? `brake:${finish}` : finish;
+      const [k, bp] = part(finish, m.geometry, local);
+      // Brake parts get their own key so they can be hidden independently of the rim.
+      const key = BRAKE_NODES.test(node) ? `brake:${k}` : k;
       if (BRAKE_NODES.test(node)) brakeFinishes[i]!.add(key);
-      (target[key] ??= []).push({ geometry: m.geometry, matrix: local });
+      (target[key] ??= []).push(bp);
       continue;
     }
     const finish: Finish | undefined = LENS_NODES.test(node) ? 'lens' : BODY_FINISH[matName];
@@ -128,7 +132,8 @@ export function buildDb11(gltfScene: Object3D, vehicle: CarDefinition): VehicleV
       unmapped.add(matName);
       continue;
     }
-    (body[finish] ??= []).push({ geometry: m.geometry, matrix: M });
+    const [key, bp] = part(finish, m.geometry, M);
+    (body[key] ??= []).push(bp);
     if (SHELL.has(finish)) shell.push({ geometry: m.geometry, matrix: M });
   }
   if (unmapped.size) throw new Error(`db11: no finish for materials ${[...unmapped].join(', ')}`);
@@ -136,16 +141,23 @@ export function buildDb11(gltfScene: Object3D, vehicle: CarDefinition): VehicleV
   const xray = { uXray: { value: 0 } };
   const owned: { geometries: BufferGeometry[]; materials: Material[] } = { geometries: [], materials: [] };
   const materials = new Map<string, Material>();
+  const palettes: ReturnType<typeof createPaletteMaterial>[] = [];
   const material = (key: string, isBody: boolean): Material => {
     const id = `${isBody ? 'body' : 'wheel'}:${key}`;
     let mat = materials.get(id);
     if (!mat) {
-      const finish = key.replace(/^brake:/, '') as Finish;
-      mat = createFinishMaterial(finish);
+      const finish = key.replace(/^brake:/, '');
+      if (finish.startsWith('palette:')) {
+        const palette = createPaletteMaterial(finish === 'palette:dark' ? 'dark' : 'bright');
+        palettes.push(palette);
+        mat = palette;
+      } else {
+        mat = createFinishMaterial(finish as Finish);
+        owned.materials.push(mat);
+      }
       mat.name = `db11-${finish}`;
       if (isBody) addBodyShader(mat, xray, finish === 'paint');
       materials.set(id, mat);
-      owned.materials.push(mat);
     }
     return mat;
   };
@@ -167,8 +179,7 @@ export function buildDb11(gltfScene: Object3D, vehicle: CarDefinition): VehicleV
   bodyGroup.name = 'body';
   root.add(bodyGroup);
   const bodyMeshes = Object.entries(body).map(([finish, parts]) => addMesh(bodyGroup, parts, material(finish, true), `body:${finish}`));
-  const shadowCasters = bodyMeshes.filter((m) => m.castShadow && !ENCLOSED.has(m.name.slice('body:'.length)));
-  for (const m of bodyMeshes) m.castShadow = shadowCasters.includes(m);
+  const shadowCasters = bodyMeshes.filter((m) => m.castShadow);
   const ghostMaterial = createGhostMaterial(xray);
   owned.materials.push(ghostMaterial);
   const ghost = addMesh(bodyGroup, shell, ghostMaterial, 'xray-ghost');
@@ -189,8 +200,11 @@ export function buildDb11(gltfScene: Object3D, vehicle: CarDefinition): VehicleV
       [fixedParts[i]!, hub],
     ] as const) {
       for (const [key, list] of Object.entries(parts)) {
-        const mesh = addMesh(parent, list, material(key, false), `${id}:${key}`);
-        if (brakeFinishes[i]!.has(key)) mesh.userData.replacedBySuspension = true;
+        const brake = brakeFinishes[i]!.has(key);
+        // Wheel parts share one palette: one mesh per corner for tyre+rim, one for the disc, one for the caliper.
+        const name = brake ? (parent === spin ? 'disc' : 'caliper') : 'wheel';
+        const mesh = addMesh(parent, list, material(key, false), `${id}:${name}${key.startsWith('palette:') || key.startsWith('brake:palette:') ? '' : `:${key}`}`);
+        if (brake) mesh.userData.replacedBySuspension = true;
       }
     }
     return { hub, spin };
@@ -221,6 +235,7 @@ export function buildDb11(gltfScene: Object3D, vehicle: CarDefinition): VehicleV
       root.removeFromParent();
       for (const g of owned.geometries) g.dispose();
       for (const m of owned.materials) m.dispose();
+      for (const m of palettes) disposePalette(m);
     },
   };
 }

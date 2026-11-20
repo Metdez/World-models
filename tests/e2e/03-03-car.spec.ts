@@ -87,7 +87,7 @@ function contact(page: Page) {
     const out: { id: string; hubY: number; tyreBottom: number; road: number | null }[] = [];
     for (const id of ['fl', 'fr', 'rl', 'rr']) {
       const hub = car.getObjectByName(`hub:${id}`);
-      const tyre = hub.getObjectByName(`${id}:tyre`);
+      const tyre = hub.getObjectByName(`${id}:wheel`);
       tyre.updateMatrixWorld(true);
       const p = tyre.geometry.getAttribute('position');
       const v = hub.position.clone();
@@ -166,8 +166,8 @@ test('DB11 mounted, oriented forward, tyres on the road; screenshots', async ({ 
   expect(mounted.flx).toBeGreaterThan(1.3); // front axle at +cgToFront (1.43 m) in the body frame
   expect(mounted.rlx).toBeLessThan(-1.3);
   expect(mounted.flz).toBeLessThan(-0.8); // left = three -Z
-  // With the procedural suspension mounted the car's own discs/calipers are hidden: <= 31 car meshes drawn.
-  expect(mounted.meshes).toBeLessThanOrEqual(31);
+  // With the procedural suspension mounted the car's own discs/calipers are hidden: <= 12 car meshes drawn.
+  expect(mounted.meshes).toBeLessThanOrEqual(12);
 
   for (const t of [5, 9.75, 20, 51.65]) {
     await page.evaluate((lap) => globalThis.__app!.seek(lap), t);
@@ -229,7 +229,7 @@ test('every suspension is pre-built; swaps toggle visibility; the car works with
     globalThis.__three!.scene.getObjectByName('vehicle:db11').traverseVisible((o: any) => (n += o.userData.replacedBySuspension ? 1 : 0));
     return n;
   });
-  expect(brakes).toBe(16);
+  expect(brakes).toBe(8);
   await shot(page, 'own-brakes', [2.6, 0.55, -2.4], [1.43, 0.38, -0.85], 30);
   await page.evaluate(() => globalThis.__app!.set('xray', true));
   for (let i = 0; i < 30; i++) await page.evaluate(() => globalThis.__app!.advance(1 / 60));
