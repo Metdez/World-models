@@ -38,8 +38,10 @@ export default {
     stage.append(renderer.domElement);
     ctx.addDisposer(() => renderer.domElement.remove());
 
-    // Label layer for CSS2DObjects added to the scene (part labels, overlays).
+    // Label layer for CSS2DObjects added through RENDER.add (part labels, overlays).
     const labels = new CSS2DRenderer();
+    // CSS2DRenderer walks the whole scene and allocates every call: only run it once a label has been added.
+    let labelsInUse = false;
     Object.assign(labels.domElement.style, { position: 'absolute', inset: '0', pointerEvents: 'none' });
     stage.append(labels.domElement);
     ctx.addDisposer(() => labels.domElement.remove());
@@ -86,6 +88,9 @@ export default {
       scene,
       camera,
       add(object: Object3D) {
+        object.traverse((o) => {
+          if ((o as { isCSS2DObject?: boolean }).isCSS2DObject) labelsInUse = true;
+        });
         scene.add(object);
         return () => scene.remove(object);
       },
@@ -127,7 +132,7 @@ export default {
       }
       renderer.info.reset();
       post.render(frame.dt);
-      labels.render(scene, camera);
+      if (labelsInUse) labels.render(scene, camera);
     };
     ctx.addDisposer(() => (frameHandler = undefined));
     await post.ready();

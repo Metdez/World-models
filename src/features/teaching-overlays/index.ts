@@ -71,8 +71,8 @@ export default {
       view = s.view;
       // Close-up: only the focused axle's construction; the far one would cross the linkage through the body.
       farFloor = s.view === 'closeup' ? 0 : 0.22;
-      // ...and only the focused corner of it: the opposite wheel's lines would cross the frame.
-      focus = s.view === 'closeup' ? (s.focusCorner ?? 'fl') : null; // the camera films corner 0 when none is set
+      // ...and only the focused corner (a bike: the focused end): the other wheels' lines would cross the frame.
+      focus = s.view === 'closeup' ? (s.focusCorner ?? '') : null;
       const on = s.overlay === 'engineer';
       if (on && !active) construction.reset();
       active = on;

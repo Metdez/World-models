@@ -109,7 +109,9 @@ export function buildSpatialLinkage(suspension: SuspensionDefinition, vehicle: V
   const chassis = new Mesh(mergeParts(chassisParts), slots[0]!.visual.materials.plain);
   chassis.name = 'chassis';
   owned.push(chassis.geometry);
-  for (const o of [chassis, ...torsos]) {
+  // Body-fixed meshes posed by the front-left chassis frame (one array, reused every frame).
+  const followers = [chassis, ...torsos];
+  for (const o of followers) {
     o.matrixAutoUpdate = false;
     o.castShadow = true;
     o.receiveShadow = true;
@@ -146,7 +148,7 @@ export function buildSpatialLinkage(suspension: SuspensionDefinition, vehicle: V
         slot.visual.update(slot.points, c.spin);
       }
       const front = slots[0]!;
-      for (const o of [chassis, ...torsos]) {
+      for (const o of followers) {
         o.visible = front.ok;
         o.matrix.copy(front.visual.chassis);
         o.matrixWorldNeedsUpdate = true;

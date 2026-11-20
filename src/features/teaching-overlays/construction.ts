@@ -194,8 +194,8 @@ export interface Construction {
   /**
    * `eye` (sim frame, optional): the axle nearer the camera is drawn at full strength, the other one dimmed down to
    * `farFloor` (0.22; 0 hides it, e.g. in the close-up where the focused wheel is the hero).
-   * `focus` (a corner id, car close-up): only that corner's construction, and its axle's ground line up to the
-   * centreline, so the opposite wheel's lines do not cross the frame.
+   * `focus` (a corner id, close-up; unknown = corner 0): only that corner's construction (a car: and its axle's ground
+   * line up to the centreline), so the other wheels' lines do not cross the frame.
    */
   draw(t: TelemetryFrame, sim: OverlaySim, dt: number, eye?: XYZ, farFloor?: number, focus?: string | null): void;
 }
@@ -531,7 +531,10 @@ export function createConstruction(main: LineBatch, ghost: LineBatch): Construct
       while (rigs.length < cs.length) rigs.push(newRig()); // grows once per layout
       axleGains(cs, eye, farFloor);
       let focused = -1;
-      if (focus && cs.length === 4) for (let i = 0; i < cs.length; i++) if (cs[i]!.id === focus) focused = i;
+      if (focus != null) {
+        focused = 0; // an unknown id films corner 0, as the camera does
+        for (let i = 0; i < cs.length; i++) if (cs[i]!.id === focus) focused = i;
+      }
       for (let i = 0; i < cs.length; i++) {
         const fc = cs[i]!;
         const rig = rigs[i]!;
