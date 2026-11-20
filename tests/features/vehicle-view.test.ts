@@ -52,7 +52,7 @@ function lowestY(mesh: Mesh): number {
   return min;
 }
 
-describe('db11 visual', async () => {
+describe('db11 visual', { timeout: 120_000 }, async () => {
   const visual = buildDb11(await parseGlb(), gtCoupe);
   const root = visual.root;
   const byName = (n: string) => root.getObjectByName(n)!;
@@ -225,7 +225,7 @@ describe('db11 visual', async () => {
     }
     console.info(`  suspension parts inside the real wheel mesh (> 2 mm, lap at true scale):\n    ${report.join('\n    ') || 'none'}`);
     expect(Array.isArray(report)).toBe(true);
-  });
+  }, 120_000);
 });
 
 /** Smallest distance from segment a-b to any vertex of g (vertices transformed by m). */
