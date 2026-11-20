@@ -10,7 +10,7 @@ export const IDLE_S = 30;
 /** Fade back to the visitor's view on exit, s. */
 const EXIT_FADE_S = 0.45;
 /** Store keys attract mode writes; snapshotted on entry and restored on exit. */
-const KEYS = ['view', 'focusCorner', 'xray', 'overlay', 'amplification', 'timeScale', 'paused', 'clock', 'suspensionId'] as const satisfies readonly (keyof AppState)[];
+const KEYS = ['view', 'focusCorner', 'xray', 'overlay', 'amplification', 'timeScale', 'paused', 'clock', 'vehicleId', 'suspensionId'] as const satisfies readonly (keyof AppState)[];
 type Snapshot = Pick<AppState, (typeof KEYS)[number]>;
 const INPUT_EVENTS = ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart'] as const;
 
@@ -60,7 +60,16 @@ export default {
       if (store.get()[key] !== value) (store.setKey as (k: K, v: AppState[K]) => void)(key, value);
     };
 
+    // The bike beat swaps the vehicle; a vehicle swap resets the suspension, so the visitor's is re-applied a frame
+    // after the vehicle comes back (a write made while the store is notifying would be overtaken by the kernel's).
+    let restoreSuspension: string | null = null;
     const startBeat = (beat: Beat) => {
+      const ownVehicle = snapshot?.vehicleId ?? store.get().vehicleId;
+      const bike = beat.bike ? ctx.registries.vehicles.list().find((v) => v.class === 'motorcycle')?.id : undefined;
+      if (store.get().vehicleId !== (bike ?? ownVehicle)) {
+        set('vehicleId', bike ?? ownVehicle);
+        if (!bike) restoreSuspension = snapshot?.suspensionId ?? null;
+      }
       const sim = ctx.sim.current;
       if (beat.at) {
         const section = sim.track.sections.find((s) => s.def.phenomenon === beat.at);
@@ -104,7 +113,9 @@ export default {
       // Rate and pause first: the kernel forces clock 'local' on those, then 'live' resyncs to the shared lap.
       set('timeScale', prior.timeScale);
       set('paused', prior.paused);
+      const swapped = store.get().vehicleId !== prior.vehicleId;
       for (const key of KEYS) set(key, prior[key]);
+      if (swapped) restoreSuspension = prior.suspensionId;
       exitFade = 1;
     };
 
@@ -125,6 +136,10 @@ export default {
 
     frameHandler = ({ dt }) => {
       let opacity = 0;
+      if (restoreSuspension !== null) {
+        set('suspensionId', restoreSuspension);
+        restoreSuspension = null;
+      }
       if (active) {
         const index = timeline.step(dt);
         if (index >= 0) startBeat(STORYBOARD[index]!);

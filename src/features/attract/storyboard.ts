@@ -22,6 +22,8 @@ export interface Beat {
   readonly patch: AttractPatch;
   /** Suspension to show: index offset from the one the visitor had (0 = theirs). */
   readonly swap: number;
+  /** Show the motorcycle for this beat (when one is registered); other beats show the visitor's vehicle. */
+  readonly bike?: boolean;
 }
 
 const CLEAN: AttractPatch = { xray: false, overlay: 'clean', timeScale: 1, amplification: 1 };
@@ -29,7 +31,7 @@ const CLEAN: AttractPatch = { xray: false, overlay: 'clean', timeScale: 1, ampli
 export const STORYBOARD: readonly Beat[] = [
   { duration: 8, title: true, caption: 'Every bump is a geometry problem.', shot: { kind: 'orbit' }, patch: CLEAN, swap: 0 },
   {
-    duration: 9,
+    duration: 8,
     caption: 'Watch the links work over a bump.',
     shot: { kind: 'closeup', corner: 'fl' },
     at: 'single-wheel-bump',
@@ -38,7 +40,7 @@ export const STORYBOARD: readonly Beat[] = [
     swap: 0,
   },
   {
-    duration: 10,
+    duration: 8,
     caption: 'Roll, made visible.',
     shot: { kind: 'front-view' },
     at: 'roll-reversal',
@@ -47,7 +49,7 @@ export const STORYBOARD: readonly Beat[] = [
     swap: 0,
   },
   {
-    duration: 10,
+    duration: 8,
     caption: 'Geometry decides the grip.',
     shot: { kind: 'trackside' },
     at: 'steady-state-roll',
@@ -65,7 +67,7 @@ export const STORYBOARD: readonly Beat[] = [
     swap: 1,
   },
   {
-    duration: 6,
+    duration: 5,
     caption: 'Same bump. Different answer.',
     shot: { kind: 'closeup', corner: 'fl' },
     at: 'single-wheel-bump',
@@ -73,8 +75,18 @@ export const STORYBOARD: readonly Beat[] = [
     patch: { ...CLEAN, xray: true },
     swap: 2,
   },
-  { duration: 6, caption: 'Brakes on. The nose dives.', shot: { kind: 'trackside' }, at: 'brake-dive', lead: 0.4, patch: CLEAN, swap: 0 },
-  { duration: 5, title: true, caption: 'Touch to explore.', shot: { kind: 'chase' }, patch: CLEAN, swap: 0 },
+  { duration: 5, caption: 'Brakes on. The nose dives.', shot: { kind: 'trackside' }, at: 'brake-dive', lead: 0.4, patch: CLEAN, swap: 0 },
+  {
+    duration: 8,
+    caption: 'On two wheels, the fork takes it.',
+    shot: { kind: 'closeup', corner: 'f' },
+    at: 'brake-dive',
+    lead: 1.5,
+    patch: { ...CLEAN, xray: true },
+    swap: 0,
+    bike: true,
+  },
+  { duration: 4, title: true, caption: 'Touch to explore.', shot: { kind: 'chase' }, patch: CLEAN, swap: 0 },
 ];
 
 export const loopDuration = (board: readonly Beat[]): number => board.reduce((sum, b) => sum + b.duration, 0);
