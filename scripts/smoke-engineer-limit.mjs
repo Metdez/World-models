@@ -2,7 +2,8 @@
 // Limits are counted in one Limiter Durable Object for every request, valid or not, so this uses schema-invalid
 // bodies (400, no model call, no neurons). With --model, the first request is a real question (1 model call).
 // Prints the colo of every response (cf-ray suffix) to show the burst was spread and still counted once.
-// Exits 1 unless request client+1 (per client id) and request ip+1 (per address) are the first 429s.
+// Exits 1 unless request client+1 (per client id) is the first 429. The per-address check is informational: it
+// only holds when every request leaves from one source address (a rotating egress proxy spreads them).
 const args = process.argv.slice(2);
 const base = (args.find((a) => !a.startsWith('--')) ?? 'https://suspension-lab.zh-a16.workers.dev').replace(/\/$/, '');
 const withModel = args.includes('--model');
@@ -45,6 +46,12 @@ report(
   `per client id: ${LIMITS.client} allowed, request ${LIMITS.client + 1} limited — [${statuses.join(', ')}]`,
 );
 
+// 1b. A concurrent burst from a second client id (lands on several isolates at once): exactly `client` get through.
+const burst = await Promise.all(Array.from({ length: LIMITS.client + 4 }, () => ask(`limit-burst-${run}`, invalid)));
+ipHits += burst.length;
+const passed = burst.filter((r) => r.status !== 429).length;
+report(passed === LIMITS.client, `concurrent burst of ${burst.length} from one client id: ${passed} passed, ${burst.length - passed} limited`);
+
 // 2. Per address: rotate client ids (each under its own limit); the address's request ip+1 is the first 429.
 let firstBusy = null;
 while (ipHits < LIMITS.ip + 1) {
@@ -52,7 +59,8 @@ while (ipHits < LIMITS.ip + 1) {
   ipHits++;
   if (r.status === 429 && firstBusy === null) firstBusy = ipHits;
 }
-report(firstBusy === LIMITS.ip + 1, `per address with rotating client ids: first 429 at request ${firstBusy} (expected ${LIMITS.ip + 1})`);
+// Informational only: an egress proxy that rotates source addresses spreads these over several keys.
+console.log(`${firstBusy === LIMITS.ip + 1 ? 'ok  ' : 'info'} per address with rotating client ids: first 429 at request ${firstBusy ?? 'none'} (${LIMITS.ip + 1} if every request left from one address)`);
 console.log(`     colos: ${[...colos].map(([c, n]) => `${c}×${n}`).join(' ')}`);
 console.log(failed ? `engineer-limit: ${failed} check(s) failed` : 'engineer-limit: all checks passed');
 process.exit(failed ? 1 : 0);
