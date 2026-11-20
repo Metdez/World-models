@@ -56,10 +56,14 @@ describe('bike camera', () => {
       // Level horizon: the camera's right vector is horizontal.
       const right = new Vector3(1, 0, 0).applyQuaternion(pose.quat);
       expect(Math.abs(right.y), corner).toBeLessThan(0.03);
-      // On the left of the bike (three -z in the un-leaned body frame) and 2-3 m from it.
+      // On the OUTSIDE of the lean (never under it: right lean, roll > 0, films from the left = three -z), 2-3 m out.
       const local = pose.pos.clone().sub(body).applyQuaternion(q.clone().invert());
-      expect(local.z, corner).toBeLessThan(-1.5);
+      expect(local.z * Math.sign(t.roll), corner).toBeLessThan(-1);
       expect(pose.pos.distanceTo(body), corner).toBeLessThan(3.2);
+      // Square to the leaned bike's side: the view runs along its lateral axis within 20 degrees.
+      const lateral = new Vector3(0, 0, 1).applyQuaternion(simQuatToThree(t.bodyRotation, new Quaternion()));
+      const look = new Vector3(0, 0, -1).applyQuaternion(pose.quat);
+      expect(Math.abs(look.dot(lateral)), corner).toBeGreaterThan(Math.cos((20 * Math.PI) / 180));
     }
   });
 });

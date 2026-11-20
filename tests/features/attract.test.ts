@@ -63,4 +63,8 @@ describe('attract storyboard', () => {
       }
     }
   });
+
+  it('the bike beat keeps the bike solid (x-ray off): a naked bike needs none', () => {
+    for (const b of STORYBOARD.filter((x) => x.bike)) expect(b.patch.xray).toBe(false);
+  });
 });

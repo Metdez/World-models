@@ -125,6 +125,24 @@ describe('construction from live frames', () => {
     expect(main.count).toBeGreaterThan(20);
   });
 
+  it('a focused corner (car close-up) draws only its own construction, nothing at the opposite wheel', () => {
+    const sim = createSimulation({ catalog, trackId: 'proving-loop', vehicleId: gtCoupe.id, suspensionId: 'double-wishbone' });
+    const t = sim.sample(1, 1);
+    const near = (b: LineBatch, p: { x: number; y: number; z: number }) => {
+      let n = 0;
+      // positions are three.js (x, z, -y) of the sim
+      for (let i = 0; i < b.count * 2; i++) if (Math.hypot(b.positions[3 * i]! - p.x, -b.positions[3 * i + 2]! - p.y, b.positions[3 * i + 1]! - p.z) < 0.25) n++;
+      return n;
+    };
+    for (const [focus, other] of [['fl', 1], ['rr', 2]] as const) {
+      const { main, ghost } = batches();
+      createConstruction(main, ghost).draw(t, sim, 1 / 60, undefined, 0, focus);
+      const cp = t.corners[other]!.contactPatch;
+      expect(near(main, cp) + near(ghost, cp), focus).toBe(0);
+      expect(main.count).toBeGreaterThan(10);
+    }
+  });
+
   it('draws a 2-corner (motorcycle) frame: force lines, load arrows, rest-point markers, no roll centre', () => {
     const frame = motoFrame();
     const sim = motoSim();

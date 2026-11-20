@@ -192,6 +192,51 @@ describe('close-up and director shots', () => {
     }
   });
 
+  it('a bike close-up films the outside of the lean, crossing over once per corner (hysteresis)', () => {
+    const sim = newSim();
+    const moto = createTelemetryFrame('motorcycle', [
+      { id: 'f', axle: 'front', side: 0 },
+      { id: 'r', axle: 'rear', side: 0 },
+    ]);
+    sim.seek(6.5);
+    const car = sim.sample(1, 1);
+    Object.assign(moto.bodyPosition, car.bodyPosition);
+    Object.assign(moto.bodyRotation, car.bodyRotation);
+    const bike = Object.create(sim, {
+      vehicle: { value: { ...gtCoupe, class: 'motorcycle', front: { tyre: gtCoupe.front.tyre }, rear: { tyre: gtCoupe.rear.tyre } } },
+    }) as Simulation;
+    const { rig, frame } = start(bike, 5, moto);
+    rig.setView('closeup', 'f', true);
+    const sideAt = (roll: number) => {
+      frame.roll = roll;
+      run(rig, frame, 5, 1.5, 30);
+      return Math.sign(rig.frame.pointToLocal(rig.out.pos, new Vector3()).z);
+    };
+    // left = three -z; a left lean (roll < 0) must be filmed from the right, and small leans never flip the side
+    expect(sideAt(0.3)).toBe(-1);
+    expect(sideAt(0.1)).toBe(-1);
+    expect(sideAt(-0.1)).toBe(-1);
+    expect(sideAt(-0.3)).toBe(1);
+    expect(sideAt(0.1)).toBe(1);
+    expect(sideAt(0.3)).toBe(-1);
+  });
+
+  it('the hero orbit opens on a front three-quarter and turns toward the profile', () => {
+    const sim = newSim();
+    const { rig, frame } = start(sim, 20);
+    rig.playShot({ kind: 'orbit', durationS: 9 }, false);
+    // A cut: no glide from behind the car.
+    expect(rig.transitioning).toBe(false);
+    run(rig, frame, 20, 0.1, 30);
+    const open = rig.frame.pointToLocal(rig.out.pos, new Vector3());
+    expect(open.x).toBeGreaterThan(0); // ahead of the car
+    expect(open.z).toBeLessThan(0); // its left flank
+    expect(Math.abs(Math.atan2(open.z, open.x))).toBeLessThan(0.8);
+    run(rig, frame, 20.1, 7.5, 30);
+    const end = rig.frame.pointToLocal(rig.out.pos, new Vector3());
+    expect(Math.abs(Math.atan2(end.z, end.x))).toBeGreaterThan(1.2); // near the profile
+  });
+
   it('shots override the view, expire back to it, and trackside is a fixed tripod cut', () => {
     const sim = newSim();
     const { rig, frame } = start(sim, 20);
