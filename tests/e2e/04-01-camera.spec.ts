@@ -145,7 +145,7 @@ test('views: chase behind the car, orbit by drag, close-up into the wheel well w
 
   const own = await ownErrors(page);
   if (own.others.length) console.info('[04-01] errors from other features (not asserted):', own.others);
-  expect(own.enabled).toEqual(['attract:true', 'camera:true']);
+  expect(own.enabled.sort()).toEqual(['attract:true', 'camera:true']);
   expect(own.errors).toEqual([]);
   expect(consoleErrors.filter((e) => /camera|attract/i.test(e))).toEqual([]);
 });
