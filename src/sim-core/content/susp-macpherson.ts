@@ -9,7 +9,7 @@
  * strut body clearing the tyre's inner sidewall, lower ball joint deep in a 20-inch wheel to keep the ground offset
  * small, which leaves the steering axis (ball joint to top mount) steeply inclined. Lower-arm pivot axes are
  * inclined in side view like the other types. Tie-rod / toe-link inner points were placed by a 2-D search so toe is
- * unchanged at +-30 mm travel. All metrics are computed by the solver.
+ * unchanged at +-60 mm travel. All metrics are computed by the solver.
  */
 import type { AxleLinkage, CarSuspensionDefinition } from '../../contracts/suspension';
 import { GT_CORNER } from './gt-geometry';
@@ -64,7 +64,7 @@ export const macpherson: CarSuspensionDefinition = {
         lcaFront: [0.2, 0.38, 0.182],
         lcaRear: [-0.22, 0.4, 0.2038],
         tieRodOuter: [-0.14, 0.76, 0.24],
-        tieRodInner: [-0.16, 0.3368, 0.2726],
+        tieRodInner: [-0.16, 0.3367, 0.2729],
         arbPickup: [0.04, 0.64, 0.17],
       },
       true,
@@ -78,7 +78,7 @@ export const macpherson: CarSuspensionDefinition = {
         lcaFront: [0.2, 0.38, 0.198],
         lcaRear: [-0.22, 0.4, 0.1812],
         tieRodOuter: [-0.14, 0.76, 0.24],
-        tieRodInner: [-0.16, 0.3155, 0.2692],
+        tieRodInner: [-0.16, 0.3152, 0.2696],
         arbPickup: [0.04, 0.64, 0.18],
       },
       false,

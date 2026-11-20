@@ -7,7 +7,7 @@
  * upper ball joint inside the top of the rim barrel, upper arm about half the lower arm length, coil-over from the
  * lower arm to the chassis between the upper arm legs. Lower-arm pivot axes are inclined in side view (front axle
  * front pivot down, rear axle front pivot up). Tie-rod / toe-link inner points were placed by a 2-D search so toe
- * is unchanged at +-30 mm travel (the usual bump-steer setup). All metrics are computed by the solver.
+ * is unchanged at +-60 mm travel (the usual bump-steer setup). All metrics are computed by the solver.
  */
 import type { AxleLinkage, CarSuspensionDefinition } from '../../contracts/suspension';
 import { GT_CORNER } from './gt-geometry';
@@ -62,7 +62,7 @@ export const doubleWishbone: CarSuspensionDefinition = {
         ucaFront: [0.08, 0.52, 0.49],
         ucaRear: [-0.17, 0.53, 0.495],
         tieRodOuter: [-0.13, 0.78, 0.25],
-        tieRodInner: [-0.15, 0.4332, 0.2124],
+        tieRodInner: [-0.15, 0.4338, 0.2121],
         springSeat: [-0.03, 0.7, 0.165],
         springTop: [-0.05, 0.62, 0.72],
         arbPickup: [0.04, 0.65, 0.155],
@@ -79,7 +79,7 @@ export const doubleWishbone: CarSuspensionDefinition = {
         ucaFront: [0.13, 0.53, 0.5],
         ucaRear: [-0.13, 0.53, 0.5],
         tieRodOuter: [-0.13, 0.78, 0.26],
-        tieRodInner: [-0.14, 0.4333, 0.2257],
+        tieRodInner: [-0.14, 0.4339, 0.2255],
         springSeat: [0.07, 0.7, 0.17],
         springTop: [0.08, 0.62, 0.7],
         arbPickup: [0.06, 0.66, 0.16],

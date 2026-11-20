@@ -8,7 +8,7 @@
  *   lower tension link from behind; the virtual lower pivot sits deep in the wheel, so the steering axis is virtual.
  * - rear: two upper links, a forward lower link, a transverse lower spring link behind the drive shaft, a toe link.
  * Lower-link chassis points are inclined in side view like the other types. Tie-rod / toe-link inner points were
- * placed by a 2-D search so toe is unchanged at +-30 mm travel. All metrics are computed by the solver.
+ * placed by a 2-D search so toe is unchanged at +-60 mm travel. All metrics are computed by the solver.
  */
 import type { AxleLinkage, CarSuspensionDefinition, ComponentRole } from '../../contracts/suspension';
 import { GT_CORNER } from './gt-geometry';
@@ -71,7 +71,7 @@ export const multilink: CarSuspensionDefinition = {
         lowerRearInner: [-0.4, 0.62, 0.156],
         lowerRearOuter: [-0.04, 0.79, 0.15],
         tieRodOuter: [-0.14, 0.785, 0.24],
-        tieRodInner: [-0.15, 0.4478, 0.2097],
+        tieRodInner: [-0.15, 0.4488, 0.2099],
         springTop: [-0.035, 0.62, 0.75],
         arbPickup: [0.028, 0.628, 0.138],
       },
@@ -91,7 +91,7 @@ export const multilink: CarSuspensionDefinition = {
         lowerRearInner: [-0.12, 0.37, 0.1302],
         lowerRearOuter: [-0.09, 0.795, 0.145],
         tieRodOuter: [-0.16, 0.775, 0.27],
-        tieRodInner: [-0.17, 0.4516, 0.2328],
+        tieRodInner: [-0.17, 0.4524, 0.2321],
         springTop: [-0.1, 0.62, 0.72],
         arbPickup: [-0.102, 0.625, 0.139],
       },
