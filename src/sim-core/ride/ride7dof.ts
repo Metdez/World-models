@@ -332,20 +332,35 @@ export function createRideModel(params: RideParams): RideModel {
     outputs(input);
   }
 
+  const residual = (): number => {
+    let norm = 0;
+    for (let k = 0; k < N; k++) norm = Math.max(norm, Math.abs(Q[k]!));
+    return norm;
+  };
+
+  /**
+   * Static equilibrium: Newton on Q(q) = 0 with a forward-difference stiffness and a backtracking line search.
+   * The force balance is piecewise linear (tyre lift-off, stops), so a full Newton step from a guess with a wheel
+   * off the ground can overshoot without bound; the start guess puts every hub on its road input (all tyres at
+   * static deflection) and the body on the plane through them. Throws if it does not converge (never returns a
+   * diverged state).
+   */
   function reset(input: RideInput): void {
-    q.fill(0);
     v.fill(0);
+    const road = input.road;
+    for (let i = 0; i < 4; i++) q[3 + i] = road[i]!;
+    const rF = (road[0]! + road[1]!) / 2;
+    const rR = (road[2]! + road[3]!) / 2;
+    q[2] = -(rF - rR) / wheelbase;
+    q[1] = ((road[0]! - road[1]!) / track[0] + (road[2]! - road[3]!) / track[1]) / 2;
+    q[0] = rR + q[2] * xR;
     linkForces(input);
-    // Newton on Q(q) = 0 with a forward-difference stiffness; linear unless stops/lift-off engage.
     const eps = 1e-7;
-    for (let iter = 0; iter < 20; iter++) {
-      forces(input, 0, false);
-      let norm = 0;
-      for (let k = 0; k < N; k++) {
-        Q0[k] = Q[k]!;
-        norm = Math.max(norm, Math.abs(Q[k]!));
-      }
-      if (norm < 1e-9 * ms * G) break;
+    const tol = 1e-9 * ms * G;
+    forces(input, 0, false);
+    let norm = residual();
+    for (let iter = 0; iter < 60 && !(norm < tol); iter++) {
+      Q0.set(Q);
       qSave.set(q);
       for (let col = 0; col < N; col++) {
         q[col]! += eps;
@@ -355,8 +370,19 @@ export function createRideModel(params: RideParams): RideModel {
       }
       b.set(Q0);
       if (!solveInPlace(A, b, N)) throw new Error('ride: singular static stiffness');
-      for (let k = 0; k < N; k++) q[k]! += b[k]!;
+      let lambda = 1;
+      for (;;) {
+        for (let k = 0; k < N; k++) q[k] = qSave[k]! + lambda * b[k]!;
+        forces(input, 0, false);
+        const next = residual();
+        if (next < norm || lambda < 1e-4) {
+          norm = next;
+          break;
+        }
+        lambda *= 0.5;
+      }
     }
+    if (!(norm < tol)) throw new Error('ride: static equilibrium did not converge');
     outputs(input);
   }
 
