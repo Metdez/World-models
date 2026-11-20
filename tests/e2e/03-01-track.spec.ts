@@ -31,7 +31,7 @@ test('track textures load, the road renders around the lap with zero console err
     expect(await canvasVariance(page)).toBeGreaterThan(20);
     await page.screenshot({ path: join(SHOTS, `03-01-app-t${t}.png`) });
   }
-  for (const set of ['asphalt_track', 'cobblestone_floor_08', 'concrete_floor_01', 'grass_ground']) expect(textures.some((u) => u.includes(set))).toBe(true);
+  for (const set of ['asphalt_track', 'cobblestone_floor_08', 'grass_ground']) expect(textures.some((u) => u.includes(set))).toBe(true);
   await expectHealthyBoot(page, errors);
   expect(warnings).toEqual([]);
 });

@@ -8,7 +8,8 @@
 import { Box3, BufferAttribute, BufferGeometry, Sphere, Vector3 } from 'three';
 import type { BuiltTrack, RoadFeature, TrackSample } from '../../contracts/track';
 
-export const SURFACES = ['asphalt', 'cobbles', 'kerb', 'apron', 'grass'] as const;
+/** Materials: `road` = asphalt, kerbs and apron in one shader (fewer draw calls); cobbles replace the asphalt in the pavé. */
+export const SURFACES = ['road', 'cobbles', 'grass'] as const;
 export type Surface = (typeof SURFACES)[number];
 
 /** Paved shoulder between the kerb and the grass, m. */
@@ -106,7 +107,7 @@ export function rowStations(length: number, resolution: number, zones: readonly 
   return uniqueSorted(rows);
 }
 
-/** The ribbon is drawn in this many pieces along s so off-screen parts are frustum-culled (4 groups each, 5 with the pavé). */
+/** The ribbon is drawn in this many pieces along s so off-screen parts are frustum-culled (2 groups each, 3 with the pavé). */
 export const CHUNKS = 4;
 
 export interface Ribbon {
@@ -128,7 +129,8 @@ export function buildRibbon(track: BuiltTrack, resolution: number, fine: boolean
   const edges = [hw, hw + kw, hw + kw + APRON, outer];
   const bands = [...edges.map((e) => -e).reverse(), ...edges];
   // Band surfaces left to right across `bands` (index b covers bands[b]..bands[b + 1]).
-  const bandSurface: Surface[] = ['grass', 'apron', 'kerb', 'asphalt', 'kerb', 'apron', 'grass'];
+  const bandSurface: Surface[] = ['grass', 'road', 'road', 'road', 'road', 'road', 'grass'];
+  const ASPHALT_BAND = 3;
   const baseCols = uniqueSorted([
     ...bands,
     ...range(-Math.floor(hw / RAIL) * RAIL, Math.floor(hw / RAIL) * RAIL, RAIL),
@@ -184,7 +186,7 @@ export function buildRibbon(track: BuiltTrack, resolution: number, fine: boolean
     }
   }
 
-  const indices = Array.from({ length: CHUNKS }, (): Record<Surface, number[]> => ({ asphalt: [], cobbles: [], kerb: [], apron: [], grass: [] }));
+  const indices = Array.from({ length: CHUNKS }, (): Record<Surface, number[]> => ({ road: [], cobbles: [], grass: [] }));
   for (let r = 0; r + 1 < stations.length; r++) {
     const mid = (stations[r]! + stations[r + 1]!) / 2;
     const chunk = indices[Math.min(CHUNKS - 1, Math.floor((mid / L) * CHUNKS))]!;
@@ -195,8 +197,7 @@ export function buildRibbon(track: BuiltTrack, resolution: number, fine: boolean
     let ib = 0;
     for (let k = 0; k + 1 < bands.length; k++) {
       const hi = bands[k + 1]!;
-      let surface = bandSurface[k]!;
-      if (surface === 'asphalt' && paved) surface = 'cobbles';
+      const surface = k === ASPHALT_BAND && paved ? 'cobbles' : bandSurface[k]!;
       const out = chunk[surface];
       // Merge walk from the band's left edge column to its right edge column in both rows.
       let ea = ia;
