@@ -106,8 +106,8 @@ export function rowStations(length: number, resolution: number, zones: readonly 
   return uniqueSorted(rows);
 }
 
-/** The ribbon is drawn in this many pieces along s so off-screen parts are frustum-culled (≤ 5 groups each). */
-export const CHUNKS = 6;
+/** The ribbon is drawn in this many pieces along s so off-screen parts are frustum-culled (4 groups each, 5 with the pavé). */
+export const CHUNKS = 4;
 
 export interface Ribbon {
   /** The whole ribbon (groups per surface); used for normals and checks, not drawn. */

@@ -109,7 +109,11 @@ export function createVehicleView(registries: Registries, visualCtx: VisualConte
       visual?.setXray(1);
       const restore = forceVisible(roots);
       try {
-        await visualCtx.render.compile();
+        const { renderer, scene, camera } = visualCtx.render;
+        // compileAsync warns (once) where KHR_parallel_shader_compile is missing (e.g. Firefox, SwiftShader);
+        // there the synchronous compile does the same work behind the loading overlay.
+        if (renderer.extensions.has('KHR_parallel_shader_compile')) await visualCtx.render.compile();
+        else renderer.compile(scene, camera);
       } finally {
         restore();
         visual?.setXray(xray);
