@@ -14,26 +14,7 @@ const load = async (name: string): Promise<unknown> => ((await import(`../fixtur
 const raw = async (path: string): Promise<string> => ((await import(`${path}?raw`)) as { default: string }).default;
 
 /** Carousel apex, MacPherson (values from the 02-04 difference report, rounded like the client does). */
-export const TELEMETRY: EngineerTelemetry = {
-  vehicle_class: 'car',
-  vehicle: 'gt-coupe',
-  suspension: 'macpherson',
-  section: 'carousel',
-  section_name: 'Carousel',
-  event: 'mid-corner, right-hander, outside (left) wheels loaded',
-  speed_kmh: 71,
-  lat_g: -0.85,
-  long_g: 0,
-  roll_deg: -1.26,
-  pitch_deg: 0.05,
-  corners: {
-    fl: { camber_deg: -0.76, toe_deg: 0, travel_mm: 21, load_n: 6100, grip_use: 0.69 },
-    fr: { camber_deg: -2.15, toe_deg: 0, travel_mm: -18, load_n: 2600, grip_use: 0.59 },
-    rl: { camber_deg: -0.16, toe_deg: 0.1, travel_mm: 19, load_n: 5800, grip_use: 0.65 },
-    rr: { camber_deg: -2.1, toe_deg: 0.1, travel_mm: -17, load_n: 2300, grip_use: 0.55 },
-  },
-  derived: { roll_centre_front_mm: 106, roll_centre_rear_mm: 86, camber_gain_front_deg_per_cm: -0.13, roll_camber_front: 0.82 },
-};
+const TELEMETRY = (await load('06-02-telemetry-carousel')) as EngineerTelemetry;
 const request = (question: string, telemetry: EngineerTelemetry = TELEMETRY): EngineerRequest => ({ question, telemetry, history: [] });
 const IDS = { suspensions: ['macpherson', 'double-wishbone', 'multilink'], sections: ['carousel', 'hairpin'], corners: ['fl', 'fr', 'rl', 'rr'] as const };
 
@@ -81,7 +62,7 @@ describe('model normaliser (recorded Workers AI responses)', () => {
     expect(cleanText('The <b>camber</b> is -1.26 degrees.')).toBe('The camber is -1.26 degrees.');
   });
 
-  it('falls back to the second model once, and throws when both fail', async () => {
+  it('falls back to the second model once on an error, and throws when both fail or the primary times out', async () => {
     const ai = fakeAi((m: string) => (m.includes('gemma') ? new Error('quota') : openAi('ok')));
     expect((await runEngineerModel(ai, [], [])).reply.text).toBe('ok');
     expect(ai.calls.map((c) => c.model)).toEqual(['@cf/google/gemma-4-26b-a4b-it', '@cf/zai-org/glm-4.7-flash']);
@@ -89,6 +70,7 @@ describe('model normaliser (recorded Workers AI responses)', () => {
     await expect(runEngineerModel(fakeAi(new Error('down')), [], [])).rejects.toThrow('down');
     const slow = fakeAi(() => new Promise(() => {}));
     await expect(runEngineerModel(slow, [], [], { primary: 10, fallback: 10 })).rejects.toThrow(/timeout/);
+    expect(slow.calls).toHaveLength(1); // a timed-out primary is not retried on the slower fallback model
   });
 });
 
@@ -151,7 +133,9 @@ describe('facts, prompt and rule-based answers', () => {
     expect(msgs[0]!.content).toContain('ACTIVE SUSPENSION: MacPherson strut');
     expect(msgs[0]!.content).not.toContain('ACTIVE SUSPENSION: double wishbone');
     expect(msgs[0]!.content).toContain('SECTION: Carousel.');
-    expect(msgs[0]!.content).toContain('"roll_deg":-1.26');
+    expect(msgs[0]!.content).toContain('body roll: 1.26 degrees, leaning left');
+    expect(msgs[0]!.content).toContain('front-left wheel: camber to road -0.76 degrees');
+    expect(msgs[0]!.content).toContain('front roll-centre height, mm: 106');
     expect(msgs[2]!.content).toBe('why?');
   });
 

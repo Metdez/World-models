@@ -1,0 +1,49 @@
+{
+  "vehicle_class": "car",
+  "vehicle": "gt-coupe",
+  "suspension": "macpherson",
+  "section": "carousel",
+  "section_name": "Carousel",
+  "event": "mid-corner, right-hander, outside (left) wheels loaded",
+  "speed_kmh": 71,
+  "lat_g": -0.85,
+  "long_g": 0,
+  "roll_deg": -1.26,
+  "pitch_deg": 0.05,
+  "corners": {
+    "fl": {
+      "camber_deg": -0.76,
+      "toe_deg": 0,
+      "travel_mm": 21,
+      "load_n": 6100,
+      "grip_use": 0.69
+    },
+    "fr": {
+      "camber_deg": -2.15,
+      "toe_deg": 0,
+      "travel_mm": -18,
+      "load_n": 2600,
+      "grip_use": 0.59
+    },
+    "rl": {
+      "camber_deg": -0.16,
+      "toe_deg": 0.1,
+      "travel_mm": 19,
+      "load_n": 5800,
+      "grip_use": 0.65
+    },
+    "rr": {
+      "camber_deg": -2.1,
+      "toe_deg": 0.1,
+      "travel_mm": -17,
+      "load_n": 2300,
+      "grip_use": 0.55
+    }
+  },
+  "derived": {
+    "roll_centre_front_mm": 106,
+    "roll_centre_rear_mm": 86,
+    "camber_gain_front_deg_per_cm": -0.13,
+    "roll_camber_front": 0.82
+  }
+}

@@ -49,23 +49,31 @@ export function normaliseReply(raw: unknown): ModelReply {
   return { text, toolCalls: calls.map(toolCall).filter((c): c is RawToolCall => c !== null) };
 }
 
-/** Plain caption text: no markdown, single spaces, at most 3 sentences and 420 characters. */
+const TOOL_NAME = /\b(switch_suspension|set_view|set_slow_motion|highlight_component|jump_to_section)\b/;
+
+/** Plain caption text: no tool-call lines, no markdown, single spaces, at most 3 sentences and 420 characters. */
 export function cleanText(text: string): string {
   const plain = text
+    .split('\n')
+    .filter((line) => !TOOL_NAME.test(line)) // some replies spell tool calls out as text
+    .join(' ')
     .replace(/<[^>]*>/g, ' ')
-    .replace(/[*_#`>|]/g, '')
+    .replace(/[*#`>|]/g, '')
+    .replace(/_/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   const sentences = plain.split(/(?<=[.!?])\s+/).slice(0, 3).join(' ');
   return sentences.length <= 420 ? sentences : `${sentences.slice(0, 417).replace(/\s+\S*$/, '')}…`;
 }
 
-export const MODEL_TIMEOUT_MS = { primary: 8000, fallback: 6000 } as const;
+export const MODEL_TIMEOUT_MS = { primary: 9000, fallback: 6000 } as const;
+
+class TimeoutError extends Error {}
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`timeout after ${ms} ms`)), ms);
+    timer = setTimeout(() => reject(new TimeoutError(`timeout after ${ms} ms`)), ms);
   });
   return Promise.race([p, timeout]).finally(() => {
     if (timer !== undefined) clearTimeout(timer);
@@ -77,7 +85,11 @@ export interface ModelRun {
   readonly model: string;
 }
 
-/** Primary model, then once the fallback model on error/timeout. Throws when both fail (caller answers by rule). */
+/**
+ * Primary model; on an ERROR (not a timeout) once the fallback model. Throws otherwise (caller answers by rule).
+ * Measured: the fallback model took 11-17 s and its one evaluated answer was mechanically wrong, so a timed-out
+ * primary goes straight to the rule-based answer instead of doubling the wait.
+ */
 export async function runEngineerModel(ai: Ai, messages: readonly ChatMessage[], tools: readonly ToolSchema[], timeouts: { readonly primary: number; readonly fallback: number } = MODEL_TIMEOUT_MS): Promise<ModelRun> {
   // The generated Ai typings key inputs by model name; this call uses the shared chat-completion input shape.
   const run = ai.run.bind(ai) as unknown as (model: string, inputs: Record<string, unknown>) => Promise<unknown>;
@@ -91,6 +103,7 @@ export async function runEngineerModel(ai: Ai, messages: readonly ChatMessage[],
   try {
     return { reply: normaliseReply(await withTimeout(run(ENGINEER_MODEL, inputs), timeouts.primary)), model: ENGINEER_MODEL };
   } catch (e) {
+    if (e instanceof TimeoutError) throw e;
     console.warn('engineer: primary model failed', e instanceof Error ? e.message : String(e));
     return { reply: normaliseReply(await withTimeout(run(ENGINEER_FALLBACK_MODEL, inputs), timeouts.fallback)), model: ENGINEER_FALLBACK_MODEL };
   }
