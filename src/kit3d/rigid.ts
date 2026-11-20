@@ -4,6 +4,7 @@
  * rotation for a single rod. Objects driven here must have `matrixAutoUpdate = false`.
  */
 import { ExtrudeGeometry, Matrix4, Quaternion, Shape, Vector2, Vector3, type BufferGeometry, type Object3D } from 'three';
+import { paint, type Finish } from './materials';
 import { bakedDisc, bakedSphere, bakedTube, mergeParts } from './tube';
 
 const _x = new Vector3();
@@ -88,7 +89,7 @@ export interface AArmSpec {
  * Tubular A-arm (wishbone) in rest coordinates: two legs from the chassis bushings (front, rear) to the ball
  * joint, a gusset web near the joint, bushed eyes along the pivot axis, a ball-joint housing whose stud and boot
  * point toward `toward` (the upright), and a boss with braces to each leg for every extra pickup (spring seat,
- * anti-roll-bar link). Returns geometry per material.
+ * anti-roll-bar link). Returns one painted geometry (arm in `finish`, rubber, steel).
  */
 export function aArmGeometry(
   bj: Vector3,
@@ -97,7 +98,8 @@ export function aArmGeometry(
   toward: Vector3,
   extras: readonly Vector3[],
   spec: AArmSpec,
-): { body: BufferGeometry; rubber: BufferGeometry; steel: BufferGeometry } {
+  finish: Finish,
+): BufferGeometry {
   const axis = new Vector3().subVectors(rear, front).normalize();
   const normal = new Vector3().crossVectors(axis, new Vector3().subVectors(bj, front)).normalize();
   const stud = normal.clone().multiplyScalar(Math.sign(normal.dot(new Vector3().subVectors(toward, bj))) || 1);
@@ -125,7 +127,7 @@ export function aArmGeometry(
     body.push(bakedDisc(p, axis, ri * 1.9, ri * 3.2));
     for (const leg of [front, rear]) body.push(bakedTube(p, closestOnSegment(p, leg, bj), ri * 0.8));
   }
-  return { body: mergeParts(body), rubber: mergeParts(rubber), steel: mergeParts(steel) };
+  return mergeParts([...body.map((g) => paint(g, finish)), ...rubber.map((g) => paint(g, 'rubber')), ...steel.map((g) => paint(g, 'steel'))]);
 }
 
 /** Closest point to p on segment a-b (new vector; build time). */

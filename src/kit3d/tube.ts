@@ -65,8 +65,8 @@ export function bakedSphere(c: Vector3, radius: number, widthSegments = 16, heig
 }
 
 /**
- * Merges part geometries into one (position + normal only, non-indexed) so one rigid body is one draw call per
- * material. Inputs are disposed.
+ * Merges part geometries into one (position, normal and uv, non-indexed) so one rigid body is one draw call.
+ * Paint (uv) either all inputs or none. Inputs are disposed.
  */
 export function mergeParts(parts: readonly BufferGeometry[]): BufferGeometry {
   const prepared = parts.map((g) => {
@@ -74,6 +74,8 @@ export function mergeParts(parts: readonly BufferGeometry[]): BufferGeometry {
     const out = new BufferGeometry();
     out.setAttribute('position', flat.getAttribute('position') as BufferAttribute);
     out.setAttribute('normal', flat.getAttribute('normal') as BufferAttribute);
+    const uv = flat.getAttribute('uv') as BufferAttribute | undefined;
+    if (uv) out.setAttribute('uv', uv);
     if (flat !== g) flat.dispose();
     g.dispose();
     return out;

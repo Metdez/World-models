@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { brakeDiscGeometry, caliperGeometry, hubGeometry } from '../../src/kit3d/brake';
 import { createDamper } from '../../src/kit3d/damper';
 import { lobedHull, padHull } from '../../src/kit3d/hull';
-import { createPartMaterials } from '../../src/kit3d/materials';
+import { createPalette, createPartMaterials, paint } from '../../src/kit3d/materials';
 import { aArmGeometry, frameFrom3, restInverse, setRigid, setSwing } from '../../src/kit3d/rigid';
 import { clampSpringLength, makeSpringMaterial, solidLength, springGeometry, springVertex, updateSpring, type CoilSpec } from '../../src/kit3d/spring';
 import { bakedTube, bellowsGeometry, mergeParts, unitCylinder, updateTube } from '../../src/kit3d/tube';
@@ -91,7 +91,7 @@ describe('tubes', () => {
     expect(outwardFraction(t)).toBeGreaterThan(0.99);
     const merged = mergeParts([t, bakedTube(new Vector3(1, 0, 0), new Vector3(1, 1, 0), 0.01)]);
     expect(merged.index).toBeNull();
-    expect(Object.keys(merged.attributes).sort()).toEqual(['normal', 'position']);
+    expect(Object.keys(merged.attributes).sort()).toEqual(['normal', 'position', 'uv']);
     const bel = bellowsGeometry(0.02, 0.011, 6, 0.005);
     expect(finite(bel)).toBe(true);
     expect(outwardFraction(bel)).toBeGreaterThan(0.95);
@@ -151,7 +151,7 @@ describe('coil spring (TS mirror of the vertex shader)', () => {
     expect(outwardFraction(g)).toBeGreaterThan(0.99);
     expect(finite(g)).toBe(true);
     expect(g.boundingSphere!.radius).toBeGreaterThan(COIL.maxLength / 2);
-    const mat = createPartMaterials().roles.spring;
+    const mat = createPartMaterials(createPalette()).roles.spring;
     const { uniforms, depth } = makeSpringMaterial(mat, COIL);
     expect(depth.customProgramCacheKey()).not.toBe(mat.customProgramCacheKey());
     const m = new Mesh(g, mat);
@@ -163,23 +163,33 @@ describe('coil spring (TS mirror of the vertex shader)', () => {
 });
 
 describe('damper', () => {
-  it('body hangs from the lower mount, rod from the upper mount, with fixed lengths', () => {
-    const d = createDamper(unitCylinder(), { body: createPartMaterials().roles.damper, rod: createPartMaterials().chrome, rubber: createPartMaterials().rubber }, {
+  it('body half rides on the lower mount, rod half on the upper mount: fixed lengths, sliding overlap', () => {
+    const d = createDamper(createPartMaterials(createPalette()).roles.damper, 'damper', {
       bodyLength: 0.25,
       bodyBelow: 0,
       bodyRadius: 0.024,
       rodLength: 0.3,
       rodRadius: 0.009,
       eyeRadius: 0.017,
+      seats: { low: 0.06, high: 0.2, radius: 0.05 },
     });
-    const body = d.group.children[0]!;
-    const rod = d.group.children[2]!;
+    const [body, rod] = d.group.children as [Mesh, Mesh];
+    for (const g of [body.geometry, rod.geometry]) {
+      expect(finite(g)).toBe(true);
+      expect(g.getAttribute('uv')).toBeDefined();
+    }
+    body.geometry.computeBoundingBox();
+    rod.geometry.computeBoundingBox();
+    expect(body.geometry.boundingBox!.max.y).toBeCloseTo(0.25 + 0.008, 3);
+    expect(rod.geometry.boundingBox!.min.y).toBeCloseTo(-0.3, 6);
     for (const L of [0.4, 0.5]) {
-      d.update(new Vector3(0, 0, 0), new Vector3(0, L, 0));
-      expect(body.scale.y).toBeCloseTo(0.25, 12);
-      expect(body.position.y).toBeCloseTo(0.125, 12);
-      expect(rod.scale.y).toBeCloseTo(0.3, 12);
-      expect(rod.position.y).toBeCloseTo(L - 0.15, 12);
+      const lower = new Vector3(0.1, 0, 0);
+      const upper = new Vector3(0.1, L, 0);
+      expect(d.update(lower, upper)).toBeCloseTo(L, 12);
+      body.updateMatrix();
+      rod.updateMatrix();
+      expect(new Vector3(0, 0.25, 0).applyMatrix4(body.matrix).distanceTo(new Vector3(0.1, 0.25, 0))).toBeLessThan(1e-12);
+      expect(new Vector3(0, -0.3, 0).applyMatrix4(rod.matrix).distanceTo(new Vector3(0.1, L - 0.3, 0))).toBeLessThan(1e-12);
     }
   });
 });
@@ -188,16 +198,19 @@ describe('build-time geometries', () => {
   it('hull, A-arm, disc, caliper and hub are finite and wound outward', () => {
     const hull = lobedHull([{ p: new Vector3(0, 0, 0), r: 0.05 }], [[{ p: new Vector3(0.2, 0.1, 0), r: 0.02 }], [{ p: new Vector3(-0.1, -0.2, 0.05), r: 0.03 }]]);
     const single = padHull([{ p: new Vector3(), r: 0.03 }, { p: new Vector3(0.1, 0, 0), r: 0.02 }]);
-    const arm = aArmGeometry(new Vector3(0, 0.15, 0.8), new Vector3(0.2, 0.14, 0.38), new Vector3(-0.2, 0.16, 0.4), new Vector3(0, 0.38, 0.85), [new Vector3(0, 0.15, 0.65)], {
-      legRadius: [0.013, 0.017],
-      bushing: { radius: 0.026, length: 0.05 },
-      jointRadius: 0.025,
-      gusset: 0.3,
-    });
+    const arm = aArmGeometry(
+      new Vector3(0, 0.15, 0.8),
+      new Vector3(0.2, 0.14, 0.38),
+      new Vector3(-0.2, 0.16, 0.4),
+      new Vector3(0, 0.38, 0.85),
+      [new Vector3(0, 0.15, 0.65)],
+      { legRadius: [0.013, 0.017], bushing: { radius: 0.026, length: 0.05 }, jointRadius: 0.025, gusset: 0.3 },
+      'lower-arm',
+    );
     const disc = brakeDiscGeometry({ outerRadius: 0.17, innerRadius: 0.1, thickness: 0.028, hatDepth: 0.04, holes: 18, holeRadius: 0.0042 });
     const caliper = caliperGeometry({ innerRadius: 0.122, outerRadius: 0.196, halfSpan: 0.42, width: 0.074, discThickness: 0.028, discRadius: 0.17 });
     const hub = hubGeometry(0.04, 0.074, 0.057);
-    for (const [name, g] of Object.entries({ hull, single, armBody: arm.body, armRubber: arm.rubber, armSteel: arm.steel, disc, caliper, hub })) {
+    for (const [name, g] of Object.entries({ hull, single, arm, disc, caliper, hub })) {
       expect(finite(g), name).toBe(true);
       expect(outwardFraction(g), name).toBeGreaterThan(0.97);
     }
@@ -208,15 +221,23 @@ describe('build-time geometries', () => {
     expect(caliper.boundingBox!.min.x).toBeGreaterThan(0.09);
   });
 
-  it('materials follow the contract palette and highlight by emissive only', () => {
-    const m = createPartMaterials();
-    for (const [role, hex] of Object.entries(COMPONENT_COLORS)) expect(m.roles[role as keyof typeof COMPONENT_COLORS].color.getHex()).toBe(hex);
-    const before = m.roles['upper-arm'].color.getHex();
+  it('palette: every finish is a texel of the colour map in the contract colour; highlight is emissive only', () => {
+    const palette = createPalette();
+    const data = palette.map.image.data as Uint8Array;
+    const g = paint(bakedTube(new Vector3(), new Vector3(0, 1, 0), 0.01), 'tie-rod');
+    const u = g.getAttribute('uv').getX(0);
+    const texel = Math.floor(u * palette.map.image.width);
+    const hex = (data[texel * 4]! << 16) | (data[texel * 4 + 1]! << 8) | data[texel * 4 + 2]!;
+    expect(hex).toBe(COMPONENT_COLORS['tie-rod']);
+    const m = createPartMaterials(palette);
+    expect(m.roles['upper-arm'].map).toBe(palette.map);
+    expect(m.roles.spring.color.getHex()).toBe(COMPONENT_COLORS.spring);
     m.setHighlight('upper-arm', true);
     expect(m.roles['upper-arm'].emissiveIntensity).toBeGreaterThan(0);
-    expect(m.roles['upper-arm'].color.getHex()).toBe(before);
+    expect(m.roles['lower-arm'].emissiveIntensity).toBe(0);
     m.setHighlight('upper-arm', false);
     expect(m.roles['upper-arm'].emissiveIntensity).toBe(0);
     m.dispose();
+    palette.dispose();
   });
 });

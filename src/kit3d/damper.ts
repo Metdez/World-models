@@ -1,11 +1,12 @@
 /**
- * Telescoping damper (research 22 B5): a body of fixed length hangs from the lower mount, a chrome rod of fixed
- * length hangs from the upper mount; the visible rod grows and shrinks as the mounts move. Mount eyes, a jounce
- * bumper on the rod and the body's end cap are separate meshes placed along the same axis. No allocation in
- * `update`.
+ * Telescoping damper / coil-over (research 22 B5) as TWO rigid halves on one axis: the body half (body, seal cap,
+ * lower end fitting, lower spring seat) rides on the lower mount, the rod half (chrome rod, jounce bumper, upper
+ * end fitting, upper spring seat) on the upper mount. Lengths are fixed, so the visible rod grows and shrinks as
+ * the mounts move. Each half is one painted mesh (one draw call). No allocation in `update`.
  */
 import { Group, Mesh, Vector3, type BufferGeometry, type Material } from 'three';
-import { placeAlong, updateTube } from './tube';
+import { paint, type Finish } from './materials';
+import { bakedTube, mergeParts, placeAlong } from './tube';
 
 export interface DamperDims {
   /** Body length measured from the lower mount toward the upper mount, m. */
@@ -18,12 +19,8 @@ export interface DamperDims {
   readonly rodRadius: number;
   /** End-fitting radius at both mounts (0 = none, e.g. a strut clamp and a top-mount bearing). */
   readonly eyeRadius: number;
-}
-
-export interface DamperMaterials {
-  readonly body: Material;
-  readonly rod: Material;
-  readonly rubber: Material;
+  /** Spring seats: distance from the lower mount (on the body) and from the upper mount (on the rod), and radius. */
+  readonly seats?: { readonly low: number; readonly high: number; readonly radius: number };
 }
 
 export interface Damper {
@@ -33,21 +30,36 @@ export interface Damper {
 }
 
 const _dir = new Vector3();
-const _a = new Vector3();
-const _b = new Vector3();
+const Y = (y: number) => new Vector3(0, y, 0);
 
-/** `cylinder` is a shared unit cylinder (radius 1, height 1 along +Y). */
-export function createDamper(cylinder: BufferGeometry, mats: DamperMaterials, dims: DamperDims): Damper {
+function disc(y: number, r: number, h: number, finish: Finish): BufferGeometry {
+  return paint(bakedTube(Y(y - h / 2), Y(y + h / 2), r, r, 28), finish);
+}
+
+/** `finish` colours the body (damper or strut role); `material` is that role's palette material. */
+export function createDamper(material: Material, finish: Finish, dims: DamperDims): Damper {
+  const { bodyLength: Lb, bodyBelow, bodyRadius: rb, rodLength: Lr, rodRadius: rr, eyeRadius: re } = dims;
+  const lowerParts = [paint(bakedTube(Y(-bodyBelow), Y(Lb), rb, rb, 24), finish), disc(Lb + 0.002, rb * 0.62, 0.012, 'chrome')];
+  const bumperTop = -re - 0.012;
+  const bumperLen = Math.min(0.045, Lr * 0.2);
+  const upperParts = [paint(bakedTube(Y(-Lr), Y(0), rr, rr, 16), 'chrome'), paint(bakedTube(Y(bumperTop - bumperLen), Y(bumperTop), rr * 1.9, rr * 1.6, 16), 'rubber')];
+  if (re > 0) {
+    lowerParts.push(paint(bakedTube(Y(0), Y(re * 2.2), re, re * 0.9, 20), finish));
+    upperParts.push(paint(bakedTube(Y(-re * 2.2), Y(0), re * 0.9, re, 20), finish));
+  }
+  if (dims.seats) {
+    const { low, high, radius } = dims.seats;
+    lowerParts.push(disc(low - 0.0035, radius, 0.007, 'steel'), paint(bakedTube(Y(low - 0.03), Y(low - 0.007), rb * 1.12, rb * 1.12, 24), 'steel'));
+    upperParts.push(disc(-high + 0.0035, radius, 0.007, 'steel'));
+  }
   const group = new Group();
-  const body = new Mesh(cylinder, mats.body);
-  const cap = new Mesh(cylinder, mats.rod);
-  const rod = new Mesh(cylinder, mats.rod);
-  const bumper = new Mesh(cylinder, mats.rubber);
-  const eyes = dims.eyeRadius > 0 ? [new Mesh(cylinder, mats.body), new Mesh(cylinder, mats.body)] : [];
-  for (const e of eyes) e.scale.set(dims.eyeRadius, dims.eyeRadius * 2.2, dims.eyeRadius);
-  group.add(body, cap, rod, bumper, ...eyes);
-  for (const m of group.children) m.castShadow = true;
-  const bumperLen = Math.min(0.045, dims.rodLength * 0.2);
+  const lowerHalf = new Mesh(mergeParts(lowerParts), material);
+  const upperHalf = new Mesh(mergeParts(upperParts), material);
+  for (const m of [lowerHalf, upperHalf]) {
+    m.castShadow = true;
+    m.receiveShadow = true;
+    group.add(m);
+  }
   return {
     group,
     update(lower, upper) {
@@ -55,24 +67,14 @@ export function createDamper(cylinder: BufferGeometry, mats: DamperMaterials, di
       const len = _dir.length();
       if (len < 1e-7) return 0;
       _dir.multiplyScalar(1 / len);
-      _a.copy(lower).addScaledVector(_dir, -dims.bodyBelow);
-      _b.copy(lower).addScaledVector(_dir, dims.bodyLength);
-      updateTube(body, _a, _b, dims.bodyRadius);
-      // Seal cap on top of the body.
-      _a.copy(_b).addScaledVector(_dir, -0.004);
-      _b.addScaledVector(_dir, 0.008);
-      updateTube(cap, _a, _b, dims.bodyRadius * 0.62);
-      _a.copy(upper).addScaledVector(_dir, -dims.rodLength);
-      updateTube(rod, _a, upper, dims.rodRadius);
-      // Jounce bumper just under the upper mount.
-      _a.copy(upper).addScaledVector(_dir, -dims.eyeRadius - 0.012);
-      _b.copy(_a).addScaledVector(_dir, -bumperLen);
-      updateTube(bumper, _b, _a, dims.rodRadius * 1.9);
-      if (eyes.length === 2) {
-        placeAlong(eyes[0]!, _a.copy(lower).addScaledVector(_dir, dims.eyeRadius * 0.6), _dir);
-        placeAlong(eyes[1]!, _b.copy(upper).addScaledVector(_dir, -dims.eyeRadius * 0.6), _dir);
-      }
+      placeAlong(lowerHalf, lower, _dir);
+      placeAlong(upperHalf, upper, _dir);
       return len;
     },
-  } satisfies Damper;
+  };
+}
+
+/** Disposes the two half geometries (materials belong to the caller). */
+export function disposeDamper(d: Damper): void {
+  for (const c of d.group.children) (c as Mesh).geometry.dispose();
 }
