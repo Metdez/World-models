@@ -1,0 +1,120 @@
+[
+  {
+    "title": "Aston Martin db11",
+    "author": "Black Snow",
+    "authorUrl": "https://sketchfab.com/BlackSnow02",
+    "license": "CC-BY-4.0",
+    "licenseUrl": "http://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://sketchfab.com/3d-models/aston-martin-db11-0ce56f01b1ff40b3a4e36bc56873dbc7",
+    "modified": "optimised/compressed (meshopt), decimated, re-materialed, badges hidden.",
+    "files": [
+      "car/aston-martin-db11.glb"
+    ]
+  },
+  {
+    "title": "Derelict Airfield 01",
+    "author": "Alexander Scholten",
+    "license": "CC0-1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "sourceUrl": "https://polyhaven.com/a/derelict_airfield_01",
+    "files": [
+      "hdri/derelict_airfield_01_1k.hdr"
+    ]
+  },
+  {
+    "title": "Evening Road 01",
+    "author": "Sergej Majboroda",
+    "license": "CC0-1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "sourceUrl": "https://polyhaven.com/a/evening_road_01",
+    "files": [
+      "hdri/evening_road_01_1k.hdr"
+    ]
+  },
+  {
+    "title": "Ferndale Studio 03",
+    "author": "Dimitrios Savva, Greg Zaal",
+    "license": "CC0-1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "sourceUrl": "https://polyhaven.com/a/ferndale_studio_03",
+    "files": [
+      "hdri/ferndale_studio_03_1k.hdr"
+    ]
+  },
+  {
+    "title": "Asphalt Track",
+    "author": "Dimitrios Savva",
+    "license": "CC0-1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "sourceUrl": "https://polyhaven.com/a/asphalt_track",
+    "files": [
+      "textures/asphalt_track/asphalt_track_diff_1k.jpg",
+      "textures/asphalt_track/asphalt_track_nor_gl_1k.jpg",
+      "textures/asphalt_track/asphalt_track_rough_1k.jpg",
+      "textures/asphalt_track/asphalt_track_ao_1k.jpg"
+    ]
+  },
+  {
+    "title": "Cobblestone Floor 08",
+    "author": "Rob Tuytel",
+    "license": "CC0-1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "sourceUrl": "https://polyhaven.com/a/cobblestone_floor_08",
+    "files": [
+      "textures/cobblestone_floor_08/cobblestone_floor_08_diff_1k.jpg",
+      "textures/cobblestone_floor_08/cobblestone_floor_08_nor_gl_1k.jpg",
+      "textures/cobblestone_floor_08/cobblestone_floor_08_rough_1k.jpg",
+      "textures/cobblestone_floor_08/cobblestone_floor_08_ao_1k.jpg"
+    ]
+  },
+  {
+    "title": "Concrete Floor 01",
+    "author": "Rob Tuytel",
+    "license": "CC0-1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "sourceUrl": "https://polyhaven.com/a/concrete_floor_01",
+    "files": [
+      "textures/concrete_floor_01/concrete_floor_01_diff_1k.jpg",
+      "textures/concrete_floor_01/concrete_floor_01_nor_gl_1k.jpg",
+      "textures/concrete_floor_01/concrete_floor_01_rough_1k.jpg",
+      "textures/concrete_floor_01/concrete_floor_01_ao_1k.jpg"
+    ]
+  },
+  {
+    "title": "Grass Ground",
+    "author": "Charlotte Baglioni",
+    "license": "CC0-1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "sourceUrl": "https://polyhaven.com/a/grass_ground",
+    "files": [
+      "textures/grass_ground/grass_ground_diff_1k.jpg",
+      "textures/grass_ground/grass_ground_nor_gl_1k.jpg",
+      "textures/grass_ground/grass_ground_rough_1k.jpg",
+      "textures/grass_ground/grass_ground_ao_1k.jpg"
+    ]
+  },
+  {
+    "title": "Starter Kit Racing sounds (engine, motorcycle engine, impact)",
+    "author": "Kenney",
+    "authorUrl": "https://kenney.nl",
+    "license": "CC0-1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "sourceUrl": "https://github.com/KenneyNL/Starter-Kit-Racing/tree/main/audio",
+    "files": [
+      "audio/engine.ogg",
+      "audio/engine-motorcycle.ogg",
+      "audio/impact.ogg"
+    ]
+  },
+  {
+    "title": "Skid sound (Starter Kit Racing)",
+    "author": "Landeplage",
+    "authorUrl": "https://github.com/Landeplage",
+    "license": "CC0-1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "sourceUrl": "https://github.com/KenneyNL/Starter-Kit-Racing/tree/main/audio",
+    "files": [
+      "audio/skid.ogg"
+    ]
+  }
+]
