@@ -1,0 +1,31 @@
+/* Sound toggle (07-03). Inside the controls' Display group it is a plain .sl-controls-btn; without controls it
+   gets its own small glass pill, top-right. Tokens only. */
+.sl-audio {
+  position: absolute;
+  top: var(--margin);
+  right: var(--margin);
+  zoom: var(--sl-hud-zoom, 1);
+  padding: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--hair);
+}
+.sl-audio .sl-audio-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  font: inherit;
+  color: var(--text-2);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+}
+.sl-audio-btn svg {
+  display: block;
+}

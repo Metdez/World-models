@@ -244,6 +244,8 @@ export default {
         [['S'], 'Slow motion', 's'],
         [['A'], 'Amplify motion', 'a'],
         [['H'], 'Hide controls', 'h'],
+        // the audio feature puts its toggle in the Display group and handles M itself
+        ...(tools.querySelector('.sl-audio-btn') ? ([[['M'], 'Sound on / off']] as [string[], string][]) : []),
         [['Esc'], 'Close panels'],
       ];
       helpRows.replaceChildren(
