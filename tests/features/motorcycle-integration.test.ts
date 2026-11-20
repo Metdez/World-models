@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 import type { SimCatalog, Simulation } from '../../src/contracts/sim';
 import { simQuatToThree, simToThree } from '../../src/contracts/units';
 import { BIKE_CHASE, CameraRig } from '../../src/features/camera/rig';
+import motorcycle from '../../src/features/motorcycle/index';
+import { ctlStep } from '../../src/features/presenter/apply';
 import { cafeRacer } from '../../src/sim-core/content/cafe-racer';
 import { motoClassic } from '../../src/sim-core/content/moto-classic';
 import { motoModern } from '../../src/sim-core/content/moto-modern';
@@ -59,5 +61,27 @@ describe('bike camera', () => {
       expect(local.z, corner).toBeLessThan(-1.5);
       expect(pose.pos.distanceTo(body), corner).toBeLessThan(3.2);
     }
+  });
+});
+
+describe('motorcycle feature', () => {
+  it('contributes the cafe racer, its three presets and both visuals; the phone remote ids resolve', () => {
+    const got: Record<string, string[]> = { vehicles: [], suspensions: [], vehicleVisuals: [], suspensionVisuals: [] };
+    const reg = (k: string) => ({ register: (x: { id: string }) => (got[k]!.push(x.id), () => {}), get: () => undefined, require: () => undefined, list: () => [] });
+    motorcycle.contribute!({ vehicles: reg('vehicles'), suspensions: reg('suspensions'), tracks: reg('tracks'), vehicleVisuals: reg('vehicleVisuals'), suspensionVisuals: reg('suspensionVisuals') } as never);
+    expect(got).toEqual({
+      vehicles: ['cafe-racer'],
+      suspensions: ['moto-classic', 'moto-modern', 'moto-telelever'],
+      vehicleVisuals: [cafeRacer.visualKey],
+      suspensionVisuals: [motoClassic.visualKey],
+    });
+    expect(cafeRacer.suspensions).toEqual(got.suspensions);
+    // The remote (06-04) sends vehicle `cafe-racer` with a moto suspension id: applied in order, vehicle first.
+    const offered = (id: string) => (id === cafeRacer.id ? cafeRacer.suspensions : id === 'gt-coupe' ? ['macpherson', 'double-wishbone', 'multilink'] : undefined);
+    const step = ctlStep(null, { seq: 1, vehicleId: 'cafe-racer', suspensionId: 'moto-telelever' }, 'gt-coupe', offered);
+    expect(step?.patch).toEqual([
+      ['vehicleId', 'cafe-racer'],
+      ['suspensionId', 'moto-telelever'],
+    ]);
   });
 });
