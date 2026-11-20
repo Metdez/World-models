@@ -1,0 +1,142 @@
+/* Race Engineer overlay: tokens from src/ui/tokens.css only. Bottom-left, caption-style answer card. */
+.sl-engineer {
+  position: absolute;
+  left: var(--margin);
+  bottom: var(--margin);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  max-width: min(380px, calc(100vw - 2 * var(--margin)));
+}
+
+.sl-engineer-toggle,
+.sl-engineer-why,
+.sl-engineer-chip,
+.sl-engineer-send {
+  font: inherit;
+  color: var(--text-1);
+  background: var(--glass);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+
+.sl-engineer-toggle {
+  padding: var(--sp-2) var(--sp-4);
+  font-weight: 500;
+}
+.sl-engineer-toggle::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: var(--sp-2);
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+.sl-engineer.is-open .sl-engineer-toggle {
+  border-color: var(--accent-dim);
+}
+
+.sl-engineer-toggle:hover,
+.sl-engineer-why:hover,
+.sl-engineer-chip:hover,
+.sl-engineer-send:hover {
+  border-color: var(--hair-strong);
+}
+
+.sl-engineer-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-3);
+  background: var(--glass);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-panel);
+  animation: sl-engineer-in var(--dur-hud) var(--ease);
+}
+.sl-engineer-panel[hidden],
+.sl-engineer-answer[hidden],
+.sl-engineer-badge[hidden] {
+  display: none;
+}
+
+.sl-engineer-answer {
+  padding: var(--sp-1) var(--sp-1) var(--sp-2);
+  border-bottom: 1px solid var(--hair);
+  animation: sl-engineer-in var(--dur-caption-in) var(--ease);
+}
+.sl-engineer-text {
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--text-1);
+}
+.sl-engineer-answer.is-busy .sl-engineer-text {
+  color: var(--text-2);
+}
+.sl-engineer-badge {
+  display: inline-block;
+  margin-top: var(--sp-2);
+  padding: 2px var(--sp-2);
+  color: var(--warn);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-pill);
+}
+
+.sl-engineer-why {
+  align-self: flex-start;
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--accent);
+  border-color: var(--accent-dim);
+  font-weight: 500;
+}
+
+.sl-engineer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+.sl-engineer-chip {
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+.sl-engineer-form {
+  display: flex;
+  gap: var(--sp-1);
+}
+.sl-engineer-input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  font: inherit;
+  color: var(--text-1);
+  background: var(--bg-1);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-chip);
+}
+.sl-engineer-input::placeholder {
+  color: var(--text-3);
+}
+.sl-engineer-send {
+  width: 36px;
+  border-radius: var(--radius-chip);
+}
+
+@keyframes sl-engineer-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
