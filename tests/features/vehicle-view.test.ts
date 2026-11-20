@@ -111,15 +111,11 @@ describe('db11 visual', { timeout: 120_000 }, async () => {
     const body = byName('body');
     let worstGap = 0;
     let worstSink = 0;
-    const blownUp: number[] = [];
     for (let i = 0; i < 40; i++) {
       sim.seek((i / 40) * sim.lapDuration);
       const t = sim.sample(1, 1);
-      // Known sim-core issue (reported in 03-03 SUMMARY): seek(33.487 s) on the pave returns a diverged ride state.
-      if (!(Math.abs(t.heave) < 1)) {
-        blownUp.push(t.lapTime);
-        continue;
-      }
+      // The 0.4-lap seek used to diverge on the pave (fixed in 02-05): every seek must give a sane ride state.
+      expect(Math.abs(t.heave), `heave after seek(${t.lapTime.toFixed(3)})`).toBeLessThan(1);
       visual.update(t);
       root.updateMatrixWorld(true);
       for (const c of t.corners) {
@@ -144,8 +140,6 @@ describe('db11 visual', { timeout: 120_000 }, async () => {
         expect(Math.abs(hubLocal.y - gtCoupe.front.tyre.radius - c.travel), `${c.id} y`).toBeLessThan(0.01);
       }
     }
-    if (blownUp.length) console.info(`  sim-core diverged after seek at lap time(s) ${blownUp.map((x) => x.toFixed(3)).join(', ')} (skipped)`);
-    expect(blownUp.length).toBeLessThanOrEqual(1);
     console.info(`  tyre bottom vs contact patch over a lap: max ${(worstGap * 1000).toFixed(1)} mm above, max ${(-worstSink * 1000).toFixed(1)} mm below`);
     expect(worstGap).toBeLessThan(0.003);
     expect(worstSink).toBeGreaterThan(-0.04);
@@ -192,7 +186,7 @@ describe('db11 visual', { timeout: 120_000 }, async () => {
     expect(churn / 20000).toBeLessThan(512);
   });
 
-  it('reports procedural suspension parts against the REAL wheel mesh (tyre + rim)', () => {
+  it('procedural suspension parts stay clear of the REAL wheel mesh (tyre + rim) over a lap', () => {
     const report: string[] = [];
     for (const def of [macpherson, doubleWishbone, multilink]) {
       const sim = createSimulation({ catalog, trackId: 'proving-loop', vehicleId: gtCoupe.id, suspensionId: def.id });
@@ -225,7 +219,7 @@ describe('db11 visual', { timeout: 120_000 }, async () => {
       for (const [k, w] of worst) report.push(`${k}: ${(w.depth * 1000).toFixed(0)} mm at t=${w.t.toFixed(1)} s`);
     }
     console.info(`  suspension parts inside the real wheel mesh (> 2 mm, lap at true scale):\n    ${report.join('\n    ') || 'none'}`);
-    expect(Array.isArray(report)).toBe(true);
+    expect(report).toEqual([]);
   }, 120_000);
 });
 
