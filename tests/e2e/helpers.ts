@@ -8,6 +8,10 @@ export function captureConsole(page: Page): string[] {
     if (m.type() === 'error') errors.push(m.text());
   });
   page.on('pageerror', (e) => errors.push(e.stack ?? e.message));
+  // Names the URL behind Chromium's bare "Failed to load resource" console error.
+  page.on('response', (r) => {
+    if (r.status() >= 400) errors.push(`${r.status()} ${r.url()}`);
+  });
   return errors;
 }
 
