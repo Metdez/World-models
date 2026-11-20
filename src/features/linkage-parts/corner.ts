@@ -191,10 +191,15 @@ export function buildCorner(o: CornerOptions): CornerVisual {
     for (const p of [R(a.front), R(a.rear)])
       for (const s of [-1, 1]) brackets.push(bracketTab(p.clone().addScaledVector(axis, s * (len / 2 + 0.007)), axis, new Vector3(p.x, p.y, 0), 0.028, 0.07, 0.006));
   }
-  const mountR = layout.damper.strut ? 0.075 : 0.034;
-  brackets.push(bakedDisc(R(layout.damper.upper).clone().addScaledVector(restDamperDir, 0.012), restDamperDir, mountR, 0.008));
+  // A strut's top mount sits a couple of centimetres under the bonnet: its plate and isolator hang BELOW the
+  // hardpoint (as under a real strut tower) and stay narrow, so neither pokes through the panel above.
+  const strutMount = layout.damper.strut;
+  const mountR = strutMount ? 0.058 : 0.034;
+  const plateAt = strutMount ? -0.006 : 0.012;
+  const rubberAt = strutMount ? -0.024 : -0.004;
+  brackets.push(bakedDisc(R(layout.damper.upper).clone().addScaledVector(restDamperDir, plateAt), restDamperDir, mountR, 0.008));
   for (const g of brackets) chassisParts.push(paint(g, 'steel'));
-  chassisParts.push(paint(bakedDisc(R(layout.damper.upper).clone().addScaledVector(restDamperDir, -0.004), restDamperDir, mountR * 0.62, 0.026), 'rubber'));
+  chassisParts.push(paint(bakedDisc(R(layout.damper.upper).clone().addScaledVector(restDamperDir, rubberAt), restDamperDir, mountR * 0.62, 0.026), 'rubber'));
 
   // ---------------------------------------------------------------- A-arms
   const arms = layout.arms.map((a) => {

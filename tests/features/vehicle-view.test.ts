@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { MeshoptDecoder as NodeMeshoptDecoder } from 'meshoptimizer';
-import { BufferGeometry, Float32BufferAttribute, Group, Matrix4, Mesh, Object3D, Vector3 } from 'three';
+import { BufferGeometry, Float32BufferAttribute, Group, Matrix4, Mesh, Object3D, Raycaster, Vector3 } from 'three';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { describe, expect, it } from 'vitest';
@@ -185,6 +185,44 @@ describe('db11 visual', { timeout: 120_000 }, async () => {
     expect(retained).toBeLessThan(64 * 1024);
     expect(churn / 20000).toBeLessThan(512);
   });
+
+  it('the top mounts of every suspension stay under the REAL bonnet and wings (07-01: strut top at 0.90 m)', () => {
+    const report: string[] = [];
+    const body = byName('body');
+    for (const def of [macpherson, doubleWishbone, multilink]) {
+      const sim = createSimulation({ catalog, trackId: 'proving-loop', vehicleId: gtCoupe.id, suspensionId: def.id });
+      const sv = buildSpatialLinkage(def, gtCoupe);
+      sim.seek(20);
+      const t = sim.sample(1, 1);
+      visual.update(t);
+      sv.update(t);
+      root.updateMatrixWorld(true);
+      sv.root.updateMatrixWorld(true);
+      const shell: Mesh[] = [];
+      body.traverse((o) => (o as Mesh).isMesh && o.visible && shell.push(o as Mesh));
+      const chassis = sv.root.getObjectByName('chassis') as Mesh;
+      const pos = chassis.geometry.getAttribute('position');
+      const ray = new Raycaster();
+      const v = new Vector3();
+      let worst = Infinity;
+      for (const c of t.corners.filter((x) => x.axle === 'front')) {
+        const k = c.pointOrder.indexOf(def.axles.front.spring.upper);
+        const top = simToThree(c.points[3 * k]!, c.points[3 * k + 1]!, c.points[3 * k + 2]!, new Vector3());
+        for (let i = 0; i < pos.count; i += 3) {
+          v.fromBufferAttribute(pos, i).applyMatrix4(chassis.matrixWorld);
+          if (v.distanceTo(top) > 0.1) continue;
+          ray.set(v.clone().setY(v.y + 2), new Vector3(0, -1, 0));
+          // The outer skin is the first surface the ray meets from above.
+          const skin = ray.intersectObjects(shell, false)[0];
+          if (skin) worst = Math.min(worst, skin.point.y - v.y);
+        }
+      }
+      sv.dispose();
+      report.push(`${def.id} ${(worst * 1000).toFixed(0)} mm`);
+      expect(worst, def.id).toBeGreaterThan(0.003);
+    }
+    console.info(`  front top mount: least panel clearance above its parts: ${report.join(', ')}`);
+  }, 120_000);
 
   it('procedural suspension parts stay clear of the REAL wheel mesh (tyre + rim) over a lap', () => {
     const report: string[] = [];

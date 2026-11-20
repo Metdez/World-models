@@ -107,7 +107,8 @@ interface Plain {
 
 const PLAIN: Partial<Record<Finish, Plain>> = {
   trim: { color: 0x0b0c0d, metalness: 0.1, roughness: 0.55 },
-  underbody: { color: 0x16171a, metalness: 0.2, roughness: 0.7 },
+  // Rough and near-black: the diffuser and arch liners face the bright sky at grazing angles (read light grey).
+  underbody: { color: 0x0b0c0d, metalness: 0, roughness: 0.92 },
   leather: { color: 0x6e4128, metalness: 0, roughness: 0.62 },
   'leather-dark': { color: 0x2a1912, metalness: 0, roughness: 0.7 },
   interior: { color: 0x121314, metalness: 0.4, roughness: 0.5 },
@@ -198,8 +199,9 @@ export function createFinishMaterial(finish: Finish): Material {
 function make(finish: Finish): Material {
   switch (finish) {
     case 'paint':
-      // Deep metallic racing green under a hard clearcoat; flakes are added in shader (no UVs on this mesh).
-      return new MeshPhysicalMaterial({ color: srgb(0x0c3324), metalness: 0.65, roughness: 0.34, clearcoat: 1, clearcoatRoughness: 0.035 });
+      // Deep metallic racing green under a hard clearcoat; flakes are added in shader (no UVs on this mesh). The hue
+      // leans yellow-green: the metallic base tints the blue overcast sky it reflects, which read teal from above.
+      return new MeshPhysicalMaterial({ color: srgb(0x103a1c), metalness: 0.6, roughness: 0.34, clearcoat: 1, clearcoatRoughness: 0.035 });
     case 'gloss-black':
       return new MeshPhysicalMaterial({ color: srgb(0x050607), metalness: 0.3, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.04 });
     case 'glass':
