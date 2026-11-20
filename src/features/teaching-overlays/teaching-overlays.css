@@ -1,0 +1,29 @@
+/* Teaching overlays: camber trace panel. Tokens only (src/ui/tokens.css). */
+.sl-teaching-overlays-trace {
+  position: absolute;
+  right: var(--margin);
+  top: calc(var(--margin) + 56px);
+  padding: 0;
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-chip);
+  box-shadow: var(--shadow-panel);
+  pointer-events: none;
+}
+
+.sl-teaching-overlays-trace[hidden] {
+  display: none;
+}
+
+.sl-teaching-overlays-canvas {
+  display: block;
+}
+
+@media (max-width: 720px) {
+  .sl-teaching-overlays-trace {
+    transform: scale(0.8);
+    transform-origin: top right;
+  }
+}
