@@ -131,6 +131,17 @@ export function buildFront(def: TelescopicFront | TeleleverFront, vehicle: Motor
       steer.push(cos(bakedTube(res, res.clone().add(new Vector3(0, 0.045, 0)), 0.021, 0.021, 16), 'black'));
       steer.push(cos(bakedTube(res.clone().add(new Vector3(0, 0.045, 0)), res.clone().add(new Vector3(0, 0.052, 0)), 0.023, 0.023, 16), 'polished'));
     }
+    // Clutch cable (left) and brake hose (right): loop forward from the lever / master cylinder, in front of the
+    // head, down to the lower yoke (the hose to a polished brake splitter there). Steered with the bars, no per-frame cost.
+    {
+      const from = side > 0 ? g0.clone().addScaledVector(dir, -0.065) : piv.clone();
+      const toY = tele ? 0.16 : 0.205;
+      const to = L(toY - 0.02, side).addScaledVector(Z, -side * 0.035).addScaledVector(fwd, -0.03);
+      const loop = S(0.02).addScaledVector(fwd, def.offset + 0.07).addScaledVector(Z, side * 0.05);
+      const pts = [from, from.clone().add(new Vector3(0.05, -0.012, -side * 0.035)), loop, to];
+      steer.push(cos(bentTube(pts, side > 0 ? 0.0052 : 0.0042, 40, 8), 'black'));
+      if (side > 0) steer.push(cos(bakedDisc(to.clone().addScaledVector(dn, 0.012), up, 0.013, 0.014, 12), 'polished'));
+    }
     // Bar-end mirror: round head facing the rider on a short stalk.
     const stalk = end.clone().addScaledVector(dir, 0.012);
     const mc = stalk.clone().add(new Vector3(-0.02, 0.0, side * 0.055));

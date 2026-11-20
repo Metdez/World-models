@@ -20,7 +20,7 @@ export const MOTO_FINISH = {
   /** Satin black plastics and brackets. */
   black: { color: 0x101114, metalness: 0.1, roughness: 0.5 },
   /** Black engine paint (cases, cylinder cores). */
-  engine: { color: 0x141518, metalness: 0.45, roughness: 0.4 },
+  engine: { color: 0x1e1f23, metalness: 0.55, roughness: 0.34 },
   /** Machined fin edges and cover rims. */
   fin: { color: 0xb2b6bb, metalness: 1, roughness: 0.2 },
   /** Brushed aluminium. */

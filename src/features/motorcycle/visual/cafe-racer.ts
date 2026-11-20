@@ -27,6 +27,7 @@ import {
   finStack,
   lathe,
   loft,
+  outward,
   rod,
   roundedRect,
   se,
@@ -124,23 +125,23 @@ export function buildCafeRacer(vehicle: MotorcycleDefinition, options: CafeRacer
   pal(slab(roundedRect(0.09, 0.05, 0.02), 0.05, 0.008, basis(V(H.x - 0.05, H.y - 0.075, 0), V(1, -0.35, 0), V(0, 0, 1)), 'frame'), 'frame');
 
   // ------------------------------------------------------------------ engine (air-cooled parallel twin)
-  const crank = new Shape(
-    (
-      [
-        [P.x + 0.035, 0.24],
-        [P.x + 0.03, 0.44],
-        [-0.06, 0.478],
-        [0.05, 0.468],
-        [0.21, 0.472],
-        [0.288, 0.425],
-        [0.295, 0.27],
-        [0.24, 0.172],
-        [0.02, 0.148],
-        [P.x + 0.09, 0.168],
-      ] as const
-    ).map(([x, y]) => new Vector2(x, y)),
-  );
-  pal(slab(crank, 0.25, 0.024, new Matrix4(), 'engine'), 'engine');
+  // Crankcase: a lofted casting, rounded-box section (superellipse), swelling at the crank and the gearbox, so the
+  // cases catch the light as volumes instead of reading as one flat black side.
+  const caseF = 0.3;
+  const caseB = P.x + 0.03;
+  const cTop = curve([[0, 0.405], [0.08, 0.452], [0.25, 0.472], [0.55, 0.466], [0.8, 0.478], [1, 0.445]]);
+  const cBot = curve([[0, 0.29], [0.1, 0.19], [0.28, 0.156], [0.6, 0.15], [0.85, 0.165], [1, 0.235]]);
+  const cW = curve([[0, 0.11], [0.2, 0.127], [0.5, 0.126], [0.8, 0.129], [1, 0.112]]);
+  const caseSurface = (s: number, t: number, out: Vector3) => {
+    const e = endRound(s, 0.07) * endRound(1 - s, 0.06);
+    const top = cTop(s);
+    const bot = cBot(s);
+    const sn = Math.sin(t);
+    out.set(caseF - (caseF - caseB) * s, (top + bot) / 2 + ((top - bot) / 2) * se(sn, 5) * Math.max(0.3, e), cW(s) * se(Math.cos(t), 5) * e);
+  };
+  pal(outward(loft(40, 36, caseSurface)), 'engine');
+  // Finned sump under the crank: cast-alloy ribs catch a highlight below the dark cases.
+  for (let k = 0; k < 5; k++) pal(slab(roundedRect(0.2, 0.026, 0.01), 0.005, 0.0015, new Matrix4().makeTranslation(0.06, 0.15, -0.08 + k * 0.04), 'fin'), 'fin');
   // Brushed covers with polished edges: clutch (right) with a domed pressure-plate boss, a domed alternator cover
   // (left), sprocket cover; a raised parting rib round the cases; bolt heads round every cover.
   pal(slab(roundedPoly([[-0.1, 0.25], [0.11, 0.24], [0.15, 0.33], [0.08, 0.42], [-0.07, 0.43], [-0.12, 0.36]], 0.05), 0.026, 0.01, new Matrix4().makeTranslation(0, 0, 0.138), 'alloy', 'polished'), 'alloy');
