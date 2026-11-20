@@ -115,6 +115,8 @@ describe('token bucket', () => {
     for (let i = 0; i < NET_LIMITS.wsBurst; i++) expect(takeToken(b, 0)).toBe('ok');
     expect(takeToken(b, 0)).toBe('drop');
     expect(takeToken(b, 199)).toBe('drop'); // 0.995 tokens
+    // 0.4 s since empty = 2 tokens
+    expect(takeToken(b, 400)).toBe('ok');
     expect(takeToken(b, 400)).toBe('ok');
     expect(takeToken(b, 400)).toBe('drop');
     // a long pause refills to the burst cap, not beyond
