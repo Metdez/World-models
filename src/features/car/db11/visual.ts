@@ -36,6 +36,8 @@ const BRAKE_NODES = /^(amdb11_brakedisc|amdb11_caliper)/;
 const CALIPER_NODES = /^amdb11_caliper/;
 /** Headlight cover glass: a clear lens, not tinted window glass. */
 const LENS_NODES = /^amdb11_headlightglass/;
+/** Finishes enclosed by the body shell: their shadows are never seen, so they skip the shadow pass. */
+const ENCLOSED: ReadonlySet<string> = new Set(['leather', 'leather-dark', 'interior', 'engine', 'engine-red']);
 /** Finishes of the outer skin: the x-ray ghost shell is made of these. */
 const SHELL: ReadonlySet<Finish> = new Set(['paint', 'gloss-black', 'glass', 'lens', 'tail-lens']);
 
@@ -165,6 +167,8 @@ export function buildDb11(gltfScene: Object3D, vehicle: CarDefinition): VehicleV
   bodyGroup.name = 'body';
   root.add(bodyGroup);
   const bodyMeshes = Object.entries(body).map(([finish, parts]) => addMesh(bodyGroup, parts, material(finish, true), `body:${finish}`));
+  const shadowCasters = bodyMeshes.filter((m) => m.castShadow && !ENCLOSED.has(m.name.slice('body:'.length)));
+  for (const m of bodyMeshes) m.castShadow = shadowCasters.includes(m);
   const ghostMaterial = createGhostMaterial(xray);
   owned.materials.push(ghostMaterial);
   const ghost = addMesh(bodyGroup, shell, ghostMaterial, 'xray-ghost');
@@ -211,7 +215,7 @@ export function buildDb11(gltfScene: Object3D, vehicle: CarDefinition): VehicleV
     setXray(amount: number): void {
       xray.uXray.value = amount;
       ghost.visible = amount > 0.001;
-      for (const m of bodyMeshes) m.castShadow = amount < 0.5 && !(m.material as Material).transparent;
+      for (const m of shadowCasters) m.castShadow = amount < 0.5;
     },
     dispose(): void {
       root.removeFromParent();
