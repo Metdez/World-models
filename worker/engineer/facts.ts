@@ -1,6 +1,7 @@
 /**
  * Grounding cards for the Race Engineer prompt (ARCHITECTURE §12.5 step 2). Curated from research 04 §1-§11 and
- * checked against what THIS simulation measures (02-02 kinematics report, 02-04 difference report).
+ * checked against what THIS simulation measures (02-02 kinematics report, 02-04 difference report, 02-05 geometry).
+ * tests/worker/engineer-facts.test.ts pins every comparative claim to the ordering sim-core produces.
  * RULES: no digits (numbers come only from telemetry; tests assert it); tendencies are worded as such; every card
  * says what the model does not capture. Research estimates ([E]) are never stated as data.
  */
@@ -33,12 +34,12 @@ Its side-view geometry gives it the most anti-dive here, but brake pitch differs
 Strengths: typically the fewest parts, the lowest cost, compact across the car (room for the engine), light. Costs: a tall tower that raises the bonnet line, limited camber control, and it is harder to combine wide tyres with a small scrub radius.`,
   'double-wishbone': `ACTIVE SUSPENSION: double wishbone. Two arms of unequal length (the upper one shorter) hold the upright; the steering axis runs between the two ball joints, independent of the spring and damper.
 It adds the most negative camber in bump of the three types here: as the body rolls it pulls the top of the outside wheel inward, so the tyre stays the flattest. The gain over the others is clearest at the rear in long corners; at the front, at true scale, it is small.
-Its roll centre is in the middle of the three here and moves sideways the least as the body rolls.
+Its roll centre is in the middle of the three here, and as the body rolls it moves sideways much less than the strut's, but more than the multi-link's.
 The spring and damper work in line with the motion, so friction is low.
-Strengths: typically the best camber control and a low bonnet line. Costs: more parts and cost, a wider package, and more sideways scrub of the tyre over bumps as camber gain rises.`,
+Strengths: typically the best camber control and a low bonnet line. Costs: more parts and cost, and a wider package. Over bumps its tyre scrubs sideways more than the multi-link's, though less than the strut's here.`,
   multilink: `ACTIVE SUSPENSION: multi-link. Here five separate rods locate each wheel, and the steering axis is a virtual one defined by the links.
 Its camber gain in bump and its camber recovery in roll lie between the strut and the double wishbone here.
-It has the lowest roll centre of the three here, so slightly more of the load transfer goes through the springs and the body rolls a tiny bit more. In this layout its roll centre still moves a long way sideways as the body rolls.
+It has the lowest roll centre of the three here, so slightly more of the load transfer goes through the springs and the body rolls a tiny bit more. In this layout its roll centre moves sideways the least of the three as the body rolls, because its lower links sit close to horizontal across the car.
 Its main real-world advantage is control of toe and camber under cornering and braking forces through deliberately designed bushing compliance. This simulation uses rigid links, so that advantage is not modelled and does not show; all three types were tuned to almost no bump steer.
 Strengths: typically the most freedom to tune camber, toe and anti-dive or anti-squat independently, and good isolation. Costs: the most parts, cost and tuning effort.`,
 };
