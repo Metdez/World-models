@@ -307,16 +307,18 @@ function intersect(p1x: number, p1z: number, d1x: number, d1z: number, p2x: numb
   out[1] = p1z + t * d1z;
 }
 
-/** Keeps an instant centre within IC_MAX of the contact point (direction kept); NaN -> along `fx, fz`. */
+/** Keeps an instant centre within IC_MAX of the contact point (direction kept); NaN -> IC_MAX along `fx, fz`. */
 function clampIc(row: Float64Array, cx: number, cz: number, fx: number, fz: number): void {
   let dx = row[ICX]! - cx;
   let dz = row[ICZ]! - cz;
-  if (!Number.isFinite(dx) || !Number.isFinite(dz)) {
+  const atInfinity = !Number.isFinite(dx) || !Number.isFinite(dz);
+  if (atInfinity) {
     dx = fx;
     dz = fz;
   }
   const d = Math.hypot(dx, dz);
-  const k = d > IC_MAX ? IC_MAX / d : 1;
+  // An IC at infinity (parallel links, telescopic fork) sits at IC_MAX so overlays read it as "far", not near.
+  const k = atInfinity || d > IC_MAX ? IC_MAX / d : 1;
   row[ICX] = cx + dx * k;
   row[ICZ] = cz + dz * k;
 }
