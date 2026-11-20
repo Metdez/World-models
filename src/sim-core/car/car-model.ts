@@ -16,7 +16,7 @@ import type { BuiltTrack, TrackSample } from '../../contracts/track';
 import { G, type AxleId, type XYZ } from '../../contracts/units';
 import type { CarAxleSpec, CarDefinition, VehicleDefinition } from '../../contracts/vehicle';
 import { createCornerSolution, solveAxleKinematics, type CornerSolution, type KinematicsTable } from '../kinematics/table';
-import { clamp, interp1, lerp, lerpAngle, wrap, wrapAngle } from '../math/interp';
+import { clamp, interp1, wrap, wrapAngle } from '../math/interp';
 import * as q from '../math/quat';
 import {
   arbRateFromRollStiffness,
@@ -127,7 +127,6 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
   const spec = (i: number): CarAxleSpec => (i < 2 ? vehicle.front : vehicle.rear);
   const swellA = track.def.swell.amplitude;
   const swellK = (TAU * track.def.swell.cycles) / track.length;
-  const swell = (s: number): number => swellA * Math.sin(swellK * s);
 
   let sol!: CarSolution;
   let tables!: readonly [KinematicsTable, KinematicsTable];
@@ -218,18 +217,20 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
     antiPitch: { front: 0, rear: 0 },
   };
   const ts: TrackSample = { s: 0, x: 0, y: 0, z: 0, heading: 0, curvature: 0, bank: 0, grade: 0 };
-  let rack = 0;
+  /** Mutable per-step scalars in a typed array: a double stored in a closure variable is re-boxed on every write. */
+  const scalar = new Float64Array(2); // [rack, dt]
   // Ride-model reference plane relative to the path's reference plane, frozen at reset (a rigid offset leaves the
   // small-angle ride model unchanged): starting the static solve on the local vertical curve keeps every tyre in
   // contact at its initial guess (a dip deeper than the static tyre deflection would leave it singular).
   let refZ = 0;
   let refSlope = 0;
   const vc = { cg: 0, slope: 0 };
-  const pose = { x: 0, y: 0, z: 0 };
+  const pose = new Float64Array(3);
   const body = q.create();
   const qa = q.create();
   const qb = q.create();
   const rcLine = new Float64Array(8);
+  const rcPoint: XYZ = { x: 0, y: 0, z: 0 };
   const stopEvents = LAYOUT.map((_, corner) => ({ kind: 'bump-stop', corner }) as const);
   const liftEvents = LAYOUT.map((_, corner) => ({ kind: 'liftoff', corner }) as const);
   const gripEvents = LAYOUT.map((_, corner) => ({ kind: 'grip-limit', corner }) as const);
@@ -245,7 +246,7 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
       const si = path.s + cx[i]! * c - cy[i]! * sn;
       const li = path.l + cx[i]! * sn + cy[i]! * c;
       const h = (track.roadHeight(si - ENVELOPE, li) + track.roadHeight(si, li) + track.roadHeight(si + ENVELOPE, li)) / 3;
-      input.road[i] = h - swell(si) - li * tb - refZ - refSlope * cx[i]!;
+      input.road[i] = h - swellA * Math.sin(swellK * si) - li * tb - refZ - refSlope * cx[i]!;
     }
   }
 
@@ -253,8 +254,8 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
   function vcPlane(s: number): void {
     const xF = (cx[0]! + cx[1]!) / 2;
     const xR = (cx[2]! + cx[3]!) / 2;
-    const vcF = track.sample(s + xF, ts).z - swell(s + xF);
-    const vcR = track.sample(s + xR, ts).z - swell(s + xR);
+    const vcF = track.sample(s + xF, ts).z - swellA * Math.sin(swellK * (s + xF));
+    const vcR = track.sample(s + xR, ts).z - swellA * Math.sin(swellK * (s + xR));
     vc.slope = (vcF - vcR) / (xF - xR);
     vc.cg = vcR - vc.slope * xR;
   }
@@ -299,7 +300,7 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
       const table = tables[i >> 1]!;
       const curves = (i < 2 ? sol.front : sol.rear).kinematics.curves;
       const travel = st.travel[i]!;
-      const c = table.sample(travel, side[i]! * (i < 2 ? rack : 0), corner(i));
+      const c = table.sample(travel, side[i]! * (i < 2 ? scalar[0]! : 0), corner(i));
       const bumpToe = interp1(curves.travel, curves.toe, travel);
       const load = st.load[i]!;
       const axleLoad = load + st.load[i ^ 1]!;
@@ -322,17 +323,18 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
       cur[o + SPIN] = wrap(prev[o + SPIN]! + (dt * path.v * (1 - path.curvature * cy[i]!)) / s.tyre.radius, TAU);
       cur[o + WCX] = c.wheelCentre.x - wcx0[i >> 1]!;
       if (events) {
-        fire(0, i, st.stop[i]! > STOP_EVENT, dt, events);
-        fire(1, i, load < LIFTOFF_LOAD, dt, events);
-        fire(2, i, cur[o + GRIP]! > 1, dt, events);
+        scalar[1] = dt;
+        fire(0, i, st.stop[i]! > STOP_EVENT, events);
+        fire(1, i, load < LIFTOFF_LOAD, events);
+        fire(2, i, cur[o + GRIP]! > 1, events);
       }
     }
   }
 
-  function fire(kind: number, i: number, condition: boolean, dt: number, events: SimEvent[]): void {
+  function fire(kind: number, i: number, condition: boolean, events: SimEvent[]): void {
     const k = kind * 4 + i;
     if (!condition) {
-      quiet[k]! += dt;
+      quiet[k]! += scalar[1]!;
       return;
     }
     if (quiet[k]! >= HYSTERESIS) events.push(kind === 0 ? stopEvents[i]! : kind === 1 ? liftEvents[i]! : gripEvents[i]!);
@@ -340,36 +342,58 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
   }
 
   function steer(path: PathState): void {
-    rack = tables[0].rackForSteer(Math.atan(L * path.curvature));
+    scalar[0] = tables[0].rackForSteer(Math.atan(L * path.curvature));
   }
 
-  /** World point of a vehicle-frame point (body pose in `body`, origin in `pose`). */
-  function toWorld(x: number, y: number, z: number, out: XYZ): XYZ {
+  /**
+   * Axle-frame LEFT-side points of corner i (mirrored for a right corner, shifted to the axle) to world, using the body
+   * pose in `body` / `pose`. Typed arrays in and out: double arguments to a non-inlined call would be boxed.
+   */
+  function xform(i: number, src: Float64Array, n: number, dst: Float64Array): void {
     const qx = body[0];
     const qy = body[1];
     const qz = body[2];
     const qw = body[3];
-    // v' = v + 2w(u x v) + 2u x (u x v), u = (qx, qy, qz)
-    const tx = 2 * (qy * z - qz * y);
-    const ty = 2 * (qz * x - qx * z);
-    const tz = 2 * (qx * y - qy * x);
-    out.x = pose.x + x + qw * tx + (qy * tz - qz * ty);
-    out.y = pose.y + y + qw * ty + (qz * tx - qx * tz);
-    out.z = pose.z + z + qw * tz + (qx * ty - qy * tx);
-    return out;
-  }
-  const tmp: XYZ = { x: 0, y: 0, z: 0 };
-  function pointsToWorld(i: number, c: CornerSolution, out: Float64Array): void {
-    const p = c.points;
-    const n = p.length / 3;
     const ax = axleX[i]!;
     const sd = side[i]!;
-    for (let k = 0; k < n; k++) {
-      toWorld(ax + p[3 * k]!, sd * p[3 * k + 1]!, p[3 * k + 2]!, tmp);
-      out[3 * k] = tmp.x;
-      out[3 * k + 1] = tmp.y;
-      out[3 * k + 2] = tmp.z;
+    for (let k = 0; k < 3 * n; k += 3) {
+      const x = ax + src[k]!;
+      const y = sd * src[k + 1]!;
+      const z = src[k + 2]!;
+      // v' = v + 2w(u x v) + 2u x (u x v), u = (qx, qy, qz)
+      const tx = 2 * (qy * z - qz * y);
+      const ty = 2 * (qz * x - qx * z);
+      const tz = 2 * (qx * y - qy * x);
+      dst[k] = pose[0]! + x + qw * tx + (qy * tz - qz * ty);
+      dst[k + 1] = pose[1]! + y + qw * ty + (qz * tx - qx * tz);
+      dst[k + 2] = pose[2]! + z + qw * tz + (qx * ty - qy * tx);
     }
+  }
+  const ang = new Float64Array(3);
+  /** q = Rz(ang[2]) * Ry(ang[1]) * Rx(ang[0]) (quat.fromRollPitchYaw, angles passed in a typed array). */
+  function rpy(out: q.Quat): void {
+    const cr = Math.cos(ang[0]! / 2);
+    const sr = Math.sin(ang[0]! / 2);
+    const cp = Math.cos(ang[1]! / 2);
+    const sp = Math.sin(ang[1]! / 2);
+    const cy = Math.cos(ang[2]! / 2);
+    const sy = Math.sin(ang[2]! / 2);
+    out[0] = sr * cp * cy - cr * sp * sy;
+    out[1] = cr * sp * cy + sr * cp * sy;
+    out[2] = cr * cp * sy - sr * sp * cy;
+    out[3] = cr * cp * cy + sr * sp * sy;
+  }
+  const p3 = new Float64Array(3);
+  const w3 = new Float64Array(3);
+  /** One axle-frame point (an XYZ of a corner solution) of corner i to world. */
+  function pointToWorld(i: number, p: XYZ, out: XYZ): void {
+    p3[0] = p.x;
+    p3[1] = p.y;
+    p3[2] = p.z;
+    xform(i, p3, 1, w3);
+    out.x = w3[0]!;
+    out.y = w3[1]!;
+    out.z = w3[2]!;
   }
 
   return {
@@ -422,13 +446,13 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
     },
 
     sample(alpha: number, amplification: number, path: PathState, out: TelemetryFrame): void {
-      for (let k = 0; k < RECORD; k++) smp[k] = lerp(prev[k]!, cur[k]!, alpha);
+      for (let k = 0; k < RECORD; k++) smp[k] = prev[k]! + (cur[k]! - prev[k]!) * alpha;
       const amp = amplification;
       // Vertical-curve road plane under the axles (crest/dip): heave/pitch are reported relative to it.
       vcPlane(path.s);
       const vcCg = vc.cg;
       const pitchPlane = -vc.slope;
-      const vc0 = track.sample(path.s, ts).z - swell(path.s);
+      const vc0 = path.z - path.l * Math.tan(path.bank) - swellA * Math.sin(swellK * path.s);
       const heave = smp[HEAVE]! + refZ - vcCg;
       const pitch = smp[PITCH]! - refSlope - pitchPlane;
       const roll = smp[ROLL]!;
@@ -438,16 +462,22 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
       out.amplification = amp;
 
       // Body pose: path frame (heading, swell grade, bank) * (vertical-curve pitch + amplified relative pitch, roll).
-      q.fromRollPitchYaw(qa, path.bank, -Math.atan(swellA * swellK * Math.cos(swellK * path.s)), path.heading);
-      q.fromRollPitchYaw(qb, roll * amp, pitchPlane + pitch * amp, 0);
+      ang[0] = path.bank;
+      ang[1] = -Math.atan(swellA * swellK * Math.cos(swellK * path.s));
+      ang[2] = path.heading;
+      rpy(qa);
+      ang[0] = roll * amp;
+      ang[1] = pitchPlane + pitch * amp;
+      ang[2] = 0;
+      rpy(qb);
       q.multiply(body, qa, qb);
-      pose.x = path.x;
-      pose.y = path.y;
-      pose.z = path.z - vc0 + vcCg + heave * amp - staticDeflectionMean;
+      pose[0] = path.x;
+      pose[1] = path.y;
+      pose[2] = path.z - vc0 + vcCg + heave * amp - staticDeflectionMean;
       q.toXYZW(body, out.bodyRotation);
-      out.bodyPosition.x = pose.x;
-      out.bodyPosition.y = pose.y;
-      out.bodyPosition.z = pose.z;
+      out.bodyPosition.x = pose[0];
+      out.bodyPosition.y = pose[1];
+      out.bodyPosition.z = pose[2];
 
       let steerSum = 0;
       let wbF = 0;
@@ -470,23 +500,30 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
         fc.motionRatio = smp[o + MR]!;
         fc.gripUse = smp[o + GRIP]!;
         fc.stop = Math.min(1, Math.abs(smp[o + STOP]!));
-        fc.spin = wrap(lerpAngle(prev[o + SPIN]!, cur[o + SPIN]!, alpha), TAU);
+        const spin0 = prev[o + SPIN]!;
+        let dSpin = cur[o + SPIN]! - spin0;
+        if (dSpin < -Math.PI) dSpin += TAU;
+        else if (dSpin > Math.PI) dSpin -= TAU;
+        const spin = spin0 + dSpin * alpha;
+        fc.spin = spin < 0 ? spin + TAU : spin >= TAU ? spin - TAU : spin;
         if (i < 2) steerSum += fc.steer;
         if (i < 2) wbF += smp[o + WCX]! / 2;
         else wbR += smp[o + WCX]! / 2;
 
         // POSE: table at the amplified travel (clamped to the table range by sample()).
-        const c = table.sample(fc.travel * amp, sd * (i < 2 ? rack : 0), corner(i));
-        const ax = axleX[i]!;
-        toWorld(ax + c.wheelCentre.x, sd * c.wheelCentre.y, c.wheelCentre.z, fc.wheelPosition);
+        const c = table.sample(fc.travel * amp, sd * (i < 2 ? scalar[0]! : 0), corner(i));
+        pointToWorld(i, c.wheelCentre, fc.wheelPosition);
         // Contact patch on the loaded tyre: lift the unloaded-radius patch by the tyre deflection.
-        toWorld(ax + c.contactPatch.x, sd * c.contactPatch.y, c.contactPatch.z, fc.contactPatch);
+        pointToWorld(i, c.contactPatch, fc.contactPatch);
         fc.contactPatch.z += fc.load / spec(i).tyre.verticalStiffness;
-        toWorld(ax + c.instantCentre.x, sd * c.instantCentre.y, c.instantCentre.z, fc.instantCentre);
-        pointsToWorld(i, c, fc.points);
+        pointToWorld(i, c.instantCentre, fc.instantCentre);
+        xform(i, c.points, c.points.length / 3, fc.points);
         fc.springLength = c.springLength;
         // Wheel attitude: yaw (toe incl. steer) then camber tilt; left toe-in yaws right, camber < 0 tilts the top in.
-        q.fromRollPitchYaw(qb, -sd * c.camber, 0, -sd * c.toe);
+        ang[0] = -sd * c.camber;
+        ang[1] = 0;
+        ang[2] = -sd * c.toe;
+        rpy(qb);
         q.toXYZW(q.multiply(qa, body, qb), fc.wheelRotation);
         // Front-view IC line (contact patch -> IC) per side, vehicle frame (y, z), for the posed roll centre.
         const r = (i & 1) * 4;
@@ -506,7 +543,11 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
             y = rcLine[0]! + u * rcLine[2]!;
             z = rcLine[1]! + u * rcLine[3]!;
           }
-          toWorld(ax, clamp(y, -5, 5), clamp(z, -5, 5), axle.rollCentre);
+          // Roll centre on the axle's centre plane (written as a left-side point at x = 0 of this axle).
+          rcPoint.x = 0;
+          rcPoint.y = clamp(y, -5, 5);
+          rcPoint.z = clamp(z, -5, 5);
+          pointToWorld(i - 1, rcPoint, axle.rollCentre);
         }
       }
       out.steer = steerSum / 2;
@@ -517,16 +558,9 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
 
     restPose(cornerIndex: number, _path: PathState, out: Float64Array): Float64Array {
       const i = cornerIndex;
-      const c = tables[i >> 1]!.sample(0, side[i]! * (i < 2 ? rack : 0), restSol);
-      const n = tables[i >> 1]!.pointOrder.length * 3;
-      // restSol is sized for the larger table; only the first n entries belong to this corner's table.
-      const ax = axleX[i]!;
-      for (let k = 0; k < n; k += 3) {
-        toWorld(ax + c.points[k]!, side[i]! * c.points[k + 1]!, c.points[k + 2]!, tmp);
-        out[k] = tmp.x;
-        out[k + 1] = tmp.y;
-        out[k + 2] = tmp.z;
-      }
+      const c = tables[i >> 1]!.sample(0, side[i]! * (i < 2 ? scalar[0]! : 0), restSol);
+      // restSol is sized for the larger table; only this corner's table's points are transformed.
+      xform(i, c.points, tables[i >> 1]!.pointOrder.length, out);
       return out;
     },
   };
