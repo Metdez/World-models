@@ -116,7 +116,7 @@ test('engineer overlay: construction lines per suspension, trace keeps the previ
     await frame(page);
     expect(await page.evaluate(() => globalThis.__app!.state().suspensionId)).toBe(id);
     const st = await overlayState(page);
-    expect(st!.layers.every((l) => l.finite && l.count > 0)).toBe(true);
+    expect(st!.layers.every((l: { finite: boolean; count: number }) => l.finite && l.count > 0)).toBe(true);
     await shot(page, `front-${id}`);
   }
   // Chase view: the rear axle is nearest the camera and drawn strongest.

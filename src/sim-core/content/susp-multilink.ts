@@ -88,7 +88,7 @@ export const multilink: CarSuspensionDefinition = {
         upperFrontOuter: [0.0413, 0.655, 0.67],
         upperRearInner: [-0.16, 0.5, 0.6],
         upperRearOuter: [-0.0567, 0.655, 0.6646],
-        lowerFrontInner: [0.1416, 0.47, 0.155],
+        lowerFrontInner: [0.1416, 0.47, 0.147],
         lowerFrontOuter: [-0.0294, 0.755, 0.15],
         lowerRearInner: [-0.12, 0.37, 0.148],
         lowerRearOuter: [-0.09, 0.795, 0.172],
