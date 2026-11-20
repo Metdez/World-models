@@ -192,7 +192,7 @@ describe('createSimulation (§7.6)', () => {
     expect(JSON.stringify(trueFields(sim.sample(1)))).toBe(JSON.stringify(trueFields(ref.sample(1))));
   });
 
-  it('class mismatches throw; the motorcycle model is a phase-5 stub; setVehicle keeps the lap fraction', () => {
+  it('class mismatches throw; a failed setVehicle leaves the car running; setVehicle keeps the lap fraction', () => {
     const motoSusp = { ...doubleWishbone, id: 'moto-x', vehicleClass: 'motorcycle' } as unknown as MotorcycleSuspensionDefinition;
     const moto = { ...gtCoupe, id: 'bike', class: 'motorcycle', suspensions: ['moto-x'], defaultSuspension: 'moto-x' } as unknown as MotorcycleDefinition;
     const catalog: SimCatalog = {
@@ -203,7 +203,9 @@ describe('createSimulation (§7.6)', () => {
     const sim = make('double-wishbone', 20, catalog);
     expect(() => sim.setSuspension('moto-x')).toThrow(/motorcycle/);
     expect(sim.suspension.id).toBe('double-wishbone');
-    expect(() => sim.setVehicle('bike')).toThrow('motorcycle model arrives in phase 5');
+    // The fake bike is a relabelled car definition: the real motorcycle model (05-01) rejects it.
+    expect(() => sim.setVehicle('bike')).toThrow();
+    expect(sim.vehicle.id).toBe('gt-coupe');
     const frame = sim.sample(1);
     const fraction = sim.lapTime / sim.lapDuration;
     sim.setVehicle('gt-coupe', 'multilink');

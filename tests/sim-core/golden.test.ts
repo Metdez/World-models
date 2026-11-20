@@ -11,9 +11,9 @@ import { provingLoop } from '../../src/sim-core/content/proving-loop';
 import { createSimulation } from '../../src/sim-core/index';
 
 const GOLDEN: Record<string, string> = {
-  macpherson: '483f16ac',
-  'double-wishbone': '30a29468',
-  multilink: '3b374690',
+  macpherson: '53e95141',
+  'double-wishbone': 'a8a25413',
+  multilink: '64d2ddf9',
 };
 const empty: SimCatalog = { track: () => undefined, vehicle: () => undefined, suspension: () => undefined };
 

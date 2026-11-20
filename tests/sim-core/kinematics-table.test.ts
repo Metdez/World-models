@@ -118,7 +118,8 @@ describe.each(CASES)('$name', ({ linkage, opts }) => {
       for (let i = 1; i < arr.length - 1; i++) {
         expect(Number.isFinite(arr[i]!)).toBe(true);
         // Second difference per 2.5 mm step, relative to the curve's own scale.
-        const scale = Math.max(...Array.from(arr, Math.abs)) + 1e-6;
+        // Floor 1e-3 (0.06 deg / 1 mm): a toe curve nulled to a few hundredths of a degree is noise-scaled otherwise.
+        const scale = Math.max(...Array.from(arr, Math.abs), 1e-3);
         expect(Math.abs(arr[i - 1]! - 2 * arr[i]! + arr[i + 1]!) / scale).toBeLessThan(0.02);
       }
     }
