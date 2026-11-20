@@ -225,7 +225,7 @@ describe('seek (shared lap clock)', () => {
 });
 
 describe('determinism golden (seed 42, 10 s)', () => {
-  const GOLDEN: Record<string, string> = { 'moto-classic': 'd015332e', 'moto-modern': '8eb3198c', 'moto-telelever': 'e70af9fa' };
+  const GOLDEN: Record<string, string> = { 'moto-classic': 'd015332e', 'moto-modern': '49727a3b', 'moto-telelever': 'ef5f24be' };
   function hashRun(id: string): string {
     const sim = bike(id);
     let h = 0x811c9dc5;

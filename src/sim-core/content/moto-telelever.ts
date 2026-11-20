@@ -54,8 +54,9 @@ export const motoTelelever: MotorcycleSuspensionDefinition = {
     axle: [REAR_AXLE[0], 0, REAR_AXLE[1]],
     shocks: 1,
     singleSided: true,
-    shockTop: [-0.43, 0, 0.66],
-    shockLower: [-0.5, 0, 0.36],
+    // Outboard of the arm on the right (-y), not inside the tyre; the planar model ignores y.
+    shockTop: [-0.43, -0.165, 0.66],
+    shockLower: [-0.5, -0.165, 0.36],
     travel: 0.12,
     spring: { rate: 90_000, preload: 400, progression: 0 },
     damper: { bump: 3_500, rebound: 7_000 },

@@ -45,8 +45,11 @@ export const motoModern: MotorcycleSuspensionDefinition = {
     rockerPivot: [-0.303, 0, 0.227],
     swingarmLink: [-0.326, 0, 0.318],
     rockerLink: [-0.353, 0, 0.253],
-    rockerShock: [-0.4, 0, 0.28],
-    shockTop: [-0.39, 0, 0.578],
+    // The shock pair (rockerShock, shockTop) is the original vertical layout turned -30 deg about rockerPivot: a rigid
+    // rotation in the plane leaves the motion-ratio curve unchanged and leans the shock forward, clear of the tyre
+    // (every point of it stays within 0.21 m of the swingarm pivot; the tyre never comes closer than 0.24 m).
+    rockerShock: [-0.3605, 0, 0.3214],
+    shockTop: [-0.2028, 0, 0.5745],
     travel: 0.12,
     spring: { rate: 130_000, preload: 1_500, progression: 0 },
     damper: { bump: 7_000, rebound: 14_000 },

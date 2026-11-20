@@ -33,6 +33,15 @@ export interface RearRig {
 
 const Z = new Vector3(0, 0, 1);
 
+/** Distance along the arm direction `u` (from the pivot) at which the shock line a→b crosses the arm line. */
+function shockCrossing(a: Vector3, b: Vector3, u: Vector3): number {
+  // Perpendicular offsets of both shock ends from the arm line (in the x-y plane).
+  const da = a.x * -u.y + a.y * u.x;
+  const db = b.x * -u.y + b.y * u.x;
+  const t = Math.abs(da - db) < 1e-9 ? 0 : da / (da - db);
+  return a.clone().lerp(b, t).dot(u);
+}
+
 export function buildRear(def: SwingarmRear | LinkageRear, vehicle: MotorcycleDefinition, roles: PartMaterials, plain: Material): RearRig {
   const P = toThree(def.pivot);
   const A = toThree(def.axle);
@@ -66,8 +75,9 @@ export function buildRear(def: SwingarmRear | LinkageRear, vehicle: MotorcycleDe
   const armParts: BufferGeometry[] = [];
   const u = rel(A).normalize();
   const len = rel(A).length();
-  // Cross brace: at the link lug for a linkage (clear of the monoshock), else a third of the way back.
-  const braceAt = def.kind === 'swingarm-linkage' ? Math.max(0.15, Math.min(0.5, rel(toThree(def.swingarmLink)).dot(u) / len)) : 0.36;
+  // Cross brace: for a linkage, 0.1 m ahead of where the monoshock crosses the arm (the shock passes between the
+  // legs behind it), else a third of the way back.
+  const braceAt = def.kind === 'swingarm-linkage' ? Math.max(0.12, Math.min(0.5, (shockCrossing(rel(toThree(def.rockerShock)), rel(toThree(def.shockTop)), u) - 0.1) / len)) : 0.36;
   const leg = (z: number, h0: number, h1: number, w: number) => {
     const shape = new Shape();
     shape.moveTo(-0.025, -h0 * 0.55);
@@ -105,9 +115,8 @@ export function buildRear(def: SwingarmRear | LinkageRear, vehicle: MotorcycleDe
     }
   }
   // Twin-shock / single-shock lower studs; linkage lug under the brace.
-  // Three z of a shock: the definition's y (mirrored); a single shock on a single-sided arm drawn at y = 0 would
-  // sit inside the tyre, so it goes just outboard of the arm.
-  const shockZ = (sim: readonly [number, number, number]) => (Math.abs(sim[1]) > 0.01 ? -sim[1] : single ? armSide * (legZ + 0.05) : 0);
+  // Three z of a shock: the definition's y (sim +y = left = three -z).
+  const shockZ = (sim: readonly [number, number, number]) => -sim[1];
   if (def.kind === 'swingarm') {
     const lo = rel(toThree(def.shockLower));
     const zs = def.shocks === 2 ? [Math.abs(shockZ(def.shockLower)) || 0.145, -(Math.abs(shockZ(def.shockLower)) || 0.145)] : [shockZ(def.shockLower)];
