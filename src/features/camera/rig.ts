@@ -29,6 +29,7 @@ export function copyPose(from: Pose, to: Pose): Pose {
 }
 
 const UP = new Vector3(0, 1, 0);
+const FORWARD = new Vector3(1, 0, 0);
 const lookMatrix = new Matrix4();
 
 /** Writes the orientation of a camera at `eye` looking at `target` (world up). */
@@ -42,6 +43,14 @@ export const BLEND_S = 1.2;
 export const FADE_S = 0.25;
 /** Height of the orbit/blend pivot above the road, m (about the car's visual centre). */
 export const PIVOT_Y = 0.6;
+
+/** Per-vehicle chase framing: distance, height and FOV from standstill to vMax, and the aim height. */
+export interface ChaseFraming {
+  readonly dist: readonly [number, number];
+  readonly height: readonly [number, number];
+  readonly fov: readonly [number, number];
+  readonly aimY: number;
+}
 
 // Chase tuning (research 13 §A3), all decay rates in 1/s.
 export const CHASE = {
@@ -60,6 +69,11 @@ export const CHASE = {
   /** Minimum clearance over the road behind the car, m. */
   clearance: 1.0,
 } as const;
+
+/** Motorcycle: a smaller, taller-than-wide subject; closer and lower so the bike fills about as much frame as the car. */
+export const BIKE_CHASE: ChaseFraming = { dist: [3.5, 4.5], height: [1.3, 1.55], fov: [44, 52], aimY: 0.62 };
+/** Size of a bike's director shots (orbit, front view) relative to the car's. */
+export const BIKE_SHOT_SCALE = 0.62;
 
 /** Default FOV per shot kind, deg (DirectorShot.fov overrides). */
 const DEFAULT_FOV: Record<ShotKind, number> = { chase: 50, orbit: 38, closeup: 42, trackside: 20, overhead: 34, 'front-view': 30 };
@@ -124,6 +138,7 @@ export function blendLocal(from: Pose, to: Pose, e: number, pivot: Vector3, out:
  * damped heading, eases distance/height/FOV with speed, and the aim leans toward the line `aheadS` seconds ahead.
  */
 export class Chase {
+  framing: ChaseFraming = CHASE;
   heading = 0;
   dist: number = CHASE.dist[0];
   height: number = CHASE.height[0];
@@ -136,10 +151,11 @@ export class Chase {
   /** Snap every channel to its target (after a seek or on first use). */
   reset(frame: CarFrame, speed01: number): void {
     this.heading = frame.heading;
-    this.dist = CHASE.dist[0] + (CHASE.dist[1] - CHASE.dist[0]) * speed01;
-    this.height = CHASE.height[0] + (CHASE.height[1] - CHASE.height[0]) * speed01;
-    this.fov = CHASE.fov[0] + (CHASE.fov[1] - CHASE.fov[0]) * smootherstep(speed01);
-    this.look.set(0, CHASE.aimY, 0);
+    const f = this.framing;
+    this.dist = f.dist[0] + (f.dist[1] - f.dist[0]) * speed01;
+    this.height = f.height[0] + (f.height[1] - f.height[0]) * speed01;
+    this.fov = f.fov[0] + (f.fov[1] - f.fov[0]) * smootherstep(speed01);
+    this.look.set(0, f.aimY, 0);
   }
 
   /** Steps the damped channels by dt. `aheadLocal` is the look-ahead line point in the car frame. */
@@ -147,13 +163,14 @@ export class Chase {
     this.heading = dampAngle(this.heading, frame.heading, CHASE.headingLambda, dt);
     const lag = wrapAngle(this.heading - frame.heading);
     if (Math.abs(lag) > CHASE.maxHeadingLag) this.heading = frame.heading + Math.sign(lag) * CHASE.maxHeadingLag;
-    this.dist = damp(this.dist, CHASE.dist[0] + (CHASE.dist[1] - CHASE.dist[0]) * speed01, CHASE.speedLambda, dt);
-    this.height = damp(this.height, CHASE.height[0] + (CHASE.height[1] - CHASE.height[0]) * speed01, CHASE.speedLambda, dt);
-    this.fov = damp(this.fov, CHASE.fov[0] + (CHASE.fov[1] - CHASE.fov[0]) * smootherstep(speed01), CHASE.speedLambda, dt);
+    const f = this.framing;
+    this.dist = damp(this.dist, f.dist[0] + (f.dist[1] - f.dist[0]) * speed01, CHASE.speedLambda, dt);
+    this.height = damp(this.height, f.height[0] + (f.height[1] - f.height[0]) * speed01, CHASE.speedLambda, dt);
+    this.fov = damp(this.fov, f.fov[0] + (f.fov[1] - f.fov[0]) * smootherstep(speed01), CHASE.speedLambda, dt);
     const w = CHASE.aheadWeight;
     const k = 1 - Math.exp(-CHASE.lookLambda * dt);
     this.look.x += (aheadLocal.x * w - this.look.x) * k;
-    this.look.y += (CHASE.aimY + aheadLocal.y * w - this.look.y) * k;
+    this.look.y += (f.aimY + aheadLocal.y * w - this.look.y) * k;
     this.look.z += (aheadLocal.z * w - this.look.z) * k;
   }
 
@@ -192,20 +209,21 @@ export const CLOSEUP = {
   eyeLateral: 0.15,
   aimY: 0.92,
   fov: 48,
-  /** Motorcycle (no track): a side view of the fork or swingarm. */
-  bikeAlong: 0.9,
-  bikeLateral: 1.7,
-  bikeEyeY: 0.7,
-  bikeFov: 42,
+  /** Motorcycle (no track): a side view from the left, slightly ahead and above, of the fork (front: aim half-way up
+   * the legs) or of the swingarm and shock (rear: aim between the axle and the pivot). */
+  bikeFront: { eye: [0.3, 1.0, 2.4], aim: [-0.13, 0.28] },
+  bikeRear: { eye: [0.2, 1.0, 2.5], aim: [0.27, 0.14] },
+  bikeFov: 40,
 } as const;
 
 /** Close-up eye/aim in the body frame for one corner. Returns the FOV. */
 export function closeupLocal(c: CornerGeometry, eye: Vector3, aim: Vector3): number {
   const dir = c.front ? 1 : -1;
   if (c.halfTrack === 0) {
-    // Left is three -z: film a centreline corner from the left.
-    eye.set(c.x + dir * CLOSEUP.bikeAlong, CLOSEUP.bikeEyeY, -CLOSEUP.bikeLateral);
-    aim.set(c.x, c.radius, 0);
+    // Left is three -z: film a centreline corner from the left. x offsets are from the axle (aim y above the hub).
+    const f = c.front ? CLOSEUP.bikeFront : CLOSEUP.bikeRear;
+    eye.set(c.x + f.eye[0], f.eye[1], -f.eye[2]);
+    aim.set(c.x + f.aim[0], c.radius + f.aim[1], 0);
     return CLOSEUP.bikeFov;
   }
   const lat = c.side === 0 ? 1 : c.side;
@@ -275,6 +293,8 @@ export class CameraRig {
   private readonly aim = new Vector3();
   private readonly tripod = new Vector3();
   private readonly bodyUp = new Vector3();
+  private readonly unroll = new Quaternion();
+  private shotScale = 1;
   private lastLapTime = Number.NaN;
   private started = false;
 
@@ -286,6 +306,9 @@ export class CameraRig {
   /** Re-read corner layout (call after `sim:vehicle`). */
   layout(t: TelemetryFrame): void {
     this.corners = cornerGeometry(this.sim(), t);
+    const bike = this.sim().vehicle.class === 'motorcycle';
+    this.chase.framing = bike ? BIKE_CHASE : CHASE;
+    this.shotScale = bike ? BIKE_SHOT_SCALE : 1;
   }
 
   get transitioning(): boolean {
@@ -380,7 +403,8 @@ export class CameraRig {
         break;
       case 'orbit': {
         const az = (this.shot?.azimuth ?? 0) + (this.shot?.age ?? 0) * 0.16;
-        this.local(7.2 * Math.cos(az), 1.9, 7.2 * Math.sin(az), 0, 0.55, 0, out);
+        const r = 7.2 * this.shotScale;
+        this.local(r * Math.cos(az), 1.9 * this.shotScale, r * Math.sin(az), 0, 0.55, 0, out);
         out.fov = DEFAULT_FOV.orbit;
         break;
       }
@@ -389,7 +413,7 @@ export class CameraRig {
         out.fov = DEFAULT_FOV.overhead;
         break;
       case 'front-view':
-        this.local(7.5, 0.8, 0, 0, 0.6, 0, out);
+        this.local(7.5 * this.shotScale, 0.8, 0, 0, 0.6, 0, out);
         out.fov = DEFAULT_FOV['front-view'];
         break;
       case 'trackside': {
@@ -426,6 +450,9 @@ export class CameraRig {
     const c = this.corners[index];
     simToThree(t.bodyPosition.x, t.bodyPosition.y, t.bodyPosition.z, this.bodyPos);
     simQuatToThree(t.bodyRotation, this.bodyQuat);
+    // A bike leans as a whole (not a suspension motion): film it in its un-leaned frame, so the camera neither rolls
+    // with a 40 degree lean nor swings under the road on the lean side, while pitch and heave stay rigid.
+    if (c && c.halfTrack === 0) this.bodyQuat.multiply(this.unroll.setFromAxisAngle(FORWARD, -t.roll));
     if (!c) {
       this.chasePose(this.sim(), out);
       return;
@@ -434,8 +461,10 @@ export class CameraRig {
     this.eye.applyQuaternion(this.bodyQuat).add(this.bodyPos);
     this.aim.applyQuaternion(this.bodyQuat).add(this.bodyPos);
     out.pos.copy(this.eye);
-    // Camera roll follows the body so the chassis reads as a fixed stage.
-    out.quat.setFromRotationMatrix(lookMatrix.lookAt(this.eye, this.aim, this.bodyUp.copy(UP).applyQuaternion(this.bodyQuat)));
+    // Camera roll follows the body so the chassis reads as a fixed stage (a bike: the horizon stays level).
+    if (c.halfTrack === 0) this.bodyUp.copy(UP);
+    else this.bodyUp.copy(UP).applyQuaternion(this.bodyQuat);
+    out.quat.setFromRotationMatrix(lookMatrix.lookAt(this.eye, this.aim, this.bodyUp));
   }
 
   /** Tripod on the inside of the line where the car will be half-way through the shot. */
