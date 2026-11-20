@@ -13,6 +13,12 @@ import { buildCafeRacer, type CafeRacerVisual } from '../../src/features/motorcy
 import { buildMotoPlanar, type MotoPlanarVisual } from '../../src/features/motorcycle/parts/moto-planar';
 import { restFrontAxle } from '../../src/features/motorcycle/parts/front';
 import { toThree } from '../../src/features/motorcycle/parts/common';
+import type { SimCatalog } from '../../src/contracts/sim';
+import { cafeRacer } from '../../src/sim-core/content/cafe-racer';
+import { motoClassic } from '../../src/sim-core/content/moto-classic';
+import { motoModern } from '../../src/sim-core/content/moto-modern';
+import { motoTelelever } from '../../src/sim-core/content/moto-telelever';
+import { createSimulation } from '../../src/sim-core/index';
 import { CAFE_RACER, MOTO_SUSPENSIONS, STATIC_POSE, createMotoFrame, poseMotoFrame, type MotoPose } from '../fixtures/05-02-moto-frame';
 
 const DEG = Math.PI / 180;
@@ -237,6 +243,75 @@ describe('05-02 cafe racer + moto-planar visuals', () => {
       parts.dispose();
     }
   });
+  it('follows the real 05-01 simulation for all three presets (amplification 1 and 3)', () => {
+    const presets = [motoClassic, motoModern, motoTelelever];
+    const catalog: SimCatalog = {
+      track: () => undefined,
+      vehicle: (id) => (id === cafeRacer.id ? cafeRacer : undefined),
+      suspension: (id) => presets.find((p) => p.id === id),
+    };
+    for (const susp of presets) {
+      if (susp.vehicleClass !== 'motorcycle') continue;
+      const sim = createSimulation({ catalog, trackId: 'proving-loop', vehicleId: cafeRacer.id, suspensionId: susp.id });
+      const bike = buildCafeRacer(cafeRacer);
+      const parts = buildMotoPlanar(susp, cafeRacer);
+      const body = named(parts.root, 'body');
+      const restAxleF = restFrontAxle(toThree(susp.front.steeringHead), susp.front.rake, susp.front.offset, cafeRacer.front.tyre.radius);
+      let carryErr = 0;
+      let tyreLo = Infinity;
+      let tyreHi = -Infinity;
+      let maxRoll = 0;
+      for (let k = 0; k < 40; k++) {
+        sim.seek((k / 40) * sim.lapDuration);
+        for (const amp of [1, 3]) {
+          const f = sim.sample(1, amp);
+          maxRoll = Math.max(maxRoll, Math.abs(f.roll));
+          bike.update(f);
+          parts.update(f);
+          expect(finite(bike.root) && finite(parts.root)).toBe(true);
+          expect(parts.inspect().front.visible && parts.inspect().rear.visible).toBe(true);
+          parts.root.updateMatrixWorld(true);
+          const pt = (ci: 0 | 1, name: string) => {
+            const c = f.corners[ci]!;
+            const j = c.pointOrder.indexOf(name);
+            return simToThree(c.points[3 * j]!, c.points[3 * j + 1]!, c.points[3 * j + 2]!, new Vector3()) as Vector3;
+          };
+          if (susp.front.kind === 'telelever') {
+            carryErr = Math.max(carryErr, partCarry(named(parts.root, 'telelever-arm'), body, toThree(susp.front.shockArm), toThree(susp.front.armPivot)).distanceTo(pt(0, 'shockArm')));
+          }
+          if (susp.rear.kind === 'swingarm-linkage') {
+            const B = toThree(susp.rear.rockerPivot);
+            carryErr = Math.max(carryErr, partCarry(named(parts.root, 'rocker'), body, toThree(susp.rear.rockerShock), B).distanceTo(pt(1, 'rockerShock')));
+          } else {
+            carryErr = Math.max(carryErr, partCarry(named(parts.root, 'swingarm'), body, toThree(susp.rear.shockLower), toThree(susp.rear.pivot)).distanceTo(pt(1, 'shockLower')));
+          }
+          for (const [ci, name] of [[0, 'axle'], [1, 'axle']] as const) {
+            const c = f.corners[ci]!;
+            const j = c.pointOrder.indexOf(name);
+            const w = simToThree(c.points[3 * j]!, c.points[3 * j + 1]!, c.points[3 * j + 2]!, new Vector3()) as Vector3;
+            const got = ci === 0 ? lowerCarry(named(parts.root, 'front-unsprung'), body, restAxleF) : partCarry(named(parts.root, 'swingarm'), body, toThree(susp.rear.axle), toThree(susp.rear.pivot));
+            carryErr = Math.max(carryErr, got.distanceTo(w));
+            // The wheel mesh hub sits on the posed axle too.
+            const hub = bike.inspect().hubs[ci === 0 ? 'f' : 'r'];
+            hub.updateMatrixWorld(true);
+            expect(new Vector3().setFromMatrixPosition(hub.matrixWorld).distanceTo(w)).toBeLessThan(0.002);
+            if (amp === 1) {
+              const wheel = hub.children[0]!.children[0] as Mesh;
+              const d = lowest(wheel) - c.contactPatch.z;
+              tyreLo = Math.min(tyreLo, d);
+              tyreHi = Math.max(tyreHi, d);
+            }
+          }
+        }
+      }
+      console.log(`${susp.id} (live sim): carried point error ${(carryErr * 1000).toFixed(2)} mm, lowest tyre point minus contact patch ${(tyreLo * 1000).toFixed(1)}..${(tyreHi * 1000).toFixed(1)} mm, max lean ${((maxRoll * 180) / Math.PI).toFixed(1)} deg`);
+      expect(carryErr).toBeLessThan(0.002);
+      expect(tyreHi).toBeLessThan(0.006);
+      expect(tyreLo).toBeGreaterThan(-0.03);
+      bike.dispose();
+      parts.dispose();
+    }
+  });
 });
 
 /**
@@ -254,4 +329,3 @@ function lowerCarry(o: Object3D, body: Object3D, rest: Vector3): Vector3 {
   const rel = new Matrix4().copy(body.matrixWorld).invert().multiply(o.matrixWorld);
   return rest.clone().applyMatrix4(rel).applyMatrix4(body.matrixWorld);
 }
-
