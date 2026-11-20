@@ -129,8 +129,20 @@ test('desktop: follow, close-up and engineer-open layouts never overlap; the can
     const tag = `${size.width}x${size.height}`;
     await set(page, 'view', 'follow');
     await set(page, 'engineerOpen', false);
+    // The longest caption the insight rules can write (swap delta chip included) stays between the two columns.
+    await page.evaluate(() => {
+      const caption = document.querySelector<HTMLElement>('.sl-insights-caption')!;
+      caption.hidden = false;
+      caption.querySelector('.sl-insights-text')!.textContent = 'MacPherson strut → Double wishbone: the outside wheel keeps more negative camber through the long carousel';
+      const chip = caption.querySelector<HTMLElement>('.sl-insights-chip')!;
+      chip.hidden = false;
+      chip.textContent = 'CAMBER RL −0.2° → −0.9°';
+    });
     await shot(page, `follow-${tag}`);
-    let list = await expectClean(page, `follow ${tag}`, ['.sl-controls-tag', '.sl-telemetry-panel', '.sl-engineer', '.sl-teaching-overlays-trace', '.sl-controls-amp']);
+    let list = await expectClean(page, `follow ${tag}`, ['.sl-controls-tag', '.sl-telemetry-panel', '.sl-engineer', '.sl-teaching-overlays-trace', '.sl-controls-amp', '.sl-insights-caption']);
+    await page.evaluate(() => {
+      document.querySelector<HTMLElement>('.sl-insights-caption')!.hidden = true;
+    });
     await expectCanvasReachable(page, list, `follow ${tag}`);
 
     await set(page, 'view', 'closeup');

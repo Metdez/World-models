@@ -78,7 +78,8 @@ export function createGhostMaterial(xray: XrayUniform): ShaderMaterial {
       varying vec3 vV;
       void main() {
         float ndv = clamp(abs(dot(normalize(vN), normalize(vV))), 0.0, 1.0);
-        float rim = pow(1.0 - ndv, uPower);
+        // Skin right at the eye (the close-up sits at the bumper) is all grazing angles: fade it, keep the silhouette.
+        float rim = pow(1.0 - ndv, uPower) * smoothstep(0.4, 1.8, length(vV));
         gl_FragColor = vec4(uColor * (rim * 0.6 + uBase) * uXray, 1.0);
       }`,
     transparent: true,
