@@ -66,6 +66,8 @@ export function buildRear(def: SwingarmRear | LinkageRear, vehicle: MotorcycleDe
   const armParts: BufferGeometry[] = [];
   const u = rel(A).normalize();
   const len = rel(A).length();
+  // Cross brace: at the link lug for a linkage (clear of the monoshock), else a third of the way back.
+  const braceAt = def.kind === 'swingarm-linkage' ? Math.max(0.15, Math.min(0.5, rel(toThree(def.swingarmLink)).dot(u) / len)) : 0.36;
   const leg = (z: number, h0: number, h1: number, w: number) => {
     const shape = new Shape();
     shape.moveTo(-0.025, -h0 * 0.55);
@@ -79,7 +81,7 @@ export function buildRear(def: SwingarmRear | LinkageRear, vehicle: MotorcycleDe
   };
   if (!single) {
     for (const s of [-1, 1]) leg(s * legZ, 0.062, 0.042, 0.034);
-    const brace = u.clone().multiplyScalar(len * 0.36);
+    const brace = u.clone().multiplyScalar(len * braceAt);
     armParts.push(paint(bakedTube(brace.clone().setZ(-legZ), brace.clone().setZ(legZ), 0.02, 0.02, 16), 'swingarm'));
   } else {
     leg(armSide * (legZ + 0.006), 0.095, 0.07, 0.05);
@@ -103,7 +105,9 @@ export function buildRear(def: SwingarmRear | LinkageRear, vehicle: MotorcycleDe
     }
   }
   // Twin-shock / single-shock lower studs; linkage lug under the brace.
-  const shockZ = (sim: readonly [number, number, number]) => Math.abs(sim[1]) > 0.01 ? -sim[1] : 0;
+  // Three z of a shock: the definition's y (mirrored); a single shock on a single-sided arm drawn at y = 0 would
+  // sit inside the tyre, so it goes just outboard of the arm.
+  const shockZ = (sim: readonly [number, number, number]) => (Math.abs(sim[1]) > 0.01 ? -sim[1] : single ? armSide * (legZ + 0.05) : 0);
   if (def.kind === 'swingarm') {
     const lo = rel(toThree(def.shockLower));
     const zs = def.shocks === 2 ? [Math.abs(shockZ(def.shockLower)) || 0.145, -(Math.abs(shockZ(def.shockLower)) || 0.145)] : [shockZ(def.shockLower)];
@@ -113,7 +117,7 @@ export function buildRear(def: SwingarmRear | LinkageRear, vehicle: MotorcycleDe
     }
   } else {
     const s = rel(toThree(def.swingarmLink));
-    const brace = u.clone().multiplyScalar(len * 0.36);
+    const brace = u.clone().multiplyScalar(len * braceAt);
     for (const z of [-0.028, 0.028]) armParts.push(paint(platePolygon([brace.clone().setZ(z).addScaledVector(u, -0.03), brace.clone().setZ(z).addScaledVector(u, 0.03), s.clone().setZ(z)], Z, 0.008, 0.002), 'swingarm'));
     armParts.push(paint(bakedDisc(s.clone(), Z, 0.014, 0.07, 14), 'steel'));
   }

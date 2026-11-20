@@ -15,6 +15,7 @@ import type { TelemetryFrame } from '../../../contracts/telemetry';
 import { simQuatToThree, simToThree, type Vec3 } from '../../../contracts/units';
 import type { MotorcycleDefinition, VehicleDefinition } from '../../../contracts/vehicle';
 import { bakedDisc, bakedTube, mergeParts } from '../../../kit3d/tube';
+import { FORK_OFFSET, FORK_RAKE, HEAD_ABOVE_AXLE, steeringPoints, SWINGARM_PIVOT } from '../../../sim-core/content/cafe-racer';
 import { createMotoPalette, disposeMotoPalette, motoPaint, type MotoFinish } from './palette';
 import { addDither, createGhostMaterial, createPaintMaterial, type PaintSpec } from './shaders';
 import {
@@ -77,9 +78,10 @@ export function buildCafeRacer(vehicle: MotorcycleDefinition, options: CafeRacer
   const xr = -(vehicle.wheelbase - vehicle.cgToFront);
   const Rf = vehicle.front.tyre.radius;
   const Rr = vehicle.rear.tyre.radius;
-  const sh = options.steeringHead ?? [xf - 0.3, 0, 0.91];
-  const pv = options.swingarmPivot ?? [xr + 0.565, 0, 0.36];
-  const rake = options.rake ?? (24 * Math.PI) / 180;
+  // Frame hardpoints default to the cafe-racer content's shared frame geometry (all presets use one frame).
+  const sh = options.steeringHead ?? steeringPoints(FORK_RAKE, FORK_OFFSET, HEAD_ABOVE_AXLE).head;
+  const pv = options.swingarmPivot ?? SWINGARM_PIVOT;
+  const rake = options.rake ?? FORK_RAKE;
   const H = V(sh[0], sh[2]);
   const P = V(pv[0], pv[2]);
   const axisDown = V(Math.sin(rake), -Math.cos(rake));
@@ -274,7 +276,7 @@ export function buildCafeRacer(vehicle: MotorcycleDefinition, options: CafeRacer
     paintParts.push(stripUv(slab(panel, 0.016, 0.006, new Matrix4().makeTranslation(0, 0, s * 0.122), 'frame')));
     pal(slab(ellipse(0.018, 0.018), 0.006, 0.002, new Matrix4().makeTranslation(-0.3, 0.68, s * 0.131), 'polished'), 'polished');
   });
-  pal(slab(roundedRect(0.22, 0.18, 0.04), 0.17, 0.02, new Matrix4().makeTranslation(-0.31, 0.63, 0), 'black'), 'black');
+  pal(slab(roundedRect(0.15, 0.17, 0.04), 0.15, 0.02, new Matrix4().makeTranslation(-0.27, 0.645, 0), 'black'), 'black');
 
   // ------------------------------------------------------------------ meshes
   const xray = { uXray: { value: 0 } };
