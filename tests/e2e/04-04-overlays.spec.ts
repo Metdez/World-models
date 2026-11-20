@@ -119,6 +119,9 @@ test('engineer overlay: construction lines per suspension, trace keeps the previ
     expect(st!.layers.every((l) => l.finite && l.count > 0)).toBe(true);
     await shot(page, `front-${id}`);
   }
+  // Chase view: the rear axle is nearest the camera and drawn strongest.
+  await page.evaluate(() => (globalThis.__shot = { eye: [-7, 1.7, 1.2], look: [0, 0.45, 0], fov: 32 }));
+  await shot(page, 'chase-multilink');
   // After two swaps the trace shows multilink with double wishbone faint.
   await page.locator('.sl-teaching-overlays-trace').screenshot({ path: join(SHOTS, '04-04-trace-after-swap.png'), timeout: 300_000 });
 

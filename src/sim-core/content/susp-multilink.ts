@@ -80,7 +80,7 @@ export const multilink: CarSuspensionDefinition = {
       GT_CORNER.front,
       { lowerFront: 'lateral-link', lowerRear: 'trailing-link' },
       'lowerFront',
-      0.8,
+      0.75,
     ),
     rear: axle(
       {

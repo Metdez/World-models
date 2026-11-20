@@ -21,10 +21,18 @@ export interface AxlePlot {
 /** Display value of a curve sample: camber in degrees, motion ratio as is. */
 export const display = (metric: TraceMetric, v: number): number => (metric === 'camber' ? v * RAD_TO_DEG : v);
 
-/** Copies one axle's curve in display units (so later kinematics() objects cannot change what we keep). */
-export function plotOf(curves: KinematicsCurves, metric: TraceMetric): AxlePlot {
-  return { travel: Float64Array.from(curves.travel), value: Float64Array.from(curves[metric], (v) => display(metric, v)) };
+/**
+ * Copies one axle's curve in display units (so later kinematics() objects cannot change what we keep), limited to
+ * the usable travel [-droop, bump] when given (the solver's table runs a little past the bump stops).
+ */
+export function plotOf(curves: KinematicsCurves, metric: TraceMetric, droop = Infinity, bump = Infinity): AxlePlot {
+  const keep: number[] = [];
+  for (let i = 0; i < curves.travel.length; i++) if (curves.travel[i]! >= -droop - 1e-9 && curves.travel[i]! <= bump + 1e-9) keep.push(i);
+  return { travel: Float64Array.from(keep, (i) => curves.travel[i]!), value: Float64Array.from(keep, (i) => display(metric, curves[metric][i]!)) };
 }
+
+/** Usable travel per axle (front, rear) as [droop, bump]; unlimited when the definition has no per-axle linkage. */
+export type TravelLimits = readonly (readonly [number, number])[];
 
 /** Plot window [x0, x1, y0, y1] covering every finite sample of the plots, y padded, with a minimum y span. */
 export function plotRange(plots: readonly (AxlePlot | null)[], minSpan: number): [number, number, number, number] {
@@ -133,7 +141,7 @@ function palette(el: Element): Palette {
 export interface TracePanel {
   readonly root: HTMLElement;
   /** Current curves; `previous` (copied by the caller before the swap) stays faint. Allocates: layout changes only. */
-  setCurves(kin: VehicleKinematics, metric: TraceMetric, previous: readonly (AxlePlot | null)[] | null, previousLabel: string): void;
+  setCurves(kin: VehicleKinematics, metric: TraceMetric, limits: TravelLimits, previous: readonly (AxlePlot | null)[] | null, previousLabel: string): void;
   /** Current curves in display units, per axle (front, rear): what the caller keeps as "previous" on a swap. */
   readonly plots: readonly (AxlePlot | null)[];
   draw(t: TelemetryFrame): void;
@@ -184,11 +192,11 @@ export function createTracePanel(): TracePanel {
     get plots() {
       return plots;
     },
-    setCurves(kin, m, previous, previousLabel) {
+    setCurves(kin, m, limits, previous, previousLabel) {
       metric = m;
       pal ??= palette(root);
       dpr = Math.max(1, Math.min(2, globalThis.devicePixelRatio || 1));
-      plots = [plotOf(kin.front.curves, m), plotOf(kin.rear.curves, m)];
+      plots = [plotOf(kin.front.curves, m, ...(limits[0] ?? [])), plotOf(kin.rear.curves, m, ...(limits[1] ?? []))];
       const minSpan = m === 'camber' ? 1 : 0.2;
       ranges = [0, 1].map((ai) => plotRange([plots[ai] ?? null, previous?.[ai] ?? null], minSpan));
       height = HEAD + 2 * (ROW + PLOT_H + GAP) - GAP + PAD;
@@ -236,7 +244,8 @@ export function createTracePanel(): TracePanel {
         sg.font = `500 9px ${pal.sans}`;
         sg.fillStyle = pal.text3;
         sg.textAlign = 'right';
-        sg.fillText('bump →', W - PAD - 3, y0 + PLOT_H - 3);
+        // camber falls with bump, motion ratio usually rises: put the word where the curve is not
+        sg.fillText('bump →', W - PAD - 3, m === 'camber' ? y0 + 10 : y0 + PLOT_H - 3);
         sg.font = `500 9px ${pal.mono}`;
         const unit = m === 'camber' ? '°' : '';
         const label = (v: number) => `${fmt(v, 1)}${unit}`;

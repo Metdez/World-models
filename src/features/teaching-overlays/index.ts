@@ -4,7 +4,7 @@ import { RENDER } from '../../contracts/services';
 import { mount } from '../../ui/dom';
 import { createConstruction } from './construction';
 import { createLineBatch } from './lines';
-import { createTracePanel, type AxlePlot, type TraceMetric } from './trace';
+import { createTracePanel, type AxlePlot, type TraceMetric, type TravelLimits } from './trace';
 import './teaching-overlays.css';
 
 const PANEL_DT = 1 / 30;
@@ -22,7 +22,7 @@ export default {
   phase: 'scene',
   init(ctx) {
     const render = ctx.services.get(RENDER);
-    const main = createLineBatch({ capacity: 1600, width: 2, casing: 5.5, renderOrder: 40, name: 'teaching-overlays:construction' });
+    const main = createLineBatch({ capacity: 1600, width: 2.5, casing: 6, renderOrder: 40, name: 'teaching-overlays:construction' });
     const ghost = createLineBatch({ capacity: 600, width: 1.5, casing: 0, renderOrder: 38, name: 'teaching-overlays:ghost' });
     const group = new Group();
     group.name = 'teaching-overlays';
@@ -38,8 +38,13 @@ export default {
     ctx.addDisposer(mount(ctx.dom.overlay, panel.root));
 
     const metric = (): TraceMetric => (ctx.sim.current.vehicle.class === 'car' ? 'camber' : 'motionRatio');
+    const limits = (): TravelLimits => {
+      const s = ctx.sim.current.suspension;
+      if (s.vehicleClass !== 'car') return [];
+      return [s.axles.front, s.axles.rear].map((a) => [a.travel.droop, a.travel.bump] as const);
+    };
     const curves = (previous: readonly (AxlePlot | null)[] | null, label: string) =>
-      panel.setCurves(ctx.sim.current.kinematics(), metric(), previous, label);
+      panel.setCurves(ctx.sim.current.kinematics(), metric(), limits(), previous, label);
     curves(null, '');
     ctx.on('sim:suspension', ({ previous }) => {
       curves(panel.plots, ctx.registries.suspensions.get(previous)?.copy.label ?? '');
