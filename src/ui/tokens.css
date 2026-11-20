@@ -1,0 +1,70 @@
+/* Design tokens ("Lab" design system, research 14 D2-D4, D8). The ONLY source of colours/type/spacing for UI. */
+:root {
+  /* colour */
+  --bg-0: #07080a;
+  --bg-1: #0d0f12;
+  --glass: rgba(16, 18, 22, 0.62);
+  --glass-filter: blur(14px) saturate(1.2);
+  --hair: rgba(255, 255, 255, 0.1);
+  --hair-strong: rgba(255, 255, 255, 0.22);
+  --text-1: #edeef0;
+  --text-2: #a3a8b0;
+  --text-3: #6b7079;
+  --accent: #7cf0d4;
+  --accent-dim: rgba(124, 240, 212, 0.25);
+  --warn: #ffb454;
+
+  /* type */
+  --font-sans: 'Geist Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  --fs-display: clamp(22px, 2.2vw, 28px);
+  --lh-display: 1.1;
+  --ls-display: -0.01em;
+  --fs-title: 18px;
+  --lh-title: 1.25;
+  --fs-body: 14px;
+  --lh-body: 1.45;
+  --fs-label: 11px;
+  --ls-label: 0.1em;
+  --fs-num: 13px;
+  --fs-num-lg: 22px;
+  --ls-num-lg: -0.01em;
+
+  /* spacing / shape / depth */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+  --margin: 24px;
+  --radius-chip: 10px;
+  --radius-panel: 14px;
+  --radius-pill: 999px;
+  --shadow-panel: 0 10px 40px rgba(0, 0, 0, 0.45);
+
+  /* motion */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 120ms;
+  --dur-thumb: 240ms;
+  --dur-hud: 360ms;
+  --dur-caption-in: 480ms;
+  --dur-caption-out: 300ms;
+}
+
+@media (max-width: 720px) {
+  :root {
+    --margin: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-thumb: 0ms;
+    --dur-hud: 0ms;
+    --dur-caption-in: 0ms;
+    --dur-caption-out: 0ms;
+  }
+}
