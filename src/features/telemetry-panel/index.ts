@@ -312,13 +312,14 @@ const telemetryPanel: FeatureModule = {
 
   update(frame: FrameInfo) {
     const s = st;
-    if (!s || s.root.hidden) return;
+    if (!s) return;
     const t = frame.t;
     // Driven by simulation time: paused = frozen, slow motion = denser trace, e2e advance() = deterministic.
     if (t.simTime - s.lastSimTime < SAMPLE_DT - 1e-9) return;
     s.lastSimTime = t.simTime;
     s.history.push(t);
     s.trail.push(gUnits(t.ay), gUnits(t.ax));
+    if (s.root.hidden) return; // keep recording (the ghost needs the lap), skip the drawing
     draw(s);
     if ((s.ticks++ & 1) === 0) writeNumbers(s);
   },

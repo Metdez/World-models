@@ -108,7 +108,7 @@ export function buildCafeRacer(vehicle: MotorcycleDefinition, options: CafeRacer
     pal(slab(roundedRect(0.1, 0.19, 0.045), 0.012, 0.003, basis(V(P.x + 0.012, P.y - 0.02, z(0.138)), V(1, 0, 0), V(0, 0, 1)), 'alloy', 'polished'), 'alloy');
     // Rear-set hanger, peg and lever.
     const peg = V(P.x - 0.115, P.y - 0.03, z(0.17));
-    pal(slab(roundedRect(0.16, 0.05, 0.022), 0.01, 0.002, new Matrix4().makeRotationZ(-0.75).setPosition(P.x - 0.06, P.y + 0.01, z(0.135)), 'alloy', 'polished'), 'alloy');
+    pal(slab(roundedPoly([[P.x + 0.02, P.y + 0.03], [P.x - 0.02, P.y - 0.045], [peg.x - 0.012, peg.y - 0.016], [peg.x - 0.02, peg.y + 0.018]], 0.014), 0.009, 0.002, new Matrix4().makeTranslation(0, 0, z(0.15)), 'alloy', 'polished'), 'alloy');
     pal(rod(V(peg.x, peg.y, z(0.13)), V(peg.x, peg.y, z(0.25)), 0.011, 'alloy', 0.011, 16), 'alloy');
     for (let k = 0; k < 6; k++) pal(bakedDisc(V(peg.x, peg.y, z(0.165 + k * 0.014)), V(0, 0, 1), 0.0125, 0.004, 16), 'black');
     pal(rod(V(peg.x + 0.005, peg.y - 0.005, z(0.152)), V(peg.x + 0.17, peg.y - 0.03, z(0.152)), 0.006, 'alloy'), 'alloy');
