@@ -33,7 +33,8 @@ export interface RoadEdges {
 export function featureHeight(f: RoadFeature, x: number, l: number, edges: RoadEdges): number {
   switch (f.kind) {
     case 'cosine-bump': {
-      const [l0, l1] = f.lateral;
+      const l0 = f.lateral[0];
+      const l1 = f.lateral[1];
       if (l <= l0 || l >= l1) return 0;
       const w = smoothstep(l0, l0 + BUMP_EDGE, l) * (1 - smoothstep(l1 - BUMP_EDGE, l1, l));
       return raisedCosine(x - f.s, f.length, f.height) * w;
@@ -57,7 +58,8 @@ export function featureHeight(f: RoadFeature, x: number, l: number, edges: RoadE
     case 'washboard': {
       const u = x - f.s;
       if (u <= 0 || u >= f.length) return 0;
-      const [w0, w1] = f.wavelength;
+      const w0 = f.wavelength[0];
+      const w1 = f.wavelength[1];
       // Linear wavelength chirp: phase = 2 pi * integral(du / lambda(u)).
       const phase = w1 === w0 ? (TAU * u) / w0 : ((TAU * f.length) / (w1 - w0)) * Math.log((w0 + ((w1 - w0) * u) / f.length) / w0);
       return f.amplitude * Math.sin(phase) * smoothstep(0, WASHBOARD_TAPER, u) * smoothstep(0, WASHBOARD_TAPER, f.length - u);

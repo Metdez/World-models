@@ -83,7 +83,9 @@ export const provingLoop: TrackDefinition = {
       primitives: corner(20, -180, 15),
       phenomenon: 'steering-lock',
       roughness: 'B',
-      targetSpeed: 9.7,
+      // Research range for hairpins is 30-40 km/h; the upper end keeps the lap inside its 65-85 s design range now
+      // that the clothoid transitions make the loop about 140 m longer than the research sketch.
+      targetSpeed: 11.1,
     },
     {
       id: 'bump-strip',
