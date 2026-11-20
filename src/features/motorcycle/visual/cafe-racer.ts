@@ -266,6 +266,8 @@ export function buildCafeRacer(vehicle: MotorcycleDefinition, options: CafeRacer
       out.set(humpF - (humpF - humpB) * s, (top + bot) / 2 + ((top - bot) / 2) * ey * e, hW(s) * se(Math.cos(t), 2.8) * e);
     }),
   );
+  // Leather back pad on the hump's front face.
+  pal(slab(roundedRect(0.2, 0.075, 0.03), 0.022, 0.009, new Matrix4().makeRotationY(Math.PI / 2).setPosition(humpF - 0.002, 0.835, 0), 'leather', 'piping'), 'leather');
   // Tail light under the hump, plate hanger.
   pal(slab(ellipse(0.034, 0.019), 0.02, 0.006, new Matrix4().makeRotationY(Math.PI / 2).setPosition(humpB + 0.015, 0.772, 0), 'tail', 'black'), 'tail');
   pal(bentTube([V(-0.83, 0.75, 0), V(-0.89, 0.7, 0), V(-0.93, 0.62, 0)], 0.012, 16, 10), 'black');
