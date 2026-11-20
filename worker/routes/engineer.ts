@@ -49,18 +49,27 @@ export async function answer(req: EngineerRequest, ai: Ai | undefined): Promise<
   return { body: { text, actions, source: 'model' }, outcome: 'model', detail: run.model };
 }
 
-/** Per-isolate fixed windows backing up the RL_ENGINEER binding, which did not throttle in the live test. */
-export const MEMORY_LIMITS = { client: 6, ip: 40, windowMs: 60_000 } as const;
-const windows = new Map<string, { start: number; count: number }>();
+/**
+ * Global limits, counted in the `engineer` Limiter Durable Object for every request (valid or not): per anonymous
+ * client id (a venue behind one NAT is not throttled as one visitor) and per address (bounds id rotation), plus a
+ * UTC-day model-call budget kept below the free Workers AI allocation (10k neurons/day, ~22 per answer). Past the
+ * budget every answer is the labelled rule-based one.
+ */
+export const ENGINEER_LIMITS = { client: 6, ip: 40, windowMs: 60_000, dailyModelCalls: 300 } as const;
 
-function allow(key: string, limit: number, now = Date.now()): boolean {
-  if (windows.size > 10_000) for (const [k, w] of windows) if (now - w.start >= MEMORY_LIMITS.windowMs) windows.delete(k);
-  const w = windows.get(key);
-  if (!w || now - w.start >= MEMORY_LIMITS.windowMs) {
-    windows.set(key, { start: now, count: 1 });
-    return true;
+export type Admission = 'busy' | 'rules' | 'model';
+
+async function admit(env: Env, clientKey: string, ip: string, needsModel: boolean): Promise<Admission> {
+  if (!env.LIMITER) return 'model';
+  const rules = clientKey === ip ? [{ key: ip, limit: ENGINEER_LIMITS.client }] : [{ key: clientKey, limit: ENGINEER_LIMITS.client }, { key: ip, limit: ENGINEER_LIMITS.ip }];
+  try {
+    const budget = needsModel ? { budget: ENGINEER_LIMITS.dailyModelCalls } : {};
+    return await env.LIMITER.getByName('engineer').admit({ rules, windowMs: ENGINEER_LIMITS.windowMs, ...budget });
+  } catch (e) {
+    // Limiter unreachable: answer from the rules rather than spend model calls unmetered.
+    console.error('limiter', e instanceof Error ? e.message : e);
+    return 'rules';
   }
-  return ++w.count <= limit;
 }
 
 const r = new Hono<{ Bindings: Env }>();
@@ -77,24 +86,22 @@ r.post(API.engineer, async (c) => {
     return c.json({ error: 'bad_request' }, 400, noStore);
   }
   const parsed = engineerRequestSchema.safeParse(json);
-  if (!parsed.success) return c.json({ error: 'bad_request' }, 400, noStore);
 
-  // Keyed by the anonymous client id so a venue behind one NAT is not throttled as one visitor.
-  // shortcut: limits are per isolate / per location; the account's Workers AI daily allocation is the hard backstop.
-  // An IP ceiling (memory only; the address is never stored beyond one window) bounds id rotation.
+  // The address is only a key inside the limiter's one-minute window; it is never stored or logged.
   const clientId = c.req.header('x-client-id');
   const ip = `ip:${c.req.header('cf-connecting-ip') ?? 'anon'}`;
-  const key = clientId && /^[\w-]{8,64}$/.test(clientId) ? `c:${clientId}` : ip;
-  const ok = allow(key, MEMORY_LIMITS.client) && allow(ip, MEMORY_LIMITS.ip) && (!c.env.RL_ENGINEER || (await c.env.RL_ENGINEER.limit({ key })).success);
-  if (!ok) return c.json({ error: 'busy' }, 429, noStore);
+  const clientKey = clientId && /^[\w-]{8,64}$/.test(clientId) ? `c:${clientId}` : ip;
+  const admission = await admit(c.env, clientKey, ip, parsed.success);
+  if (admission === 'busy') return c.json({ error: 'busy' }, 429, noStore);
+  if (!parsed.success) return c.json({ error: 'bad_request' }, 400, noStore);
 
   // Cast only for exactOptionalPropertyTypes: zod types optional corners as `X | undefined` (absent at runtime).
   const req = parsed.data as EngineerRequest;
   c.env.STATS?.writeDataPoint({ indexes: ['engineer-asked'], blobs: ['engineer-asked', req.telemetry.suspension, ''], doubles: [1] });
   const started = Date.now();
-  const { body, outcome, detail } = await answer(req, c.env.AI);
+  const { body, outcome, detail } = await answer(req, admission === 'model' ? c.env.AI : undefined);
   // Never log the question text: outcome, model and timing only.
-  console.log(JSON.stringify({ engineer: outcome, detail, ms: Date.now() - started, actions: body.actions.length }));
+  console.log(JSON.stringify({ engineer: admission === 'rules' ? 'budget' : outcome, detail, ms: Date.now() - started, actions: body.actions.length }));
   return c.json(body, 200, noStore);
 });
 

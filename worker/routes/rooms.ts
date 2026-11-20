@@ -4,14 +4,16 @@ import { generateHostKey, generateRoomCode, isPrivateCode, isRoomCode } from '..
 
 const NO_STORE = { 'Cache-Control': 'no-store' };
 const CODE_ATTEMPTS = 3;
+/** Room creations per address per minute, counted globally in the `rooms` Limiter Durable Object. */
+export const ROOM_CREATES_PER_MINUTE = 10;
 
 const r = new Hono<{ Bindings: Env }>();
 
 /** Big screen creates a private room; the host key is only ever shown on that screen (QR fragment). */
 r.post(API.rooms, async (c) => {
   const ip = c.req.header('cf-connecting-ip') ?? 'unknown';
-  const { success } = await c.env.RL_ROOMS.limit({ key: ip });
-  if (!success) return c.json({ error: 'busy' } satisfies ErrorResponse, 429, NO_STORE);
+  const verdict = await c.env.LIMITER.getByName('rooms').admit({ rules: [{ key: ip, limit: ROOM_CREATES_PER_MINUTE }], windowMs: 60_000 });
+  if (verdict === 'busy') return c.json({ error: 'busy' } satisfies ErrorResponse, 429, NO_STORE);
   const hostKey = generateHostKey();
   for (let i = 0; i < CODE_ATTEMPTS; i++) {
     const code = generateRoomCode();

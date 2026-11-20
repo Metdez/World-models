@@ -7,6 +7,8 @@ import { cleanText, normaliseReply, runEngineerModel } from '../../worker/engine
 import { numbersInText, ungroundedNumbers } from '../../worker/engineer/numbers';
 import { buildMessages } from '../../worker/engineer/prompt';
 import app from '../../worker/index';
+import { Limiter, type AdmitRequest } from '../../worker/limiter';
+import { ENGINEER_LIMITS } from '../../worker/routes/engineer';
 import { parseAction } from '../../worker/schemas/engineer';
 
 // Template paths keep tsc from resolving JSON/raw modules (no resolveJsonModule in the worker program).
@@ -33,9 +35,21 @@ function fakeAi(reply: unknown | ((model: string) => unknown)): Ai & { calls: { 
 const openAi = (content: string, tools: { name: string; arguments: string }[] = []) => ({
   choices: [{ message: { role: 'assistant', content, tool_calls: tools.map((f, i) => ({ id: `c${i}`, type: 'function', function: f })) } }],
 });
-const limiter = (ok: boolean, keys: string[] = []) => ({ limit: async ({ key }: { key: string }) => (keys.push(key), { success: ok }) });
-const env = (over: Record<string, unknown> = {}) => ({ APP_VERSION: 't', RL_ENGINEER: limiter(true), ...over }) as unknown as Env;
-let ipSeq = 0; // a fresh address per call keeps the route's in-memory limiter out of unrelated tests
+/** Fake LIMITER namespace backed by the real Limiter class over an in-memory storage map. */
+function limiterNs(requests: AdmitRequest[] = [], storage = new Map<string, unknown>()) {
+  const state = { storage: { get: async (k: string) => storage.get(k), put: async (k: string, v: unknown) => void storage.set(k, v) } };
+  const objects = new Map<string, Limiter>();
+  return {
+    getByName(name: string) {
+      let o = objects.get(name);
+      if (!o) objects.set(name, (o = new Limiter(state as unknown as DurableObjectState, {} as Env)));
+      const obj = o;
+      return { admit: (req: AdmitRequest) => (requests.push(req), obj.admit(req)) };
+    },
+  };
+}
+const env = (over: Record<string, unknown> = {}) => ({ APP_VERSION: 't', LIMITER: limiterNs(), ...over }) as unknown as Env;
+let ipSeq = 0; // a fresh address per call keeps the limiter out of unrelated tests
 const post = (body: unknown, e: Env, headers: Record<string, string> = {}) =>
   app.request('/api/engineer', { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body), headers: { 'content-type': 'application/json', 'cf-connecting-ip': `192.0.2.${++ipSeq}`, ...headers } }, e);
 
@@ -203,24 +217,41 @@ describe('POST /api/engineer', () => {
     }
   });
 
-  it('rate-limits by client id (else IP) with 429 busy', async () => {
-    const keys: string[] = [];
-    const res = await post(request('Why?'), env({ RL_ENGINEER: limiter(false, keys) }), { 'x-client-id': 'client-123456' });
-    expect(res.status).toBe(429);
-    expect(await res.json()).toEqual({ error: 'busy' });
-    await post(request('Why?'), env({ RL_ENGINEER: limiter(false, keys) }), { 'x-client-id': 'bad id!', 'cf-connecting-ip': '203.0.113.9' });
-    expect(keys).toEqual(['c:client-123456', 'ip:203.0.113.9']);
-  });
-
-  it('also throttles in memory per client id and per address when the binding lets everything through', async () => {
-    const e = env();
+  it('limits globally per client id and per address, counting invalid requests too', async () => {
+    const requests: AdmitRequest[] = [];
+    const e = env({ LIMITER: limiterNs(requests) });
     const codes: number[] = [];
-    for (let i = 0; i < 8; i++) codes.push((await post(request('Why?'), e, { 'x-client-id': 'memory-client-1', 'cf-connecting-ip': '198.51.100.7' })).status);
-    expect(codes).toEqual([200, 200, 200, 200, 200, 200, 429, 429]);
+    for (let i = 0; i < 8; i++) codes.push((await post(i % 2 ? request('') : request('Why?'), e, { 'x-client-id': 'client-123456', 'cf-connecting-ip': '198.51.100.7' })).status);
+    expect(codes).toEqual([200, 400, 200, 400, 200, 400, 429, 429]);
+    expect(requests[0]).toEqual({ rules: [{ key: 'c:client-123456', limit: 6 }, { key: 'ip:198.51.100.7', limit: 40 }], windowMs: 60_000, budget: ENGINEER_LIMITS.dailyModelCalls });
+    expect(requests[1]).not.toHaveProperty('budget'); // an invalid request spends no model budget
     const rotating: number[] = [];
     for (let i = 0; i < 40; i++) rotating.push((await post(request('Why?'), e, { 'x-client-id': `rotating-id-${i}`, 'cf-connecting-ip': '198.51.100.8' })).status);
     expect(rotating.filter((s) => s === 429)).toHaveLength(0);
-    expect((await post(request('Why?'), e, { 'x-client-id': 'rotating-id-x', 'cf-connecting-ip': '198.51.100.8' })).status).toBe(429);
+    const res = await post(request('Why?'), e, { 'x-client-id': 'rotating-id-x', 'cf-connecting-ip': '198.51.100.8' });
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: 'busy' });
+    await post(request('Why?'), e, { 'x-client-id': 'bad id!', 'cf-connecting-ip': '203.0.113.9' });
+    expect(requests.at(-1)!.rules).toEqual([{ key: 'ip:203.0.113.9', limit: 6 }]);
+  });
+
+  it('answers from the rules (labelled) once the daily model budget is spent, and when the limiter fails', async () => {
+    const storage = new Map<string, unknown>([['spent', { day: new Date().toISOString().slice(0, 10), used: ENGINEER_LIMITS.dailyModelCalls - 1 }]]);
+    const ai = fakeAi(openAi('The strut leans.'));
+    const e = env({ AI: ai, LIMITER: limiterNs([], storage) });
+    expect(((await (await post(request('Why?'), e)).json()) as EngineerResponse).source).toBe('model');
+    const spent = (await (await post(request('Why?'), e)).json()) as EngineerResponse;
+    expect(spent.source).toBe('fallback');
+    expect(spent.text.length).toBeGreaterThan(40);
+    expect(ai.calls).toHaveLength(1);
+    // A new UTC day starts a fresh budget.
+    storage.set('spent', { day: '2000-01-01', used: 9999 });
+    expect(((await (await post(request('Why?'), e)).json()) as EngineerResponse).source).toBe('model');
+    const broken = env({ AI: ai, LIMITER: { getByName: () => ({ admit: async () => Promise.reject(new Error('down')) }) } });
+    const res = await post(request('Why?'), broken);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as EngineerResponse).source).toBe('fallback');
+    expect(ai.calls).toHaveLength(2);
   });
 
   it('rejects invalid, oversized and injected-label input with 400/413 before any model call', async () => {

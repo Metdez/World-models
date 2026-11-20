@@ -6,6 +6,7 @@ import health from './routes/health';
 import rooms from './routes/rooms';
 import time from './routes/time';
 
+export { Limiter } from './limiter';
 export { Room } from './room';
 
 const app = new Hono<{ Bindings: Env }>();

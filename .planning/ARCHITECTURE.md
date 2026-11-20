@@ -2285,20 +2285,28 @@ track: anisotropy). The ribbon resolution is chosen at build time from the tier 
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*", "/ws/*", "/r/*"]
   },
-  "durable_objects": { "bindings": [{ "name": "ROOM", "class_name": "Room" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
+  "durable_objects": {
+    "bindings": [
+      { "name": "ROOM", "class_name": "Room" },
+      { "name": "LIMITER", "class_name": "Limiter" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Room"] },
+    { "tag": "v2", "new_sqlite_classes": ["Limiter"] }
+  ],
   "ai": { "binding": "AI" },
   "analytics_engine_datasets": [{ "binding": "STATS", "dataset": "suspension_lab_events" }],
-  "ratelimits": [
-    { "name": "RL_ENGINEER", "namespace_id": "4101", "simple": { "limit": 6, "period": 60 } },
-    { "name": "RL_ROOMS", "namespace_id": "4102", "simple": { "limit": 10, "period": 60 } }
-  ],
   "vars": { "APP_VERSION": "dev" },
   "observability": { "enabled": true, "head_sampling_rate": 1 }
 }
 ```
 If the first deploy rejects a binding (e.g. Rate Limiting on this plan), 01-04 removes ONLY that block, records it in
 STATE.md, and the dependent plan uses its documented fallback (in-DO/in-memory token bucket).
+07-02: the Rate Limiting bindings (`RL_ENGINEER`, `RL_ROOMS`) were replaced by the `Limiter` Durable Object
+(`worker/limiter.ts`, migration v2): rate-limit bindings count per location and in-memory counters per isolate, so a
+burst spread over colos passed both in production. One `Limiter` instance per route (`getByName('engineer' | 'rooms')`)
+sees every request: fixed 60 s windows per key, plus the engineer's UTC-day model-call budget.
 
 ### 12.2 `worker/index.ts` (verbatim, 01-01; route modules are stubs until their owner replaces them)
 ```ts
@@ -2310,6 +2318,7 @@ import health from './routes/health';
 import rooms from './routes/rooms';
 import time from './routes/time';
 
+export { Limiter } from './limiter';
 export { Room } from './room';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -2336,7 +2345,7 @@ Stub body: `r.all('/api/rooms', (c) => c.json({ error: 'not_implemented' }, 501)
 |---|---|---|
 | GET /api/health | health.ts | `HealthResponse` (`version` = `env.APP_VERSION`), no-store |
 | GET /api/time | time.ts | `TimeResponse`, `Cache-Control: no-store`, stamped right before return |
-| POST /api/rooms | rooms.ts | RL_ROOMS by IP; code from alphabet (retry ×3 if taken); `ROOM.getByName(code).init(hostKey)`; `CreateRoomResponse` |
+| POST /api/rooms | rooms.ts | `LIMITER('rooms')` 10/min by IP; code from alphabet (retry ×3 if taken); `ROOM.getByName(code).init(hostKey)`; `CreateRoomResponse` |
 | GET /ws/:code | rooms.ts | code must match `^[A-Z2-9]{5}$` or equal `LIVE`; requires `Upgrade: websocket` (426); forwards to the DO |
 | GET /r/:code | rooms.ts | 302 → `/remote.html?room=CODE` |
 | POST /api/engineer | engineer.ts | §12.5 |
@@ -2361,8 +2370,10 @@ sample → `clock.setOffset`). Before the socket opens, one `GET /api/time` burs
 Offline / `e2e`: ROOM service still provided with `connected: false`; nothing breaks.
 
 ### 12.5 AI Race Engineer (06-02)
-1. Validate `EngineerRequest` (zod; limits in `NET_LIMITS`), else 400. Rate limit `RL_ENGINEER` keyed by
-   `x-client-id` header (anonymous uuid) or IP → 429 `{error:'busy'}`.
+1. Validate `EngineerRequest` (zod; limits in `NET_LIMITS`), else 400. Rate limit (07-02: `LIMITER('engineer')`,
+   every request counted, valid or not) 6/min per `x-client-id` header (anonymous uuid, else IP) and 40/min per IP →
+   429 `{error:'busy'}`; a UTC-day budget of 300 model calls (free allocation 10k neurons, ~22 per answer), past
+   which the answer is the labelled rule answer.
 2. Prompt (`engineer/prompt.ts`): rules (1–3 plain sentences; explain WHY; quote only numbers in TELEMETRY; use a
    tool to SHOW; at most 2 tools; never invent specs, brands, lap times; steer off-topic back), FACTS = `common` +
    the active suspension's card (`engineer/facts.ts`, curated from research 04 §1–§11, tendencies only, no numbers),

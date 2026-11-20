@@ -6,9 +6,9 @@ function fakeEnv(opts: { allow?: boolean; initResults?: boolean[] } = {}) {
   const results = [...(opts.initResults ?? [true])];
   const names: string[] = [];
   const forwarded: Request[] = [];
-  const limit = vi.fn(async () => ({ success: opts.allow ?? true }));
+  const limit = vi.fn(async () => (opts.allow ?? true ? 'model' : 'busy'));
   const env = {
-    RL_ROOMS: { limit },
+    LIMITER: { getByName: (name: string) => (names.push(`limiter:${name}`), { admit: limit }) },
     ROOM: {
       getByName(name: string) {
         names.push(name);
@@ -36,14 +36,14 @@ describe('POST /api/rooms', () => {
     const body = (await res.json()) as CreateRoomResponse;
     expect(body.code).toMatch(new RegExp(`^[${ROOM_CODE_ALPHABET}]{5}$`));
     expect(body.hostKey).toMatch(/^[A-Za-z0-9_-]{32}$/);
-    expect(names).toEqual([body.code]);
-    expect(limit).toHaveBeenCalledWith({ key: '203.0.113.7' });
+    expect(names).toEqual(['limiter:rooms', body.code]);
+    expect(limit).toHaveBeenCalledWith({ rules: [{ key: '203.0.113.7', limit: 10 }], windowMs: 60_000 });
   });
 
   it('retries taken codes up to 3 times, then 503', async () => {
     const retry = fakeEnv({ initResults: [false, false, true] });
     expect((await app.request('/api/rooms', { method: 'POST' }, retry.env)).status).toBe(200);
-    expect(retry.names).toHaveLength(3);
+    expect(retry.names).toHaveLength(4);
     const fail = fakeEnv({ initResults: [false, false, false] });
     expect((await app.request('/api/rooms', { method: 'POST' }, fail.env)).status).toBe(503);
   });
@@ -53,7 +53,7 @@ describe('POST /api/rooms', () => {
     const res = await app.request('/api/rooms', { method: 'POST' }, env);
     expect(res.status).toBe(429);
     expect(await res.json()).toEqual({ error: 'busy' });
-    expect(names).toEqual([]);
+    expect(names).toEqual(['limiter:rooms']);
     expect((await app.request('/api/rooms', {}, env)).status).toBe(405);
   });
 });
