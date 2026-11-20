@@ -22,8 +22,8 @@ export default {
   phase: 'scene',
   init(ctx) {
     const render = ctx.services.get(RENDER);
-    const main = createLineBatch({ capacity: 1600, width: 2.5, casing: 6, renderOrder: 40, name: 'teaching-overlays:construction' });
-    const ghost = createLineBatch({ capacity: 600, width: 1.5, casing: 0, renderOrder: 38, name: 'teaching-overlays:ghost' });
+    const main = createLineBatch({ capacity: 1000, width: 2.5, casing: 6, renderOrder: 40, name: 'teaching-overlays:construction' });
+    const ghost = createLineBatch({ capacity: 1400, width: 1.5, casing: 0, renderOrder: 38, name: 'teaching-overlays:ghost' });
     const group = new Group();
     group.name = 'teaching-overlays';
     group.visible = false;

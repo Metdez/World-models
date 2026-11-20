@@ -188,7 +188,9 @@ export function buildCafeRacer(vehicle: MotorcycleDefinition, options: CafeRacer
   const tBot = curve([[0, 0.79], [0.5, 0.768], [1, 0.795]]);
   const tW = curve([[0, 0.125], [0.25, 0.16], [0.5, 0.168], [0.78, 0.15], [1, 0.105]]);
   const tankSurface = (s: number, t: number, out: Vector3) => {
-    const e = endRound(s, 0.085) * endRound(1 - s, 0.09);
+    // Blunt in side view (height rounds off over a short span), rounded in plan (width over a longer one).
+    const eh = endRound(s, 0.035) * endRound(1 - s, 0.05);
+    const ew = endRound(s, 0.14) * endRound(1 - s, 0.11);
     const c = Math.cos(t);
     const sn = Math.sin(t);
     const top = tTop(s);
@@ -201,7 +203,7 @@ export function buildCafeRacer(vehicle: MotorcycleDefinition, options: CafeRacer
     // Knee cut-outs: a soft dish low on the rear flanks.
     const bump = (u: number) => (Math.abs(u) < 1 ? (1 - u * u) * (1 - u * u) : 0);
     w -= 0.026 * bump((s - 0.76) / 0.2) * bump((ey + 0.15) / 0.6);
-    out.set(tankF - (tankF - tankB) * s, mid + hh * ey * e, w * ex * e);
+    out.set(tankF - (tankF - tankB) * s, mid + hh * ey * eh, w * ex * ew);
   };
   paintParts.push(loft(64, 48, tankSurface));
   // Monza flip cap and its hinge.
@@ -416,24 +418,24 @@ function updateChain(top: Mesh, bottom: Mesh, a: Vector3, b: Vector3, ra: number
   _d.multiplyScalar(1 / L);
   const k = (ra - rb) / L;
   const q = Math.sqrt(Math.max(0, 1 - k * k));
-  for (const [mesh, sign] of [
-    [top, 1],
-    [bottom, -1],
-  ] as const) {
-    // Unit normal m with m.d = k: m = k d + sign q d_perp, d_perp = (-d.y, d.x) or its opposite (pick the upper one).
-    let px = -_d.y;
-    let py = _d.x;
-    if (py < 0) {
-      px = -px;
-      py = -py;
-    }
-    _n.set(k * _d.x + sign * q * px, k * _d.y + sign * q * py, 0);
-    mesh.position.set(a.x + ra * _n.x, a.y + ra * _n.y, a.z);
-    _p.set(b.x + rb * _n.x - mesh.position.x, b.y + rb * _n.y - mesh.position.y, 0);
-    const len = _p.length();
-    mesh.quaternion.setFromUnitVectors(UP, _p.multiplyScalar(1 / len));
-    mesh.scale.set(1, len / rest, 1);
+  placeRun(top, 1, a, b, ra, rb, k, q, rest);
+  placeRun(bottom, -1, a, b, ra, rb, k, q, rest);
+}
+
+function placeRun(mesh: Mesh, sign: number, a: Vector3, b: Vector3, ra: number, rb: number, k: number, q: number, rest: number): void {
+  // Unit normal m with m.d = k: m = k d + sign q d_perp, d_perp the upward perpendicular of d.
+  let px = -_d.y;
+  let py = _d.x;
+  if (py < 0) {
+    px = -px;
+    py = -py;
   }
+  _n.set(k * _d.x + sign * q * px, k * _d.y + sign * q * py, 0);
+  mesh.position.set(a.x + ra * _n.x, a.y + ra * _n.y, a.z);
+  _p.set(b.x + rb * _n.x - mesh.position.x, b.y + rb * _n.y - mesh.position.y, 0);
+  const len = _p.length();
+  mesh.quaternion.setFromUnitVectors(UP, _p.multiplyScalar(1 / len));
+  mesh.scale.set(1, len / rest, 1);
 }
 
 export const cafeRacerVisual: VehicleVisualDefinition = {

@@ -176,7 +176,7 @@ export function buildFront(def: TelescopicFront | TeleleverFront, vehicle: Motor
   // ---------------------------------------------------------------- fork: sprung tubes
   const fork: BufferGeometry[] = [];
   const unsprung = new Group();
-  unsprung.name = 'fork-lower';
+  unsprung.name = 'front-unsprung';
   steering.add(unsprung);
   const lower: BufferGeometry[] = [];
   const lowerPlain: BufferGeometry[] = [];

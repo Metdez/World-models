@@ -33,9 +33,9 @@ const LOAD_SCALE = 0.3 / 4000;
 
 // Linear-rgb stroke colours (additive layer: values > 1 survive the AgX tone map as clean, bright strokes).
 const FORCE = [0.36, 1.9, 1.4] as const; // accent mint: contact patch → IC → RC
-const IC = [1.25, 0.3, 0.22] as const; // coral: arm planes → IC
+const IC = [1.5, 0.36, 0.26] as const; // coral: arm planes → IC
 const RC = [1.5, 1.5, 1.5] as const;
-const GUIDE = [0.42, 0.45, 0.5] as const; // ground line, centreline
+const GUIDE = [0.55, 0.58, 0.64] as const; // ground line, centreline
 const GHOST = [0.3, 0.38, 0.48] as const; // additive ghost layer
 const GRIP_OK = [0.7, 0.85, 0.95] as const;
 const GRIP_WARN = [1.6, 0.72, 0.16] as const; // --warn
@@ -198,6 +198,8 @@ export interface Construction {
 export function createConstruction(main: LineBatch, ghost: LineBatch): Construction {
   const rigs: CornerRig[] = [];
   let rest = new Float64Array(0);
+  /** Batch that stroke()/ray() write to: `main` for primary strokes, `ghost` (thin, no casing) for secondary ones. */
+  let out = main;
   // body basis (sim frame)
   const ex = v3();
   const ey = v3();
@@ -228,7 +230,7 @@ export function createConstruction(main: LineBatch, ghost: LineBatch): Construct
       const e = Math.min(s + step, s1);
       const fa = fadeAt(s, max, clamped);
       const fb = fadeAt(e, max, clamped);
-      main.seg(
+      out.seg(
         o[0]! + dir[0]! * s, o[1]! + dir[1]! * s, o[2]! + dir[2]! * s,
         o[0]! + dir[0]! * e, o[1]! + dir[1]! * e, o[2]! + dir[2]! * e,
         col[0]! * fa, col[1]! * fa, col[2]! * fa, col[0]! * fb, col[1]! * fb, col[2]! * fb,
@@ -312,7 +314,9 @@ export function createConstruction(main: LineBatch, ghost: LineBatch): Construct
         const t1 = closestT(p, d, ic);
         set(a, p[0]! + d[0]! * t0, p[1]! + d[1]! * t0, p[2]! + d[2]! * t0);
         set(b, p[0]! + d[0]! * t1, p[1]! + d[1]! * t1, p[2]! + d[2]! * t1);
+        out = ghost;
         ray(a, b, IC, 0, 0.016, 1.6, armMax);
+        out = main;
       }
       // Contact patch → IC: solid; the roll centre lies on its continuation (dashed past the IC).
       const ax = t.axles[fc.axle === 'front' ? 0 : 1];
@@ -436,14 +440,16 @@ export function createConstruction(main: LineBatch, ghost: LineBatch): Construct
     set(b, cr.contactPatch.x, cr.contactPatch.y, cr.contactPatch.z);
     if (!finite3(a) || !finite3(b)) return;
     const gk = 0.8;
-    main.seg(a[0]!, a[1]!, a[2]!, b[0]!, b[1]!, b[2]!, GUIDE[0] * gk, GUIDE[1] * gk, GUIDE[2] * gk, GUIDE[0] * gk, GUIDE[1] * gk, GUIDE[2] * gk);
+    ghost.seg(a[0]!, a[1]!, a[2]!, b[0]!, b[1]!, b[2]!, GUIDE[0] * gk, GUIDE[1] * gk, GUIDE[2] * gk, GUIDE[0] * gk, GUIDE[1] * gk, GUIDE[2] * gk);
     if (!ax || !Number.isFinite(ax.rollCentreHeight)) return;
     set(q, ax.rollCentre.x, ax.rollCentre.y, ax.rollCentre.z);
     if (!finite3(q)) return;
     set(c, (a[0]! + b[0]!) / 2, (a[1]! + b[1]!) / 2, (a[2]! + b[2]!) / 2);
     // centreline: dashed from the ground to a little above the RC (or above the ground, whichever is higher)
     const top = Math.max(dot(sub(p, q, c), ez), 0) + 0.12;
+    out = ghost;
     stroke(c, ez, 0, top, GUIDE, 0.025, LINE_MAX, false);
+    out = main;
     ring(main, q, ey, ez, 0.034, RC, 1, 16);
     ring(main, q, ey, ez, 0.012, RC, 1, 8);
     // trail in the body frame, re-posed every frame so it shows RC migration relative to the car
@@ -527,9 +533,9 @@ export function createConstruction(main: LineBatch, ghost: LineBatch): Construct
       const sampleTrail = trailClock >= RC_TRAIL_DT;
       if (sampleTrail) trailClock = 0;
       if (cs.length === 4) {
-        main.gain = gain[0]!;
+        main.gain = ghost.gain = gain[0]!;
         drawAxle(0, cs[0]!, cs[1]!, t, sampleTrail);
-        main.gain = gain[1]!;
+        main.gain = ghost.gain = gain[1]!;
         drawAxle(1, cs[2]!, cs[3]!, t, sampleTrail);
       }
       main.gain = ghost.gain = 1;

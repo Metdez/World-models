@@ -39,7 +39,7 @@ export interface PaintSpec {
 }
 
 const FLAKE_CELL = 0.0008;
-const FLAKE_FADE_M = 6;
+const FLAKE_FADE_M = 3;
 
 /**
  * Deep metallic paint under a hard clearcoat with flakes and twin stripes. The stripes are decided per fragment from
@@ -90,7 +90,7 @@ vec3 flakeHash(vec3 p) {
           /* glsl */ `#include <normal_fragment_maps>
 \t{
 \t\tfloat flakeFade = clamp(1.0 - length(vViewPosition) / ${FLAKE_FADE_M.toFixed(1)}, 0.0, 1.0);
-\t\tnormal = normalize(normal + 0.2 * flakeFade * flakeHash(floor(vPaintPos / ${FLAKE_CELL})));
+\t\tnormal = normalize(normal + 0.07 * flakeFade * flakeHash(floor(vPaintPos / ${FLAKE_CELL})));
 \t}`,
         );
   };

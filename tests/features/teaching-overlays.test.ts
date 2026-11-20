@@ -19,8 +19,8 @@ import { createSimulation } from '../../src/sim-core/index';
 const catalog: SimCatalog = { track: () => undefined, vehicle: () => undefined, suspension: () => undefined };
 const v = (x: number, y: number, z: number) => Float64Array.of(x, y, z);
 const batches = () => ({
-  main: createLineBatch({ capacity: 1600, width: 2, casing: 5, renderOrder: 1, name: 'main' }),
-  ghost: createLineBatch({ capacity: 600, width: 1.5, casing: 0, opacity: 0.5, renderOrder: 0, name: 'ghost' }),
+  main: createLineBatch({ capacity: 1000, width: 2.5, casing: 6, renderOrder: 1, name: 'main' }),
+  ghost: createLineBatch({ capacity: 1400, width: 1.5, casing: 0, renderOrder: 0, name: 'ghost' }),
 });
 const allFinite = (b: LineBatch) => b.positions.subarray(0, b.count * 6).every(Number.isFinite);
 
@@ -89,6 +89,8 @@ describe('construction from live frames', () => {
         const t = sim.sample(1, amp);
         c.draw(t, sim, 1 / 60);
         expect(main.count).toBeGreaterThan(40);
+        expect(main.count).toBeLessThan(main.capacity);
+        expect(ghost.count).toBeLessThan(ghost.capacity);
         expect(ghost.count).toBeGreaterThan(40);
         expect(allFinite(main) && allFinite(ghost)).toBe(true);
         worstMiss = Math.max(worstMiss, armMiss(t, sim));
