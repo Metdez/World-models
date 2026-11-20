@@ -50,6 +50,7 @@ function init(ctx: FeatureContext): void {
   if (ctx.flags.e2e) return; // deterministic tests: no network room (§6.6)
 
   ctx.addDisposer(mount(ctx.dom.overlay, view.root));
+  ctx.watch((s) => view.root.classList.toggle('is-off', !s.hudVisible)); // H hides it with the rest of the HUD
 
   const labelOf = (suspensionId: string) => ctx.registries.suspensions.get(suspensionId)?.copy.short ?? suspensionId;
   const showPresence = (p: PresenceSnapshot) => {

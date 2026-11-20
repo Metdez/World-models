@@ -1,26 +1,39 @@
-/* Live Lab presence readout. Tokens only (src/ui/tokens.css). */
+/*
+ * Live Lab presence: one slim line under the vehicle tag (04-05 layout, left column; --sl-hud-* from controls.css).
+ * Tokens only (src/ui/tokens.css).
+ */
 .sl-live-lab {
   position: absolute;
   left: var(--margin);
-  bottom: var(--margin);
-  width: 208px;
-  padding: var(--sp-2) var(--sp-3);
-  display: grid;
+  top: calc(var(--margin) + var(--sl-hud-tag-h, 100px) + var(--sl-hud-gap, 8px));
+  zoom: var(--sl-hud-zoom, 1);
+  height: var(--sl-hud-line-h, 28px);
+  max-width: var(--sl-hud-col, 316px);
+  padding: 0 var(--sp-3) 0 10px;
+  display: flex;
+  align-items: center;
   gap: var(--sp-2);
+  overflow: hidden;
+  white-space: nowrap;
   background: var(--glass);
   -webkit-backdrop-filter: var(--glass-filter);
   backdrop-filter: var(--glass-filter);
   border: 1px solid var(--hair);
-  border-radius: var(--radius-chip);
+  border-radius: var(--radius-pill);
   color: var(--text-2);
-  font: 500 var(--fs-label) / 1.3 var(--font-sans);
+  font: 500 var(--fs-label) / 1 var(--font-sans);
   letter-spacing: var(--ls-label);
   text-transform: uppercase;
-  pointer-events: none;
   transition: opacity var(--dur-hud) var(--ease);
 }
 
+/* base.css opts overlay children in (#overlay > *); a readout never takes input. */
+#overlay > .sl-live-lab {
+  pointer-events: none;
+}
+
 .sl-live-lab[hidden],
+.sl-live-lab.is-off,
 .sl-live-lab [hidden] {
   display: none;
 }
@@ -47,9 +60,10 @@
 }
 
 .sl-live-lab-bar {
+  flex: 0 0 40px;
   display: flex;
-  gap: 2px;
-  height: 4px;
+  gap: 1px;
+  height: 3px;
   border-radius: var(--radius-pill);
   overflow: hidden;
 }
@@ -71,8 +85,9 @@
 
 .sl-live-lab-legend {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-1) var(--sp-3);
+  gap: var(--sp-2);
+  min-width: 0;
+  overflow: hidden;
   color: var(--text-3);
   text-transform: none;
   letter-spacing: 0;
@@ -90,7 +105,9 @@
 
 @media (max-width: 720px) {
   .sl-live-lab {
-    width: auto;
-    max-width: 60vw;
+    max-width: calc(100vw - 2 * var(--margin));
+  }
+  .sl-live-lab-legend {
+    display: none;
   }
 }

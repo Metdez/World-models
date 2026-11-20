@@ -22,7 +22,8 @@ export default {
   phase: 'scene',
   init(ctx) {
     const render = ctx.services.get(RENDER);
-    const main = createLineBatch({ capacity: 1000, width: 2.5, casing: 6, renderOrder: 40, name: 'teaching-overlays:construction' });
+    // A strong dark casing keeps the strokes legible over the bright x-ray shell and the sky alike.
+    const main = createLineBatch({ capacity: 1000, width: 2.5, casing: 6, casingStrength: 0.85, renderOrder: 40, name: 'teaching-overlays:construction' });
     const ghost = createLineBatch({ capacity: 1400, width: 1.5, casing: 0, renderOrder: 38, name: 'teaching-overlays:ghost' });
     const group = new Group();
     group.name = 'teaching-overlays';
@@ -58,6 +59,7 @@ export default {
 
     let active = false;
     let view: string | undefined;
+    let farFloor = 0.22;
     ctx.watch((s) => {
       // Close-up defaults the engineer layer on (on entering it); the user can switch it off again there.
       if (s.view === 'closeup' && view !== 'closeup' && s.overlay !== 'engineer') {
@@ -66,11 +68,13 @@ export default {
         return;
       }
       view = s.view;
+      // Close-up: only the focused axle's construction; the far one would cross the linkage through the body.
+      farFloor = s.view === 'closeup' ? 0 : 0.22;
       const on = s.overlay === 'engineer';
       if (on && !active) construction.reset();
       active = on;
       group.visible = on;
-      panel.setVisible(on && s.hudVisible);
+      panel.setVisible(on && s.hudVisible && !s.attract);
     });
 
     const size = new Vector2();
@@ -86,7 +90,7 @@ export default {
       eye.x = c.x;
       eye.y = -c.z;
       eye.z = c.y;
-      construction.draw(frame.t, ctx.sim.current, frame.dt, eye);
+      construction.draw(frame.t, ctx.sim.current, frame.dt, eye, farFloor);
       panelClock += frame.dt;
       if (panelClock >= PANEL_DT) {
         panelClock = 0;

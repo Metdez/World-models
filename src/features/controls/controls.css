@@ -1,5 +1,35 @@
 /* HUD controls (plan 04-02, research 14 D2-D8). Tokens only (src/ui/tokens.css). */
 
+/*
+ * One HUD layout (04-05, research 14 D5). Every HUD piece of every feature reads these (with fallbacks), so the
+ * columns stack without measuring each other. Lengths are HUD px: --sl-hud-zoom scales all of them together.
+ *   left column : vehicle tag → Live Lab line → presenter card (screen) … telemetry card → engineer pill
+ *   right column: time/display groups → camber trace … poll → view control
+ *   centre      : amplification chip, debug stats … insight caption → suspension control
+ */
+:root {
+  --sl-hud-zoom: 1;
+  --sl-hud-col: 316px; /* left/right column width */
+  --sl-hud-gap: 8px; /* between stacked pieces */
+  --sl-hud-tag-h: 100px; /* vehicle tag */
+  --sl-hud-line-h: 28px; /* Live Lab presence line */
+  --sl-hud-top-h: 44px; /* top-right groups */
+  --sl-hud-pill-h: 38px; /* "Ask the engineer" pill */
+  --sl-hud-view-h: 48px; /* view control */
+  --sl-hud-susp-h: 96px; /* suspension control + descriptor */
+}
+/* big screens at events: the same layout, larger */
+@media (min-width: 1600px) and (min-height: 860px) {
+  :root {
+    --sl-hud-zoom: 1.25;
+  }
+}
+@media (min-width: 2400px) and (min-height: 1300px) {
+  :root {
+    --sl-hud-zoom: 1.6;
+  }
+}
+
 .sl-controls-hud {
   position: absolute;
   transition:
@@ -79,9 +109,12 @@
 .sl-controls-tag {
   top: var(--margin);
   left: var(--margin);
+  height: var(--sl-hud-tag-h);
+  max-width: var(--sl-hud-col);
   display: grid;
+  align-content: center;
   gap: 6px;
-  padding: var(--sp-3) var(--sp-4) var(--sp-2);
+  padding: 0 var(--sp-4);
   border-radius: var(--radius-panel);
 }
 #overlay > .sl-controls-tag {
@@ -464,20 +497,11 @@ button.sl-controls-help-row:hover {
   }
 }
 
-/* big screens at events: the same layout, larger */
-@media (min-width: 1600px) and (min-height: 860px) {
-  .sl-controls-hud,
-  .sl-controls-amp,
-  .sl-controls-restore {
-    zoom: 1.25;
-  }
-}
-@media (min-width: 2400px) and (min-height: 1300px) {
-  .sl-controls-hud,
-  .sl-controls-amp,
-  .sl-controls-restore {
-    zoom: 1.6;
-  }
+/* big screens: the shared HUD scale rule (top of this file) */
+.sl-controls-hud,
+.sl-controls-amp,
+.sl-controls-restore {
+  zoom: var(--sl-hud-zoom);
 }
 
 /* the view control leaves the bottom row before it can touch the suspension control */

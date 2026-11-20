@@ -9,13 +9,16 @@ export interface HdrAnalysis {
   readonly sunColor: Rgb;
   /** Irradiance removed by the clamp (luminance · sr, cosine-free); 0 when nothing exceeded it. */
   readonly sunIrradiance: number;
-  /** Mean linear colour of the sky band just above the horizon (fog colour). */
+  /** Mean linear colour of the HDRI at the horizon line, where the fogged terrain edge meets the background (fog colour). */
   readonly horizon: Rgb;
 }
 
 const LUMA: Rgb = [0.2126, 0.7152, 0.0722];
-/** Latitude band for the horizon colour, rad. */
-const HORIZON_BAND: readonly [number, number] = [2 * (Math.PI / 180), 8 * (Math.PI / 180)];
+/**
+ * Latitude band for the horizon colour, rad. The far terrain is fully fogged and ends at ~0°, right against the
+ * background there: the sky above (2–8°, ~5× brighter on the airfield) drew a light line along the horizon.
+ */
+const HORIZON_BAND: readonly [number, number] = [-1 * (Math.PI / 180), 2 * (Math.PI / 180)];
 
 /** Direction three.js samples at equirect uv (`equirectUv` in the shader chunks, flipY texture: v = 1 at row 0). */
 export function equirectDirection(u: number, v: number, out: [number, number, number]): [number, number, number] {

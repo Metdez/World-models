@@ -311,8 +311,10 @@ const telemetryPanel: FeatureModule = {
       s.lastSimTime = -Infinity;
     });
     c.watch((state) => {
-      // The engineer panel grows upward into this column: give it the space while open.
-      root.hidden = !state.hudVisible || state.engineerOpen;
+      // The engineer panel grows upward into this column: give it the space while open. Attract mode is a clean film.
+      root.hidden = !state.hudVisible || state.engineerOpen || state.attract;
+      // Close-up: the wheel is the hero; the card folds to the g-g and its two numbers (the camber trace takes over).
+      root.classList.toggle('is-compact', state.view === 'closeup');
       scaleNote.hidden = state.amplification === 1;
       s.reducedMotion = state.reducedMotion;
     });

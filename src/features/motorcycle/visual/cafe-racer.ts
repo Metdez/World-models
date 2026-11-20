@@ -35,6 +35,7 @@ import {
   spokedWheel,
   sprocketGeometry,
   taperedTube,
+  twinBarrel,
   yToZ,
 } from './shapes';
 
@@ -140,20 +141,46 @@ export function buildCafeRacer(vehicle: MotorcycleDefinition, options: CafeRacer
     ).map(([x, y]) => new Vector2(x, y)),
   );
   pal(slab(crank, 0.25, 0.024, new Matrix4(), 'engine'), 'engine');
-  // Brushed covers with polished edges: clutch (right), alternator and sprocket (left), sump fins underneath.
+  // Brushed covers with polished edges: clutch (right) with a domed pressure-plate boss, a domed alternator cover
+  // (left), sprocket cover; a raised parting rib round the cases; bolt heads round every cover.
   pal(slab(roundedPoly([[-0.1, 0.25], [0.11, 0.24], [0.15, 0.33], [0.08, 0.42], [-0.07, 0.43], [-0.12, 0.36]], 0.05), 0.026, 0.01, new Matrix4().makeTranslation(0, 0, 0.138), 'alloy', 'polished'), 'alloy');
-  pal(slab(ellipse(0.042, 0.042), 0.012, 0.004, new Matrix4().makeTranslation(0.02, 0.335, 0.156), 'polished', 'fin'), 'polished');
-  pal(slab(ellipse(0.088, 0.088), 0.026, 0.01, new Matrix4().makeTranslation(0.165, 0.305, -0.138), 'alloy', 'polished'), 'alloy');
-  pal(slab(ellipse(0.032, 0.032), 0.012, 0.004, new Matrix4().makeTranslation(0.165, 0.305, -0.156), 'polished', 'fin'), 'polished');
+  /** Domed cover facing +z (side +1) or -z (side -1), centred at (x, y), base at |z| = z0. */
+  const dome = (x: number, y: number, z0: number, side: 1 | -1, r: number, h: number, finish: MotoFinish) => {
+    const g = yToZ(lathe([[0, h], [r * 0.35, h * 0.97], [r * 0.65, h * 0.82], [r * 0.88, h * 0.5], [r, h * 0.16], [r, 0]], 40, 0.5));
+    if (side < 0) g.rotateY(Math.PI);
+    pal(g.translate(x, y, side * z0), finish);
+  };
+  const bolts = (x: number, y: number, z: number, r: number, n: number, phase = 0) => {
+    for (let i = 0; i < n; i++) {
+      const a = phase + (i / n) * Math.PI * 2;
+      const p = V(x + Math.cos(a) * r, y + Math.sin(a) * r, z);
+      pal(rod(p, p.clone().setZ(z + Math.sign(z) * 0.007), 0.0055, 'polished', 0.0055, 6), 'polished');
+    }
+  };
+  dome(0.02, 0.335, 0.162, 1, 0.05, 0.022, 'alloy');
+  pal(yToZ(lathe([[0.05, 0], [0.054, 0.003], [0.054, 0.007], [0.05, 0.009]], 40, 0.5)).translate(0.02, 0.335, 0.16), 'polished');
+  bolts(0.02, 0.335, 0.164, 0.038, 6, 0.3);
+  bolts(0.01, 0.335, 0.164, 0.118, 9, 0.1);
+  dome(0.165, 0.305, 0.138, -1, 0.09, 0.03, 'alloy');
+  pal(yToZ(lathe([[0.09, 0], [0.095, 0.004], [0.095, 0.01], [0.09, 0.013]], 48, 0.5)).rotateY(Math.PI).translate(0.165, 0.305, -0.136), 'polished');
+  bolts(0.165, 0.305, -0.164, 0.072, 8, 0.2);
+  for (const z of [-0.126, 0.126]) pal(slab(roundedRect(0.33, 0.012, 0.005), 0.008, 0.002, new Matrix4().makeTranslation(0.085, 0.365, z), 'black'), 'black');
   pal(slab(roundedRect(0.14, 0.11, 0.045), 0.02, 0.008, new Matrix4().makeTranslation(sx + 0.035, sy + 0.005, -0.142), 'alloy', 'polished'), 'alloy');
   pal(yToZ(sprocketGeometry(vehicle.chain.frontRadius, 0)).translate(sx, sy, CHAIN_Z), 'steel');
   // Cylinder block, head and cam cover on an axis tilted forward.
   const tilt = (8 * Math.PI) / 180;
   const cyl = new Matrix4().makeRotationZ(-tilt).setPosition(0.105, 0.462, 0);
-  const block = finStack(15, 0.0, 0.2, { depth: 0.172, width: 0.285, thickness: 0.0036 }, { depth: 0.122, width: 0.235 }, 0.2, 'engine', 'fin');
-  const head = finStack(5, 0.2, 0.278, { depth: 0.19, width: 0.3, thickness: 0.0048 }, { depth: 0.16, width: 0.262 }, 0, 'engine', 'fin');
-  const cam = slab(roundedRect(0.15, 0.285, 0.055), 0.042, 0.014, new Matrix4().makeBasis(V(1, 0, 0), V(0, 0, -1), V(0, 1, 0)).setPosition(0, 0.297, 0), 'engine', 'fin');
+  // Two barrels in one finned block (twin-lobed fins with a filleted waist), a deeper-finned head, a twin-dome cam
+  // cover with a polished parting line, and spark-plug caps on top of each bore.
+  const block = finStack(13, 0.0, 0.2, { depth: 0.165, width: 0.29, thickness: 0.0052 }, { depth: 0.11, width: 0.23 }, 0.16, 'engine', 'fin', twinBarrel);
+  const head = finStack(5, 0.205, 0.278, { depth: 0.2, width: 0.31, thickness: 0.0062 }, { depth: 0.15, width: 0.262 }, 0, 'engine', 'fin', twinBarrel);
+  const cam = slab(twinBarrel(0.27, 0.15), 0.034, 0.016, new Matrix4().makeBasis(V(0, 0, 1), V(1, 0, 0), V(0, 1, 0)).setPosition(0, 0.282, 0), 'engine', 'fin');
+  const camLine = slab(twinBarrel(0.276, 0.156), 0.004, 0, new Matrix4().makeBasis(V(0, 0, 1), V(1, 0, 0), V(0, 1, 0)).setPosition(0, 0.282, 0), 'polished');
   for (const g of [block, head, cam]) pal(g.applyMatrix4(cyl), 'engine');
+  pal(camLine.applyMatrix4(cyl), 'polished');
+  for (const z of [-0.057, 0.057]) {
+    pal(rod(V(0.072, 0.0, z).applyMatrix4(cyl).setY(0.462 + 0.33), V(0.07, 0.0, z).applyMatrix4(cyl).setY(0.462 + 0.36), 0.011, 'black', 0.009, 10), 'black');
+  }
   const local = (x: number, y: number, z: number) => V(x, y, z).applyMatrix4(cyl);
   both((s) => {
     // Faux carburettor throttle bodies behind the head.
@@ -336,8 +363,8 @@ export function buildCafeRacer(vehicle: MotorcycleDefinition, options: CafeRacer
     hub.position.set(id === 'f' ? xf : xr, tyre.radius, 0);
     return { hub, spin };
   };
-  const front = wheel('f', vehicle.front.tyre, 36, 0.05, false);
-  const rear = wheel('r', vehicle.rear.tyre, 40, 0.068, true);
+  const front = wheel('f', vehicle.front.tyre, 28, 0.05, false);
+  const rear = wheel('r', vehicle.rear.tyre, 32, 0.068, true);
 
   // Chain: a run of links (side plates + rollers) at rest length, stretched per frame along the tangent.
   const chainRest = Math.hypot(xr - sx, Rr - sy);

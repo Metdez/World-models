@@ -191,8 +191,11 @@ export function buildRig(rig: CornerRig, c: CornerFrame, sim: OverlaySim): void 
 export interface Construction {
   /** Clears the RC trails (vehicle/suspension change, seek). */
   reset(): void;
-  /** `eye` (sim frame, optional): the axle nearer the camera is drawn at full strength, the other one dimmed. */
-  draw(t: TelemetryFrame, sim: OverlaySim, dt: number, eye?: XYZ): void;
+  /**
+   * `eye` (sim frame, optional): the axle nearer the camera is drawn at full strength, the other one dimmed down to
+   * `farFloor` (0.22; 0 hides it, e.g. in the close-up where the focused wheel is the hero).
+   */
+  draw(t: TelemetryFrame, sim: OverlaySim, dt: number, eye?: XYZ, farFloor?: number): void;
 }
 
 export function createConstruction(main: LineBatch, ghost: LineBatch): Construction {
@@ -486,7 +489,7 @@ export function createConstruction(main: LineBatch, ghost: LineBatch): Construct
 
   const gain = [1, 1];
   const centre = new Float64Array(6);
-  const axleGains = (cs: readonly CornerFrame[], eye: XYZ | undefined): void => {
+  const axleGains = (cs: readonly CornerFrame[], eye: XYZ | undefined, floor: number): void => {
     gain[0] = gain[1] = 1;
     if (!eye) return;
     centre.fill(0);
@@ -502,7 +505,7 @@ export function createConstruction(main: LineBatch, ghost: LineBatch): Construct
     const d1 = Math.hypot(centre[3]! - eye.x * cs.length / 2, centre[4]! - eye.y * cs.length / 2, centre[5]! - eye.z * cs.length / 2);
     if (!(d0 > 0 && d1 > 0)) return;
     // the far axle fades with the distance ratio: both full from the side, ~0.3 from straight ahead / behind
-    const far = 0.22 + 0.78 * Math.min(d0, d1) ** 6 / Math.max(d0, d1) ** 6;
+    const far = floor + (1 - floor) * Math.min(d0, d1) ** 6 / Math.max(d0, d1) ** 6;
     gain[d0 <= d1 ? 1 : 0] = far;
   };
 
@@ -511,7 +514,7 @@ export function createConstruction(main: LineBatch, ghost: LineBatch): Construct
       trailLen[0] = trailLen[1] = 0;
       trailHead[0] = trailHead[1] = 0;
     },
-    draw(t, sim, dt, eye) {
+    draw(t, sim, dt, eye, farFloor = 0.22) {
       const { x, y, z, w } = t.bodyRotation;
       set(ex, 1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y));
       set(ey, 2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x));
@@ -521,7 +524,7 @@ export function createConstruction(main: LineBatch, ghost: LineBatch): Construct
       ghost.begin();
       const cs = t.corners;
       while (rigs.length < cs.length) rigs.push(newRig()); // grows once per layout
-      axleGains(cs, eye);
+      axleGains(cs, eye, farFloor);
       for (let i = 0; i < cs.length; i++) {
         const fc = cs[i]!;
         const rig = rigs[i]!;

@@ -228,6 +228,7 @@ export default {
       if (e.key === ' ' && e.target instanceof HTMLButtonElement && e.target.getAttribute('role') !== 'radio') return;
       if (e.repeat && e.key !== 'Escape') return;
       if (apply(keyAction(e.key, c.store.get(), keyContext()))) e.preventDefault();
+      else if (e.key.toLowerCase() === 'x' && c.store.get().view === 'closeup') announce.textContent = 'X-ray stays on in close-up';
     };
     window.addEventListener('keydown', onKey);
     c.addDisposer(() => window.removeEventListener('keydown', onKey));
@@ -237,7 +238,7 @@ export default {
       const rows: [string[], string, string?][] = [
         [k.suspensions.map((_, i) => String(i + 1)), 'Suspension'],
         [['F', 'E', 'C'], 'Follow · Explore · Close-up'],
-        [['X'], 'X-ray', 'x'],
+        c.store.get().view === 'closeup' ? [['X'], 'X-ray · always on in close-up'] : [['X'], 'X-ray', 'x'],
         ...(k.otherVehicleId ? ([[['V'], 'Vehicle class', 'v']] as [string[], string, string][]) : []),
         [['Space'], 'Pause', ' '],
         [['S'], 'Slow motion', 's'],

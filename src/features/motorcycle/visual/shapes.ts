@@ -151,6 +151,38 @@ export function yToZ(g: BufferGeometry): BufferGeometry {
   return g.rotateX(Math.PI / 2);
 }
 
+/**
+ * Outline of a parallel twin's finned block seen along the bores: two round barrels side by side (along x, width w,
+ * barrel diameter d) joined by a filleted waist. Polar samples of a smooth union of the two circles.
+ */
+export function twinBarrel(w: number, d: number, samples = 56): Shape {
+  const r = d / 2;
+  const c = Math.max(0, w / 2 - r);
+  const k = r * 0.55;
+  // Polynomial smooth minimum of the two circle distances (negative inside).
+  const sdf = (x: number, y: number) => {
+    const a = Math.hypot(x - c, y) - r;
+    const b = Math.hypot(x + c, y) - r;
+    const h = Math.max(k - Math.abs(a - b), 0) / k;
+    return Math.min(a, b) - h * h * k * 0.25;
+  };
+  const pts: Vector2[] = [];
+  for (let i = 0; i < samples; i++) {
+    const t = (i / samples) * Math.PI * 2;
+    const dx = Math.cos(t);
+    const dy = Math.sin(t);
+    let lo = 0;
+    let hi = w;
+    for (let j = 0; j < 24; j++) {
+      const m = (lo + hi) / 2;
+      if (sdf(dx * m, dy * m) < 0) lo = m;
+      else hi = m;
+    }
+    pts.push(new Vector2(dx * lo, dy * lo));
+  }
+  return new Shape(pts);
+}
+
 /** Rounded rectangle / stadium shape centred on the origin. */
 export function roundedRect(w: number, h: number, r: number): Shape {
   const s = new Shape();
@@ -234,12 +266,22 @@ export interface FinSpec {
  * Stack of cooling fins along the local +Y axis from y0 to y1 (count fins), each a stadium plate whose outline
  * shrinks by `taper` per unit height; caps in `face`, machined edges in `edge`. Plus the core block inside.
  */
-export function finStack(count: number, y0: number, y1: number, fin: FinSpec, core: { depth: number; width: number }, taper: number, face: MotoFinish, edge: MotoFinish): BufferGeometry {
+export function finStack(
+  count: number,
+  y0: number,
+  y1: number,
+  fin: FinSpec,
+  core: { depth: number; width: number },
+  taper: number,
+  face: MotoFinish,
+  edge: MotoFinish,
+  outline: (w: number, d: number) => Shape = (w, d) => roundedRect(w, d, d / 2.2),
+): BufferGeometry {
   const parts: BufferGeometry[] = [];
   for (let i = 0; i < count; i++) {
     const y = y0 + ((y1 - y0) * (i + 0.5)) / count;
     const k = 1 - taper * (y - y0);
-    const s = roundedRect(fin.width * k, fin.depth * k, (fin.depth * k) / 2.2);
+    const s = outline(fin.width * k, fin.depth * k);
     const g = new ExtrudeGeometry(s, { depth: fin.thickness, bevelEnabled: false, curveSegments: 6 });
     motoPaintGroups(g, face, edge);
     // Shape plane XY (x = width -> three z, y = depth -> three x); extrusion -> three y.
@@ -247,7 +289,7 @@ export function finStack(count: number, y0: number, y1: number, fin: FinSpec, co
     g.translate(0, y - fin.thickness / 2, 0);
     parts.push(g);
   }
-  const c = new ExtrudeGeometry(roundedRect(core.width, core.depth, core.depth / 2.2), { depth: y1 - y0, bevelEnabled: false, curveSegments: 6 });
+  const c = new ExtrudeGeometry(outline(core.width, core.depth), { depth: y1 - y0, bevelEnabled: false, curveSegments: 6 });
   motoPaint(c, face);
   c.applyMatrix4(new Matrix4().makeBasis(new Vector3(0, 0, 1), new Vector3(1, 0, 0), new Vector3(0, 1, 0)));
   c.translate(0, y0, 0);
@@ -363,7 +405,7 @@ export function spokedWheel(s: WheelSpec): BufferGeometry {
       const ar = a + lead * ((2 * Math.PI) / half) * 1.5;
       hubAt.set(Math.cos(a) * (hr - 0.004), Math.sin(a) * (hr - 0.004), side * h);
       rimAt.set(Math.cos(ar) * nippleR, Math.sin(ar) * nippleR, side * 0.006);
-      parts.push(motoPaint(bakedTube(hubAt, rimAt, 0.0019, 0.0019, 5), 'spoke'));
+      parts.push(motoPaint(bakedTube(hubAt, rimAt, 0.0026, 0.0026, 6), 'spoke'));
       const dir = new Vector3().subVectors(rimAt, hubAt).normalize();
       parts.push(motoPaint(bakedTube(rimAt.clone().addScaledVector(dir, -0.014), rimAt.clone().addScaledVector(dir, 0.002), 0.0032, 0.0032, 6), 'steel'));
     }

@@ -33,6 +33,9 @@ export default {
     controls.maxPolarAngle = Math.PI * 0.49;
     controls.smoothTime = 0.2;
     controls.draggingSmoothTime = 0.1;
+    // Default speeds turn ~180° for a quarter-screen drag; half that reads as orbiting, not spinning.
+    controls.azimuthRotateSpeed = 0.5;
+    controls.polarRotateSpeed = 0.5;
     ctx.addDisposer(() => controls.dispose());
     let exploreHeading = Number.NaN;
     const pivot = new Vector3();
@@ -57,7 +60,8 @@ export default {
     const rig = new CameraRig(() => ctx.sim.current, explore);
     const instant = () => ctx.store.get().reducedMotion;
 
-    // Close-up switches x-ray on; leaving restores it unless the user toggled x-ray meanwhile.
+    // Close-up switches x-ray on (and keeps it on: the eye sits at the bumper and looks through the body at the
+    // linkage); leaving restores it unless x-ray was already on before entering.
     let xrayAuto = false;
     let view = ctx.store.get().view;
     let corner = ctx.store.get().focusCorner;
@@ -85,7 +89,7 @@ export default {
         return;
       }
       corner = s.focusCorner;
-      if (view === 'closeup' && !s.xray) xrayAuto = false;
+      if (view === 'closeup' && !s.xray) ctx.store.setKey('xray', true);
     });
     controls.enabled = view === 'explore';
 

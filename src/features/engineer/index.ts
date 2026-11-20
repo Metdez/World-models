@@ -187,6 +187,7 @@ const engineer: FeatureModule = {
       panel.hidden = !s.engineerOpen;
       toggle.setAttribute('aria-expanded', String(s.engineerOpen));
       root.classList.toggle('is-open', s.engineerOpen);
+      root.hidden = !s.hudVisible || s.attract; // H and attract mode hide it with the rest of the HUD
     });
     c.addDisposer(() => {
       pending?.abort();

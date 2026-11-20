@@ -2,7 +2,7 @@
  * GLSL for the DB11 body: screen-door x-ray dither (all body finishes), object-space metallic flakes (paint) and the
  * additive fresnel ghost shell shown while x-ray is on (research 10 §1a/§1b, written for WebGLRenderer).
  */
-import { AdditiveBlending, Color, FrontSide, ShaderMaterial, type IUniform, type Material } from 'three';
+import { Color, CustomBlending, FrontSide, MaxEquation, ShaderMaterial, type IUniform, type Material } from 'three';
 
 /** Shared x-ray uniform: 0 = solid body, 1 = body fully dithered away. */
 export interface XrayUniform {
@@ -51,11 +51,15 @@ export function addBodyShader(material: Material, xray: XrayUniform, flakes: boo
   material.customProgramCacheKey = () => (flakes ? 'db11-body-flakes' : 'db11-body');
 }
 
-/** Additive fresnel rim shell: bright at grazing angles, almost nothing face-on; never writes depth. */
+/**
+ * Fresnel rim shell: bright at grazing angles, almost nothing face-on; never writes depth. Max blending (not
+ * additive): the shell's overlapping skin layers (bumpers, inner panels) no longer stack into a bright wash, so the
+ * linkage and the construction lines behind it keep their contrast (04-05).
+ */
 export function createGhostMaterial(xray: XrayUniform): ShaderMaterial {
   return new ShaderMaterial({
     name: 'db11-ghost',
-    uniforms: { uXray: xray.uXray, uColor: { value: new Color(0x7fd8ff) }, uPower: { value: 2.2 }, uBase: { value: 0.012 } },
+    uniforms: { uXray: xray.uXray, uColor: { value: new Color(0x7fd8ff) }, uPower: { value: 2.6 }, uBase: { value: 0.01 } },
     vertexShader: /* glsl */ `
       varying vec3 vN;
       varying vec3 vV;
@@ -75,11 +79,12 @@ export function createGhostMaterial(xray: XrayUniform): ShaderMaterial {
       void main() {
         float ndv = clamp(abs(dot(normalize(vN), normalize(vV))), 0.0, 1.0);
         float rim = pow(1.0 - ndv, uPower);
-        gl_FragColor = vec4(uColor * (rim * 0.75 + uBase) * uXray, 1.0);
+        gl_FragColor = vec4(uColor * (rim * 0.6 + uBase) * uXray, 1.0);
       }`,
     transparent: true,
     depthWrite: false,
-    blending: AdditiveBlending,
+    blending: CustomBlending,
+    blendEquation: MaxEquation,
     side: FrontSide,
   });
 }

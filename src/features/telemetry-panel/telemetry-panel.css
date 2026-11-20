@@ -1,10 +1,14 @@
-/* Telemetry card (research 14 D5): bottom-left, above the "Ask the engineer" pill. Tokens only. */
+/*
+ * Telemetry card (research 14 D5): bottom of the left column, above the "Ask the engineer" pill (04-05 layout,
+ * --sl-hud-* from controls.css). Tokens only.
+ */
 .sl-telemetry-panel {
-  --sl-telemetry-pill: 56px; /* the engineer pill's height + gap below this card */
+  --sl-telemetry-pill: calc(var(--sl-hud-pill-h, 38px) + var(--sl-hud-gap, 8px)); /* engineer pill + gap */
   position: absolute;
   left: var(--margin);
   bottom: calc(var(--margin) + var(--sl-telemetry-pill));
-  width: 316px;
+  zoom: var(--sl-hud-zoom, 1);
+  width: var(--sl-hud-col, 316px);
   padding: var(--sp-3) var(--sp-3) var(--sp-2);
   display: grid;
   gap: var(--sp-2);
@@ -166,10 +170,24 @@
   border-top: 1px dashed var(--text-2);
 }
 
+/* Close-up: the wheel is the hero. g-g + lateral g + roll only; the camber trace (top right) has the detail. */
+.sl-telemetry-panel.is-compact {
+  width: auto;
+}
+.sl-telemetry-panel.is-compact .sl-telemetry-panel-top {
+  grid-template-columns: 88px;
+}
+.sl-telemetry-panel.is-compact .sl-telemetry-panel-corners,
+.sl-telemetry-panel.is-compact .sl-telemetry-panel-sparkhead,
+.sl-telemetry-panel.is-compact .sl-telemetry-panel-spark,
+.sl-telemetry-panel.is-compact .sl-telemetry-panel-note {
+  display: none;
+}
+
 /* Below this width the centred suspension control reaches this column: sit above its top edge. */
-@media (max-width: 1320px) {
+@media (max-width: 1240px) {
   .sl-telemetry-panel {
-    --sl-telemetry-pill: 88px;
+    --sl-telemetry-pill: calc(var(--sl-hud-pill-h, 38px) + var(--sl-hud-gap, 8px) + 32px);
   }
 }
 

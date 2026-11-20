@@ -1,9 +1,8 @@
 import { Color, NoToneMapping, PCFShadowMap, PerspectiveCamera, Scene, WebGLRenderer, type Object3D } from 'three';
 import { CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import { QUALITY_PRESETS, type FeatureModule, type FrameInfo, type QualitySettings, type QualityTier } from '../../contracts/app';
-import { CAMERA, RENDER, type RenderService, type RenderStats } from '../../contracts/services';
+import { RENDER, type RenderService, type RenderStats } from '../../contracts/services';
 import { createGovernor, startRatio, stepGovernor, trackFrame } from './governor';
-import { createPlaceholder } from './placeholder';
 import { createPost } from './post';
 
 const BACKGROUND = 0x07080a;
@@ -81,14 +80,6 @@ export default {
       post.setQuality(quality());
     });
 
-    const placeholder = createPlaceholder(ctx.sim, ctx.registries);
-    scene.add(placeholder.root);
-    ctx.addDisposer(() => {
-      scene.remove(placeholder.root);
-      placeholder.dispose();
-    });
-    ctx.on('sim:vehicle', placeholder.rebuild);
-
     const service: RenderService = {
       renderer,
       scene,
@@ -133,8 +124,6 @@ export default {
           ctx.store.setKey('quality', LOWER_TIER[current]);
         }
       }
-      placeholder.update(frame.t);
-      if (!ctx.services.tryGet(CAMERA)) placeholder.chase(camera);
       renderer.info.reset();
       post.render(frame.dt);
       labels.render(scene, camera);

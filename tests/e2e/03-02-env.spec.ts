@@ -7,6 +7,8 @@ import { canvasVariance, captureConsole, expectHealthyBoot, waitForReady } from 
 const SHOTS = process.env.SHOTS_DIR ?? 'test-results/03-02-shots';
 mkdirSync(SHOTS, { recursive: true });
 test.use({ deviceScaleFactor: 1 });
+// High-tier frames take seconds under SwiftShader: these ran 52–60 s against the 60 s default (03-01 SUMMARY).
+test.describe.configure({ timeout: 120_000 });
 
 /** Console warnings, minus Chromium's own readback notice caused by taking screenshots. */
 function captureWarnings(page: Page): string[] {

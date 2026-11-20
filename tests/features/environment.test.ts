@@ -30,9 +30,10 @@ describe('environment HDRI clamp', () => {
     expect(Math.asin(y) * (180 / Math.PI)).toBeLessThan(22);
     expect(hdr.sunIrradiance).toBeGreaterThan(1);
     expect(Math.max(...hdr.sunColor)).toBeCloseTo(1, 6);
-    // Warm-ish white sun, bright blue-white horizon haze.
+    // Warm-ish white sun; the horizon line is the dark tree line (fog colour), not the bright sky above it.
     expect(hdr.sunColor[0]).toBeGreaterThanOrEqual(hdr.sunColor[2]);
-    expect(hdr.horizon.every((c) => c > 0.3 && c < 5)).toBe(true);
+    expect(hdr.horizon.every((c) => c > 0.03 && c < 0.3)).toBe(true);
+    expect(hdr.horizon[1]).toBeGreaterThan(hdr.horizon[2]);
   });
 
   it('leaves values under the clamp untouched and falls back to the brightest pixel', () => {

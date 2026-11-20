@@ -1,13 +1,33 @@
-/* Race Engineer overlay: tokens from src/ui/tokens.css only. Bottom-left, caption-style answer card. */
+/*
+ * Race Engineer overlay: tokens from src/ui/tokens.css only. Foot of the left column (04-05 layout, --sl-hud-* from
+ * controls.css); the open panel grows upward within the column width, so it never reaches the suspension control.
+ */
 .sl-engineer {
   position: absolute;
   left: var(--margin);
   bottom: var(--margin);
+  zoom: var(--sl-hud-zoom, 1);
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: var(--sp-2);
-  max-width: min(380px, calc(100vw - 2 * var(--margin)));
+  max-width: min(var(--sl-hud-col, 316px), calc(100vw - 2 * var(--margin)));
+}
+.sl-engineer.is-open {
+  width: min(var(--sl-hud-col, 316px), calc(100vw - 2 * var(--margin)));
+}
+/* The column box itself is not a hit target; only the pill and the panel are (base.css opts #overlay > * in). */
+#overlay > .sl-engineer {
+  pointer-events: none;
+}
+.sl-engineer > * {
+  pointer-events: auto;
+}
+.sl-engineer[hidden] {
+  display: none;
+}
+.sl-engineer-toggle {
+  height: var(--sl-hud-pill-h, 38px);
 }
 
 .sl-engineer-toggle,

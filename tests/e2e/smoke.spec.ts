@@ -1,6 +1,15 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { SIM_DT } from '../../src/contracts/units';
-import { canvasVariance, captureConsole, expectHealthyBoot, waitForReady } from './helpers';
+import { canvasVariance, captureConsole, expectHealthyBoot } from './helpers';
+
+// SwiftShader renders about one frame per second on a loaded machine: boot (shader compile + first frame) can take
+// well over the helpers' 20 s, so the smoke allows for it rather than flaking.
+test.describe.configure({ timeout: 120_000 });
+
+async function waitForReady(page: Page, path = '/?e2e=1'): Promise<void> {
+  await page.goto(path);
+  await page.waitForFunction(() => globalThis.__app?.ready === true, undefined, { timeout: 90_000 });
+}
 
 test('boots, renders a non-blank scene, no errors', async ({ page }) => {
   const consoleErrors = captureConsole(page);
@@ -29,7 +38,7 @@ test('paused start is deterministic and advance() moves the lap clock', async ({
 
 test('?debug=1 shows the stats panel', async ({ page }) => {
   const consoleErrors = captureConsole(page);
-  await waitForReady(page, '/?debug=1');
+  await waitForReady(page, '/?e2e=1&debug=1'); // e2e keeps the room offline and attract mode off
   await expect(page.locator('#overlay .sl-debug-stats canvas').first()).toBeVisible();
   await expectHealthyBoot(page, consoleErrors);
 });

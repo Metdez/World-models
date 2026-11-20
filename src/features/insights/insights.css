@@ -1,12 +1,16 @@
-/* Insight caption (research 14 D7/D8): one line, bottom-centre above the suspension control. Tokens only. */
+/*
+ * Insight caption (research 14 D7/D8): one line, bottom-centre above the suspension control (04-05 layout,
+ * --sl-hud-* from controls.css); never wider than the gap between the two columns. Tokens only.
+ */
 .sl-insights {
-  --sl-insights-controls: 96px; /* clearance for the suspension control and its descriptor below */
+  --sl-insights-controls: var(--sl-hud-susp-h, 96px); /* the suspension control and its descriptor below */
   position: absolute;
   left: 50%;
   bottom: calc(var(--margin) + var(--sl-insights-controls));
   transform: translateX(-50%);
+  zoom: var(--sl-hud-zoom, 1);
   width: max-content;
-  max-width: min(640px, calc(100vw - 2 * var(--margin)));
+  max-width: min(640px, calc(100vw / var(--sl-hud-zoom, 1) - 2 * (var(--margin) + var(--sl-hud-col, 316px) + var(--sp-4))));
   pointer-events: none;
 }
 #overlay > .sl-insights {

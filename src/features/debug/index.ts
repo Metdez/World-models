@@ -1,6 +1,7 @@
 import Stats from 'stats-gl';
 import type { FeatureModule } from '../../contracts/app';
 import { RENDER } from '../../contracts/services';
+import './debug.css';
 
 let stats: Stats | undefined;
 

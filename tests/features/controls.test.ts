@@ -27,6 +27,7 @@ describe('keyAction (UI-01 keyboard map)', () => {
   it('toggles: X x-ray, Space pause, S slow motion, A amplification, H HUD', () => {
     expect(keyAction('x', s, car)).toEqual({ xray: true });
     expect(keyAction('x', { ...s, xray: true }, car)).toEqual({ xray: false });
+    expect(keyAction('x', { ...s, xray: true, view: 'closeup' }, car)).toBeNull(); // close-up looks through the body
     expect(keyAction(' ', s, car)).toEqual({ paused: true });
     expect(keyAction('s', s, car)).toEqual({ timeScale: SLOW_MO });
     expect(keyAction('S', { ...s, timeScale: SLOW_MO }, car)).toEqual({ timeScale: 1 });
@@ -62,6 +63,7 @@ describe('loading progress (UI-03)', () => {
     assets: {
       'car/db11': { id: 'car/db11', url: '/assets/car/db11.aa.glb', bytes: 600 },
       'hdri/a': { id: 'hdri/a', url: '/assets/hdri/a.bb.hdr', bytes: 400 },
+      'hdri/b': { id: 'hdri/b', url: '/assets/hdri/b.dd.hdr', bytes: 300 },
       'audio/engine': { id: 'audio/engine', url: '/assets/audio/engine.cc.ogg', bytes: 1000 },
     },
     attributions: [],
@@ -69,11 +71,17 @@ describe('loading progress (UI-03)', () => {
   const bytes = bootAssetBytes(manifest);
 
   it('weights fetched asset bytes, ignores audio, other URLs and duplicates', () => {
-    expect([...bytes.keys()]).toEqual(['/assets/car/db11.aa.glb', '/assets/hdri/a.bb.hdr']);
+    expect([...bytes.slotOf.keys()]).toEqual(['/assets/car/db11.aa.glb', '/assets/hdri/a.bb.hdr', '/assets/hdri/b.dd.hdr']);
     expect(assetFraction(bytes, [])).toBe(0);
     expect(assetFraction(bytes, ['http://localhost:4173/assets/car/db11.aa.glb', 'http://x/main.js'])).toBeCloseTo(0.6);
     expect(assetFraction(bytes, ['/assets/hdri/a.bb.hdr', '/assets/hdri/a.bb.hdr', 'https://h/assets/audio/engine.cc.ogg'])).toBeCloseTo(0.4);
-    expect(assetFraction(new Map(), [])).toBe(1);
+    expect(assetFraction({ slotOf: new Map(), bytes: new Map() }, [])).toBe(1);
+  });
+
+  it('alternate HDRIs are one slot: the one a boot fetches completes it, the bar can reach ASSET_WEIGHT', () => {
+    expect([...bytes.bytes.entries()]).toEqual([['car/db11', 600], ['hdri/', 400]]);
+    expect(assetFraction(bytes, ['/assets/hdri/b.dd.hdr'])).toBeCloseTo(0.4);
+    expect(assetFraction(bytes, ['/assets/hdri/b.dd.hdr', '/assets/hdri/a.bb.hdr', '/assets/car/db11.aa.glb'])).toBeCloseTo(1);
   });
 
   it('assets fill at most ASSET_WEIGHT; only the first rendered frame completes the bar', () => {

@@ -1,12 +1,15 @@
 /*
- * Presenter room card (big screen). Tokens only. Left column under the D5 vehicle tag: the top-right is the HUD chrome
- * and the overlays' curve card, bottom-left the telemetry card. Horizontal (QR | code) to stay short.
+ * Presenter room card (big screen). Tokens only. Left column under the D5 vehicle tag and the Live Lab line
+ * (04-05 layout, --sl-hud-* from controls.css): the top-right is the HUD chrome and the overlays' curve card,
+ * bottom-left the telemetry card. Horizontal (QR | code) to stay short.
  */
 .sl-presenter {
+  --sl-presenter-top: calc(var(--margin) + var(--sl-hud-tag-h, 100px) + var(--sl-hud-gap, 8px));
   position: absolute;
-  top: calc(var(--margin) + 92px);
+  top: var(--sl-presenter-top);
   left: var(--margin);
-  width: 316px;
+  zoom: var(--sl-hud-zoom, 1);
+  width: var(--sl-hud-col, 316px);
   padding: var(--sp-3);
   display: grid;
   gap: var(--sp-3);
@@ -17,6 +20,11 @@
   border-radius: var(--radius-panel);
   box-shadow: var(--shadow-panel);
   color: var(--text-1);
+}
+
+/* the presence line, when shown, sits between the tag and this card */
+#overlay:has(> .sl-live-lab:not([hidden], .is-off)) > .sl-presenter {
+  top: calc(var(--sl-presenter-top) + var(--sl-hud-line-h, 28px) + var(--sl-hud-gap, 8px));
 }
 
 .sl-presenter[hidden],
@@ -142,7 +150,6 @@
 @media (max-width: 720px) {
   .sl-presenter {
     width: 260px;
-    top: calc(var(--margin) + 64px);
   }
   .sl-presenter-body {
     grid-template-columns: 96px 1fr;

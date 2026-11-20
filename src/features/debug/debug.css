@@ -1,0 +1,17 @@
+/*
+ * ?debug=1 stats panel: top centre under the amplification chip (04-05 layout), clear of the vehicle tag.
+ * stats-gl pins itself with inline styles (fixed, 0,0) and sizes no box of its own (its canvases are absolute),
+ * hence !important and an explicit two-panel box (FPS | CPU, 90×48 each).
+ */
+#overlay > .sl-debug-stats {
+  position: absolute !important;
+  top: calc(var(--margin) + 48px) !important;
+  left: 50% !important;
+  transform: translateX(-50%);
+  zoom: var(--sl-hud-zoom, 1);
+  width: 180px;
+  height: 48px;
+  overflow: hidden;
+  border-radius: 6px;
+  z-index: auto !important;
+}

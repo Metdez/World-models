@@ -29,7 +29,8 @@ export function keyAction(key: string, s: Readonly<AppState>, k: KeyContext): Ke
   if (view) return { view };
   switch (lower) {
     case 'x':
-      return { xray: !s.xray };
+      // Close-up looks through the body at the linkage: x-ray stays on there (the help card says so).
+      return s.view === 'closeup' ? null : { xray: !s.xray };
     case 'v':
       return k.otherVehicleId === null ? null : { vehicleId: k.otherVehicleId };
     case 's':

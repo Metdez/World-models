@@ -1,8 +1,9 @@
-/* Audience poll bars. Tokens only. Right edge, above the D5 segmented controls (bottom-right). */
+/* Audience poll bars. Tokens only. Right column, above the view control (04-05 layout, --sl-hud-* from controls.css). */
 .sl-poll {
   position: absolute;
   right: var(--margin);
-  bottom: calc(var(--margin) + 88px);
+  bottom: calc(var(--margin) + var(--sl-hud-view-h, 48px) + var(--sp-4));
+  zoom: var(--sl-hud-zoom, 1);
   width: 300px;
   padding: var(--sp-3) var(--sp-4) var(--sp-4);
   display: grid;

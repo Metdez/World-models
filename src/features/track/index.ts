@@ -1,4 +1,4 @@
-import { Group, Line, Mesh, TextureLoader } from 'three';
+import { Group, Mesh, TextureLoader } from 'three';
 import type { FeatureModule } from '../../contracts/app';
 import { RENDER } from '../../contracts/services';
 import { provingLoop } from '../../sim-core/content/proving-loop';
@@ -66,11 +66,5 @@ export default {
       for (const t of Object.values(textures)) t.dispose();
     });
     ctx.watch(() => setAnisotropy(textures, render.quality.anisotropy));
-
-    // shortcut: the renderer's walking-skeleton placeholder keeps its ground disc and centreline until a vehicle
-    // visual registers; both would z-fight the road, so hide them here. Remove when the placeholder is deleted.
-    render.scene.getObjectByName('placeholder')?.traverse((o) => {
-      if (o instanceof Line || (o instanceof Mesh && o.geometry.type === 'CircleGeometry')) o.visible = false;
-    });
   },
 } satisfies FeatureModule;
