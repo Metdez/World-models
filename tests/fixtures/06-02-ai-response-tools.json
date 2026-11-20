@@ -1,0 +1,44 @@
+{
+  "id": "93124ed8ade3455b8b8e865c0634cd0d",
+  "object": "chat.completion",
+  "created": 1795206308,
+  "model": "@cf/google/gemma-4-26b-a4b-it-external",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "The MacPherson strut has very little camber gain during compression, so the wheel is leaning with the body at -1.26 degrees of roll. I'll show you the front left corner.\n\n",
+        "tool_calls": [
+          {
+            "id": "call_99ef6eab0cb74f87bf9cfd07",
+            "type": "function",
+            "function": {
+              "name": "highlight_component",
+              "arguments": "{\"component\": \"strut\", \"corner\": \"fl\"}"
+            }
+          },
+          {
+            "id": "call_24fab7fcc7e64f2398704c9a",
+            "type": "function",
+            "function": {
+              "name": "set_view",
+              "arguments": "{\"corner\": \"fl\", \"view\": \"closeup\"}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls",
+      "logprobs": null
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 394,
+    "completion_tokens": 83,
+    "total_tokens": 477,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "neurons": 5.845454216003418
+  }
+}

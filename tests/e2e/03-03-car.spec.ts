@@ -9,7 +9,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { captureConsole, expectHealthyBoot, waitForReady } from './helpers';
+import { captureConsole, expectHealthyBoot } from './helpers';
 
 const SHOTS = process.env.SHOTS_DIR ?? 'test-results/03-03-shots';
 mkdirSync(SHOTS, { recursive: true });
@@ -55,6 +55,12 @@ async function installShotCamera(page: Page): Promise<void> {
     });
     globalThis.__THREE_DEVTOOLS__ = hook;
   });
+}
+
+/** Like helpers.waitForReady, with more headroom: the DB11 + three suspension visuals compile at boot (SwiftShader). */
+async function waitForReady(page: Page, path: string): Promise<void> {
+  await page.goto(path);
+  await page.waitForFunction(() => globalThis.__app?.ready === true, undefined, { timeout: 60_000 });
 }
 
 /** Console warnings, minus Chromium's own readback notice caused by taking screenshots. */
@@ -190,8 +196,9 @@ test('DB11 mounted, oriented forward, tyres on the road; screenshots', async ({ 
   await shot(page, 'front-wheel-lock', [2.9, 0.6, -2.1], [1.43, 0.35, -0.85], 30);
 
   await page.evaluate(() => globalThis.__app!.seek(20));
+  // Reduced motion makes the 0.4 s fade instant (rendering 25 fade frames at the high tier is slow in SwiftShader).
+  await page.evaluate(() => globalThis.__app!.set('reducedMotion', true));
   await page.evaluate(() => globalThis.__app!.set('xray', true));
-  for (let i = 0; i < 30; i++) await page.evaluate(() => globalThis.__app!.advance(1 / 60));
   await shot(page, 'xray', [4.4, 1.9, -3.4], [0.2, 0.45, 0], 34);
 
   await expectHealthyBoot(page, errors);
@@ -226,6 +233,7 @@ test('every suspension is pre-built; swaps toggle visibility; the car works with
   await shot(page, 'own-brakes', [2.6, 0.55, -2.4], [1.43, 0.38, -0.85], 30);
   await page.evaluate(() => globalThis.__app!.set('xray', true));
   for (let i = 0; i < 30; i++) await page.evaluate(() => globalThis.__app!.advance(1 / 60));
+  expect(await page.evaluate(() => globalThis.__three!.scene.getObjectByName('xray-ghost').visible)).toBe(true);
   await expectHealthyBoot(page, errors);
   expect(warnings).toEqual([]);
 });

@@ -1,0 +1,26 @@
+{
+  "id": "fd2448bb2b7e4e5d9cd19149cbf4b81b",
+  "object": "chat.completion",
+  "created": 1795206316,
+  "model": "@cf/google/gemma-4-26b-a4b-it-external",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "I am your Race Engineer, not a geography tutor. Please focus on the telemetry for the gt-coupe."
+      },
+      "finish_reason": "stop",
+      "logprobs": null
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 388,
+    "completion_tokens": 24,
+    "total_tokens": 412,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "neurons": 4.181818008422852
+  }
+}
