@@ -19,6 +19,9 @@ import { createCornerSolution, solveAxleKinematics, type CornerSolution, type Ki
 import linkageParts from '../../src/features/linkage-parts/index';
 import { buildSpatialLinkage, VISUAL_ID, type SpatialLinkageVisual } from '../../src/features/linkage-parts/visual';
 import type { Capsule } from '../../src/features/linkage-parts/corner';
+import { gtCoupe } from '../../src/sim-core/content/gt-coupe';
+import { createSimulation } from '../../src/sim-core/index';
+import type { SimCatalog } from '../../src/contracts/sim';
 
 const DEFS = [macpherson, doubleWishbone, multilink] as const;
 const MAX_STEER = 0.35;
@@ -341,5 +344,38 @@ describe.each(DEFS.map((d) => [d.id, d] as const))('spatial-linkage: %s', (_id, 
     for (const c of cols) expect(c.length()).toBeCloseTo(1, 9);
     expect(cols[0]!.dot(cols[1]!)).toBeCloseTo(0, 9);
     expect(m.determinant()).toBeCloseTo(1, 9);
+  });
+});
+
+describe('spatial-linkage on the live simulation (02-04 CornerFrame points, amplified x3)', () => {
+  const catalog: SimCatalog = { track: () => undefined, vehicle: () => undefined, suspension: () => undefined };
+  it.each(DEFS.map((d) => [d.id, d] as const))('%s: follows a whole lap without NaN, stretched links or new clearance problems', (_id, def) => {
+    const sim = createSimulation({ catalog, trackId: 'proving-loop', vehicleId: gtCoupe.id, suspensionId: def.id });
+    const v = buildSpatialLinkage(def, gtCoupe);
+    const lengths = new Map<string, number>();
+    const problems: string[] = [];
+    let worst = 0;
+    for (let i = 0; i < 24; i++) {
+      sim.seek((i / 24) * sim.lapDuration);
+      v.update(sim.sample(1, 3));
+      for (const [corner, info] of Object.entries(v.inspect())) {
+        expect(info.visible, corner).toBe(true);
+        for (const c of info.capsules) {
+          expect(Number.isFinite(c.a.x + c.a.y + c.a.z + c.b.x + c.b.y + c.b.z), c.name).toBe(true);
+          if (c.name.startsWith('upright') || c.name.startsWith('seat') || ['damper', 'spring', 'rod', 'gaiter'].includes(c.name)) continue;
+          const key = `${corner}:${c.name}`;
+          const len = c.a.distanceTo(c.b);
+          if (!lengths.has(key)) lengths.set(key, len);
+          expect(Math.abs(len - lengths.get(key)!), key).toBeLessThan(1e-4);
+        }
+        for (const { pair, gap } of clearances(info.capsules)) {
+          const limit = HARDPOINT_CONFLICTS[def.id]?.[pair];
+          if (gap < 0 && (limit === undefined || -gap > limit)) problems.push(`t${i} ${corner} ${pair} ${(gap * 1000).toFixed(1)} mm`);
+          worst = Math.min(worst, gap);
+        }
+      }
+    }
+    expect(problems).toEqual([]);
+    v.dispose();
   });
 });
