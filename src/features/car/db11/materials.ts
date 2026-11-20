@@ -111,10 +111,17 @@ function make(finish: Finish): Material {
       return new MeshPhysicalMaterial({ color: srgb(0x0c3324), metalness: 0.65, roughness: 0.34, clearcoat: 1, clearcoatRoughness: 0.035 });
     case 'gloss-black':
       return new MeshPhysicalMaterial({ color: srgb(0x050607), metalness: 0.3, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.04 });
-    case 'trim':
-      return std(0x0b0c0d, 0.1, 0.5);
-    case 'underbody':
-      return std(0x16171a, 0.2, 0.7);
+    case 'trim': {
+      // Upward-facing diffuser/sill plastics otherwise mirror the bright sky at grazing angles and read light grey.
+      const m = std(0x0b0c0d, 0.1, 0.5);
+      m.envMapIntensity = 0.45;
+      return m;
+    }
+    case 'underbody': {
+      const m = std(0x16171a, 0.2, 0.7);
+      m.envMapIntensity = 0.45;
+      return m;
+    }
     case 'chrome':
       return std(0xe6e8eb, 1, 0.06);
     case 'mirror':
