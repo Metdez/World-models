@@ -63,7 +63,7 @@ export function createPlaceholder(sim: SimHost) {
     const v = sim.current.vehicle;
     const width = 'track' in v.front ? v.front.track : 0.35;
     // Vehicle frame: origin on the ground under the CG; box spans the wheelbase plus overhangs.
-    box = new Mesh(new BoxGeometry(v.wheelbase + 1.2, v.cgHeight, width), bodyMaterial);
+    box = new Mesh(new BoxGeometry(v.wheelbase + 1.2, v.cgHeight, width * 0.8), bodyMaterial);
     box.position.set(v.cgToFront - v.wheelbase / 2, v.cgHeight, 0);
     body.add(box);
     wheels = sim.frame.corners.map((c) => {
