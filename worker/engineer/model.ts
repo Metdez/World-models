@@ -67,7 +67,9 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(`timeout after ${ms} ms`)), ms);
   });
-  return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
+  return Promise.race([p, timeout]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
 }
 
 export interface ModelRun {
@@ -76,7 +78,7 @@ export interface ModelRun {
 }
 
 /** Primary model, then once the fallback model on error/timeout. Throws when both fail (caller answers by rule). */
-export async function runEngineerModel(ai: Ai, messages: readonly ChatMessage[], tools: readonly ToolSchema[], timeouts = MODEL_TIMEOUT_MS): Promise<ModelRun> {
+export async function runEngineerModel(ai: Ai, messages: readonly ChatMessage[], tools: readonly ToolSchema[], timeouts: { readonly primary: number; readonly fallback: number } = MODEL_TIMEOUT_MS): Promise<ModelRun> {
   // The generated Ai typings key inputs by model name; this call uses the shared chat-completion input shape.
   const run = ai.run.bind(ai) as unknown as (model: string, inputs: Record<string, unknown>) => Promise<unknown>;
   const inputs = {
