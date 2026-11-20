@@ -1,0 +1,456 @@
+/**
+ * Camera rig (research 13 §A3/A4/A6): every source (chase, closeup, explore, director shots) produces a WORLD pose
+ * each frame; switches blend from the captured pose to the live target in the CAR FRAME (driving-line point at the
+ * frame's lap time, yawed by the path heading), so a blend never lags a fast car and arcs around it, never through it.
+ * Pure three.js math, no DOM: unit-tested in node. Allocates only in the constructor.
+ */
+import { Matrix4, Quaternion, Vector3 } from 'three';
+import type { DirectorShot, ShotKind } from '../../contracts/services';
+import type { PathState, Simulation } from '../../contracts/sim';
+import type { ViewMode } from '../../contracts/store';
+import type { TelemetryFrame } from '../../contracts/telemetry';
+import { RAD_TO_DEG, simQuatToThree, simToThree, type CornerId } from '../../contracts/units';
+import { clamp, damp, dampAngle, smootherstep, wrapAngle } from './damp';
+
+export interface Pose {
+  readonly pos: Vector3;
+  readonly quat: Quaternion;
+  /** Vertical FOV, deg. */
+  fov: number;
+}
+
+export const createPose = (): Pose => ({ pos: new Vector3(), quat: new Quaternion(), fov: 50 });
+
+export function copyPose(from: Pose, to: Pose): Pose {
+  to.pos.copy(from.pos);
+  to.quat.copy(from.quat);
+  to.fov = from.fov;
+  return to;
+}
+
+const UP = new Vector3(0, 1, 0);
+const lookMatrix = new Matrix4();
+
+/** Writes the orientation of a camera at `eye` looking at `target` (world up). */
+export function lookAt(eye: Vector3, target: Vector3, out: Quaternion): Quaternion {
+  return out.setFromRotationMatrix(lookMatrix.lookAt(eye, target, UP));
+}
+
+/** Blend duration between sources, s (plan: ≤ 1.4 s). */
+export const BLEND_S = 1.2;
+/** Dip-from-black after a reduced-motion cut, s. */
+export const FADE_S = 0.25;
+/** Height of the orbit/blend pivot above the road, m (about the car's visual centre). */
+export const PIVOT_Y = 0.6;
+
+// Chase tuning (research 13 §A3), all decay rates in 1/s.
+export const CHASE = {
+  /** Heading lag: reveals the car's flank in corners (lag ≈ yaw rate / lambda). */
+  headingLambda: 2.2,
+  maxHeadingLag: 0.55,
+  dist: [6.2, 7.8] as const,
+  height: [1.55, 1.95] as const,
+  fov: [46, 56] as const,
+  speedLambda: 1.2,
+  /** Look-ahead along the known driving line, s, and how far the aim leans toward it. */
+  aheadS: 0.6,
+  aheadWeight: 0.3,
+  lookLambda: 5,
+  aimY: 0.7,
+  /** Minimum clearance over the road behind the car, m. */
+  clearance: 1.0,
+} as const;
+
+/** Default FOV per shot kind, deg (DirectorShot.fov overrides). */
+const DEFAULT_FOV: Record<ShotKind, number> = { chase: 50, orbit: 38, closeup: 42, trackside: 20, overhead: 34, 'front-view': 30 };
+
+/** Driving-line frame at the current lap time: origin on the road, x along the path heading, y up. */
+export class CarFrame {
+  readonly pos = new Vector3();
+  readonly quat = new Quaternion();
+  private readonly inv = new Quaternion();
+  heading = 0;
+
+  set(path: PathState): void {
+    simToThree(path.x, path.y, path.z, this.pos);
+    this.heading = path.heading;
+    // Sim heading is CCW from +X seen from above = rotation about three +Y.
+    this.quat.setFromAxisAngle(UP, path.heading);
+    this.inv.copy(this.quat).invert();
+  }
+
+  toLocal(world: Pose, out: Pose): Pose {
+    out.pos.copy(world.pos).sub(this.pos).applyQuaternion(this.inv);
+    out.quat.copy(this.inv).multiply(world.quat);
+    out.fov = world.fov;
+    return out;
+  }
+
+  pointToLocal(world: Vector3, out: Vector3): Vector3 {
+    return out.copy(world).sub(this.pos).applyQuaternion(this.inv);
+  }
+
+  toWorld(local: Pose, out: Pose): Pose {
+    out.pos.copy(local.pos).applyQuaternion(this.quat).add(this.pos);
+    out.quat.copy(this.quat).multiply(local.quat);
+    out.fov = local.fov;
+    return out;
+  }
+}
+
+/** Spherical blend about `pivot` (all in the car frame): radius, azimuth (shortest way) and elevation interpolate. */
+export function blendLocal(from: Pose, to: Pose, e: number, pivot: Vector3, out: Pose): Pose {
+  const ax = from.pos.x - pivot.x;
+  const ay = from.pos.y - pivot.y;
+  const az = from.pos.z - pivot.z;
+  const bx = to.pos.x - pivot.x;
+  const by = to.pos.y - pivot.y;
+  const bz = to.pos.z - pivot.z;
+  const ra = Math.hypot(ax, ay, az);
+  const rb = Math.hypot(bx, by, bz);
+  const r = ra + (rb - ra) * e;
+  const thA = Math.atan2(az, ax);
+  const th = thA + wrapAngle(Math.atan2(bz, bx) - thA) * e;
+  const elA = Math.asin(clamp(ay / (ra || 1), -1, 1));
+  const el = elA + (Math.asin(clamp(by / (rb || 1), -1, 1)) - elA) * e;
+  out.pos.set(pivot.x + r * Math.cos(el) * Math.cos(th), pivot.y + r * Math.sin(el), pivot.z + r * Math.cos(el) * Math.sin(th));
+  out.quat.slerpQuaternions(from.quat, to.quat, e);
+  out.fov = from.fov + (to.fov - from.fov) * e;
+  return out;
+}
+
+/**
+ * Spring-free chase: the anchor is the exact driving-line point (smooth, no lag at speed); the offset swings with a
+ * damped heading, eases distance/height/FOV with speed, and the aim leans toward the line `aheadS` seconds ahead.
+ */
+export class Chase {
+  heading = 0;
+  dist: number = CHASE.dist[0];
+  height: number = CHASE.height[0];
+  fov: number = CHASE.fov[0];
+  readonly look = new Vector3(0, CHASE.aimY, 0);
+  private readonly eye = new Vector3();
+  private readonly aim = new Vector3();
+  private readonly local = createPose();
+
+  /** Snap every channel to its target (after a seek or on first use). */
+  reset(frame: CarFrame, speed01: number): void {
+    this.heading = frame.heading;
+    this.dist = CHASE.dist[0] + (CHASE.dist[1] - CHASE.dist[0]) * speed01;
+    this.height = CHASE.height[0] + (CHASE.height[1] - CHASE.height[0]) * speed01;
+    this.fov = CHASE.fov[0] + (CHASE.fov[1] - CHASE.fov[0]) * smootherstep(speed01);
+    this.look.set(0, CHASE.aimY, 0);
+  }
+
+  /** Steps the damped channels by dt. `aheadLocal` is the look-ahead line point in the car frame. */
+  step(dt: number, frame: CarFrame, speed01: number, aheadLocal: Vector3): void {
+    this.heading = dampAngle(this.heading, frame.heading, CHASE.headingLambda, dt);
+    const lag = wrapAngle(this.heading - frame.heading);
+    if (Math.abs(lag) > CHASE.maxHeadingLag) this.heading = frame.heading + Math.sign(lag) * CHASE.maxHeadingLag;
+    this.dist = damp(this.dist, CHASE.dist[0] + (CHASE.dist[1] - CHASE.dist[0]) * speed01, CHASE.speedLambda, dt);
+    this.height = damp(this.height, CHASE.height[0] + (CHASE.height[1] - CHASE.height[0]) * speed01, CHASE.speedLambda, dt);
+    this.fov = damp(this.fov, CHASE.fov[0] + (CHASE.fov[1] - CHASE.fov[0]) * smootherstep(speed01), CHASE.speedLambda, dt);
+    const w = CHASE.aheadWeight;
+    const k = 1 - Math.exp(-CHASE.lookLambda * dt);
+    this.look.x += (aheadLocal.x * w - this.look.x) * k;
+    this.look.y += (CHASE.aimY + aheadLocal.y * w - this.look.y) * k;
+    this.look.z += (aheadLocal.z * w - this.look.z) * k;
+  }
+
+  /** World pose; `minY` keeps the eye above the road behind the car. */
+  pose(frame: CarFrame, minY: number, out: Pose): Pose {
+    const lag = wrapAngle(this.heading - frame.heading);
+    // Car frame: x forward, y up, z right (left = -z). Behind the car along the lagged heading.
+    this.eye.set(-this.dist * Math.cos(lag), this.height, this.dist * Math.sin(lag));
+    this.local.pos.copy(this.eye).applyQuaternion(frame.quat).add(frame.pos);
+    if (this.local.pos.y < minY) this.local.pos.y = minY;
+    this.aim.copy(this.look).applyQuaternion(frame.quat).add(frame.pos);
+    out.pos.copy(this.local.pos);
+    lookAt(out.pos, this.aim, out.quat);
+    out.fov = this.fov;
+    return out;
+  }
+}
+
+/** Static corner geometry in the BODY frame (three axes: x forward, y up, z right). */
+export interface CornerGeometry {
+  /** Axle x, m. */
+  readonly x: number;
+  /** Half track, m (0 for a motorcycle). */
+  readonly halfTrack: number;
+  /** +1 left, -1 right, 0 centreline. */
+  readonly side: 1 | -1 | 0;
+  readonly front: boolean;
+  readonly radius: number;
+}
+
+export const CLOSEUP = {
+  /** Eye ahead of (front) / behind (rear) the axle, outboard of the tyre, at hub height. */
+  along: 1.45,
+  outboard: 0.85,
+  /** Minimum lateral eye offset (a motorcycle has no track), m. */
+  minLateral: 1.4,
+  eyeY: 0.5,
+  /** Aim point inboard of the wheel centre: where the arms meet the upright. */
+  inboard: 0.42,
+  aimY: 0.92,
+  fov: 42,
+} as const;
+
+/** Close-up eye/aim in the body frame for one corner, framed into the wheel well. Returns the FOV. */
+export function closeupLocal(c: CornerGeometry, eye: Vector3, aim: Vector3): number {
+  const dir = c.front ? 1 : -1;
+  // Left is three -z; a centreline corner is filmed from the left.
+  const lat = c.side === 0 ? 1 : c.side;
+  const lateral = Math.max(c.halfTrack + CLOSEUP.outboard, CLOSEUP.minLateral);
+  eye.set(c.x + dir * CLOSEUP.along, CLOSEUP.eyeY, -lat * lateral);
+  aim.set(c.x + dir * 0.05, c.radius * CLOSEUP.aimY, -lat * Math.max(c.halfTrack - CLOSEUP.inboard, 0));
+  return CLOSEUP.fov;
+}
+
+/** Body-frame corner geometry for every corner of the current simulation (array order = TelemetryFrame.corners). */
+export function cornerGeometry(sim: Simulation, t: TelemetryFrame): CornerGeometry[] {
+  const v = sim.vehicle;
+  return t.corners.map((c) => {
+    const axle = v[c.axle];
+    const front = c.axle === 'front';
+    return {
+      x: front ? v.cgToFront : v.cgToFront - v.wheelbase,
+      halfTrack: 'track' in axle ? axle.track / 2 : 0,
+      side: c.side,
+      front,
+      radius: axle.tyre.radius,
+    };
+  });
+}
+
+interface ActiveShot {
+  kind: ShotKind;
+  corner: CornerId | null;
+  remaining: number;
+  age: number;
+  fov: number | undefined;
+  azimuth: number;
+}
+
+export type ExplorePose = (frame: CarFrame, dt: number, out: Pose) => boolean;
+
+/**
+ * Owns every camera source and the blend. `update()` writes `out` (the world camera pose to apply).
+ * View / shot changes may come between frames (store watchers); they capture the last applied pose.
+ */
+export class CameraRig {
+  readonly out = createPose();
+  readonly frame = new CarFrame();
+  readonly chase = new Chase();
+  view: ViewMode = 'follow';
+  corner: CornerId | null = null;
+  shot: ActiveShot | null = null;
+  /** Blend progress 0..1 (1 = settled on the target). */
+  blend = 1;
+  /** Black-dip opacity for reduced-motion cuts, 0..1. */
+  fade = 0;
+  /** Seconds the lap clock may jump before the chase snaps instead of swinging. */
+  static readonly SNAP_S = 0.5;
+
+  private corners: CornerGeometry[] = [];
+  private readonly path: PathState = { lapTime: 0, s: 0, l: 0, v: 0, ax: 0, ay: 0, curvature: 0, heading: 0, x: 0, y: 0, z: 0, bank: 0, grade: 0, sectionIndex: 0 };
+  private readonly ahead: PathState = { ...this.path };
+  private readonly aheadWorld = new Vector3();
+  private readonly aheadLocal = new Vector3();
+  private readonly target = createPose();
+  private readonly fromLocal = createPose();
+  private readonly toLocal = createPose();
+  private readonly mixLocal = createPose();
+  private readonly pivot = new Vector3(0, PIVOT_Y, 0);
+  private readonly bodyPos = new Vector3();
+  private readonly bodyQuat = new Quaternion();
+  private readonly eye = new Vector3();
+  private readonly aim = new Vector3();
+  private readonly tripod = new Vector3();
+  private readonly bodyUp = new Vector3();
+  private lastLapTime = Number.NaN;
+  private started = false;
+
+  constructor(
+    private readonly sim: () => Simulation,
+    private readonly explore: ExplorePose | null = null,
+  ) {}
+
+  /** Re-read corner layout (call after `sim:vehicle`). */
+  layout(t: TelemetryFrame): void {
+    this.corners = cornerGeometry(this.sim(), t);
+  }
+
+  get transitioning(): boolean {
+    return this.blend < 1;
+  }
+
+  setView(view: ViewMode, corner: CornerId | null, instant: boolean): void {
+    this.view = view;
+    this.corner = corner;
+    this.shot = null;
+    this.begin(instant);
+  }
+
+  playShot(shot: DirectorShot, instant: boolean): void {
+    this.shot = {
+      kind: shot.kind,
+      corner: shot.corner ?? null,
+      remaining: shot.durationS,
+      age: 0,
+      fov: shot.fov,
+      azimuth: 0,
+    };
+    if (shot.kind === 'trackside') this.placeTripod(shot.durationS);
+    if (shot.kind === 'orbit') {
+      // Start the orbit where the camera already is (seen from the car) so the move reads as one gesture.
+      this.frame.pointToLocal(this.out.pos, this.eye);
+      this.shot.azimuth = Math.atan2(this.eye.z, this.eye.x);
+    }
+    // Trackside is a tripod cut (film grammar); everything else glides.
+    this.begin(instant || shot.kind === 'trackside');
+  }
+
+  clearShot(instant: boolean): void {
+    if (!this.shot) return;
+    this.shot = null;
+    this.begin(instant);
+  }
+
+  /** Advance one render frame. `reducedMotion` turns blends into cuts (callers pass `instant`). */
+  update(dt: number, t: TelemetryFrame): Pose {
+    const sim = this.sim();
+    sim.stateAt(t.lapTime, this.path);
+    this.frame.set(this.path);
+    const speed01 = clamp(this.path.v / sim.vehicle.limits.vMax, 0, 1);
+    sim.stateAt(t.lapTime + CHASE.aheadS, this.ahead);
+    simToThree(this.ahead.x, this.ahead.y, this.ahead.z, this.aheadWorld);
+    this.frame.pointToLocal(this.aheadWorld, this.aheadLocal);
+    const d = sim.lapDuration;
+    const step = t.lapTime - this.lastLapTime;
+    const jumped = !this.started || !(Math.abs(step - d * Math.round(step / d)) <= CameraRig.SNAP_S);
+    this.lastLapTime = t.lapTime;
+    if (jumped || !Number.isFinite(this.chase.heading)) this.chase.reset(this.frame, speed01);
+    else this.chase.step(dt, this.frame, speed01, this.aheadLocal);
+    if (this.corners.length !== t.corners.length) this.layout(t);
+
+    if (this.shot) {
+      this.shot.age += dt;
+      this.shot.remaining -= dt;
+      if (this.shot.remaining <= 0) {
+        this.shot = null;
+        this.begin(false);
+      }
+    }
+    this.source(dt, t, sim);
+    if (!this.started) {
+      this.started = true;
+      this.blend = 1;
+    }
+
+    if (this.blend < 1) {
+      this.blend = Math.min(1, this.blend + dt / BLEND_S);
+      this.frame.toLocal(this.target, this.toLocal);
+      blendLocal(this.fromLocal, this.toLocal, smootherstep(this.blend), this.pivot, this.mixLocal);
+      this.frame.toWorld(this.mixLocal, this.out);
+    } else copyPose(this.target, this.out);
+    if (this.fade > 0) this.fade = Math.max(0, this.fade - dt / FADE_S);
+    return this.out;
+  }
+
+  /** Writes the live target pose of the active shot or view into `this.target`. */
+  private source(dt: number, t: TelemetryFrame, sim: Simulation): void {
+    const kind: ShotKind | ViewMode = this.shot ? this.shot.kind : this.view;
+    const fov = this.shot?.fov;
+    const out = this.target;
+    switch (kind) {
+      case 'explore':
+        if (this.explore?.(this.frame, dt, out)) return;
+        this.chasePose(sim, out);
+        return;
+      case 'closeup':
+        this.closeupPose(t, this.shot ? this.shot.corner : this.corner, out);
+        break;
+      case 'orbit': {
+        const az = (this.shot?.azimuth ?? 0) + (this.shot?.age ?? 0) * 0.16;
+        this.local(7.2 * Math.cos(az), 1.9, 7.2 * Math.sin(az), 0, 0.55, 0, out);
+        out.fov = DEFAULT_FOV.orbit;
+        break;
+      }
+      case 'overhead':
+        this.local(-4, 17, 0.01, 0.5, 0, 0, out);
+        out.fov = DEFAULT_FOV.overhead;
+        break;
+      case 'front-view':
+        this.local(7.5, 0.8, 0, 0, 0.6, 0, out);
+        out.fov = DEFAULT_FOV['front-view'];
+        break;
+      case 'trackside': {
+        this.aim.set(0, 0.7, 0).applyQuaternion(this.frame.quat).add(this.frame.pos);
+        out.pos.copy(this.tripod);
+        lookAt(out.pos, this.aim, out.quat);
+        // Telephoto: keep the car about the same size on screen as it approaches and passes.
+        out.fov = clamp(2 * Math.atan(3.2 / Math.max(1, this.tripod.distanceTo(this.aim))) * RAD_TO_DEG, 9, 48);
+        break;
+      }
+      default:
+        this.chasePose(sim, out);
+    }
+    if (fov !== undefined) out.fov = fov;
+  }
+
+  private chasePose(sim: Simulation, out: Pose): void {
+    const track = sim.track;
+    const minY = track.roadHeight(this.path.s - this.chase.dist, this.path.l) + CHASE.clearance;
+    this.chase.pose(this.frame, minY, out);
+  }
+
+  /** Pose from an eye and aim in the car frame. */
+  private local(ex: number, ey: number, ez: number, ax: number, ay: number, az: number, out: Pose): void {
+    out.pos.set(ex, ey, ez).applyQuaternion(this.frame.quat).add(this.frame.pos);
+    this.aim.set(ax, ay, az).applyQuaternion(this.frame.quat).add(this.frame.pos);
+    lookAt(out.pos, this.aim, out.quat);
+  }
+
+  /** Rigid body-frame anchor: the body stays still on screen and the wheel and links visibly work. */
+  private closeupPose(t: TelemetryFrame, corner: CornerId | null, out: Pose): void {
+    let index = 0;
+    for (let i = 0; i < t.corners.length; i++) if (t.corners[i]!.id === corner) index = i;
+    const c = this.corners[index];
+    simToThree(t.bodyPosition.x, t.bodyPosition.y, t.bodyPosition.z, this.bodyPos);
+    simQuatToThree(t.bodyRotation, this.bodyQuat);
+    if (!c) {
+      this.chasePose(this.sim(), out);
+      return;
+    }
+    out.fov = closeupLocal(c, this.eye, this.aim);
+    this.eye.applyQuaternion(this.bodyQuat).add(this.bodyPos);
+    this.aim.applyQuaternion(this.bodyQuat).add(this.bodyPos);
+    out.pos.copy(this.eye);
+    // Camera roll follows the body so the chassis reads as a fixed stage.
+    out.quat.setFromRotationMatrix(lookMatrix.lookAt(this.eye, this.aim, this.bodyUp.copy(UP).applyQuaternion(this.bodyQuat)));
+  }
+
+  /** Tripod on the inside of the line where the car will be half-way through the shot. */
+  private placeTripod(durationS: number): void {
+    const sim = this.sim();
+    sim.stateAt(this.lastLapTime + durationS * 0.5, this.ahead);
+    const def = sim.track.def;
+    const inside = this.ahead.curvature < 0 ? -1 : 1;
+    const l = inside * (def.width / 2 + def.kerbWidth + 5);
+    const p = sim.track.toWorld(this.ahead.s, l, { x: 0, y: 0, z: 0 });
+    simToThree(p.x, p.y, p.z + 1.3, this.tripod);
+  }
+
+  private begin(instant: boolean): void {
+    if (!this.started) return;
+    if (instant) {
+      this.blend = 1;
+      this.fade = 1;
+      return;
+    }
+    this.frame.toLocal(this.out, this.fromLocal);
+    this.blend = 0;
+  }
+}

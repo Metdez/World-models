@@ -1,0 +1,8 @@
+/* Camera: dip-from-black used instead of camera motion when reduced motion is on. Tokens only. */
+.sl-camera-fade {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-0);
+  opacity: 0;
+  pointer-events: none;
+}
