@@ -9,7 +9,9 @@
  * strut body clearing the tyre's inner sidewall, lower ball joint deep in a 20-inch wheel to keep the ground offset
  * small, which leaves the steering axis (ball joint to top mount) steeply inclined. Lower-arm pivot axes are
  * inclined in side view like the other types. Tie-rod / toe-link inner points were placed by a 2-D search so toe is
- * unchanged at +-60 mm travel. All metrics are computed by the solver.
+ * unchanged at +-70 mm travel. 02-05: strut axis moved inboard (and the top mount 40 mm up to hold the kingpin
+ * inclination) so the coil and its lower seat clear the real DB11 tyre shoulder; measured against the wheel mesh.
+ * All metrics are computed by the solver.
  */
 import type { AxleLinkage, CarSuspensionDefinition } from '../../contracts/suspension';
 import { GT_CORNER } from './gt-geometry';

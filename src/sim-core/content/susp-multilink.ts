@@ -8,7 +8,11 @@
  *   lower tension link from behind; the virtual lower pivot sits deep in the wheel, so the steering axis is virtual.
  * - rear: two upper links, a forward lower link, a transverse lower spring link behind the drive shaft, a toe link.
  * Lower-link chassis points are inclined in side view like the other types. Tie-rod / toe-link inner points were
- * placed by a 2-D search so toe is unchanged at +-60 mm travel. All metrics are computed by the solver.
+ * placed by a 2-D search so toe is unchanged at +-70 mm travel. 02-05 packaging against the real DB11 wheel: the
+ * trailing (front) / leading (rear) lower link swung inboard through the same virtual lower pivot so it no longer runs
+ * along the tyre's inner sidewall; spring links raised and the coil-over moved inboard (spring at 0.75 / 0.7 of the
+ * link) so the damper eye clears the rim lip; upper outer joints moved inboard along their link lines so the upright
+ * necks clear the rim; spring tops moved so the rods pass between the upper links. All metrics are computed by the solver.
  */
 import type { AxleLinkage, CarSuspensionDefinition, ComponentRole } from '../../contracts/suspension';
 import { GT_CORNER } from './gt-geometry';

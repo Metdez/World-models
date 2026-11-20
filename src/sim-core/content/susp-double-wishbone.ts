@@ -7,7 +7,8 @@
  * upper ball joint inside the top of the rim barrel, upper arm about half the lower arm length, coil-over from the
  * lower arm to the chassis between the upper arm legs. Lower-arm pivot axes are inclined in side view (front axle
  * front pivot down, rear axle front pivot up). Tie-rod / toe-link inner points were placed by a 2-D search so toe
- * is unchanged at +-60 mm travel (the usual bump-steer setup). All metrics are computed by the solver.
+ * is unchanged at +-60 mm travel (the usual bump-steer setup). 02-05: rear coil-over moved to x = 0 so it passes
+ * between the upper arm legs instead of through the front leg. All metrics are computed by the solver.
  */
 import type { AxleLinkage, CarSuspensionDefinition } from '../../contracts/suspension';
 import { GT_CORNER } from './gt-geometry';
