@@ -85,3 +85,25 @@ describe('motorcycle feature', () => {
     ]);
   });
 });
+
+describe('bike close-up side', () => {
+  it('films a single-sided swingarm from its own side, everything else from the left', () => {
+    const sim = bike('moto-telelever', 3);
+    const t = sim.sample(1, 1);
+    const rig = new CameraRig(() => sim);
+    rig.setView('closeup', 'r', true);
+    const side = () => {
+      const pose = rig.update(1 / 60, t);
+      const q = new Quaternion();
+      simQuatToThree(t.bodyRotation, q);
+      const body = new Vector3();
+      simToThree(t.bodyPosition.x, t.bodyPosition.y, t.bodyPosition.z, body);
+      return Math.sign(pose.pos.clone().sub(body).applyQuaternion(q.invert()).z);
+    };
+    expect(side()).toBe(motoTelelever.rear.kind === 'swingarm' && motoTelelever.rear.shockLower[1] < 0 ? 1 : -1);
+    sim.setSuspension('moto-modern');
+    expect(side()).toBe(-1);
+    rig.setView('closeup', 'f', true);
+    expect(side()).toBe(-1);
+  });
+});

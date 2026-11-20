@@ -199,6 +199,8 @@ export interface CornerGeometry {
   readonly side: 1 | -1 | 0;
   readonly front: boolean;
   readonly radius: number;
+  /** Motorcycle close-ups: the side to film from, +1 left (default), -1 right (a single-sided arm on the right). */
+  readonly filmSide?: 1 | -1;
 }
 
 export const CLOSEUP = {
@@ -211,8 +213,8 @@ export const CLOSEUP = {
   fov: 48,
   /** Motorcycle (no track): a side view from the left, slightly ahead and above, of the fork (front: aim half-way up
    * the legs) or of the swingarm and shock (rear: aim between the axle and the pivot). */
-  bikeFront: { eye: [0.3, 1.0, 2.4], aim: [-0.13, 0.28] },
-  bikeRear: { eye: [0.2, 1.0, 2.5], aim: [0.27, 0.14] },
+  bikeFront: { eye: [0.3, 0.95, 1.95], aim: [-0.13, 0.28] },
+  bikeRear: { eye: [0.2, 0.95, 2.05], aim: [0.27, 0.14] },
   bikeFov: 40,
 } as const;
 
@@ -222,7 +224,7 @@ export function closeupLocal(c: CornerGeometry, eye: Vector3, aim: Vector3): num
   if (c.halfTrack === 0) {
     // Left is three -z: film a centreline corner from the left. x offsets are from the axle (aim y above the hub).
     const f = c.front ? CLOSEUP.bikeFront : CLOSEUP.bikeRear;
-    eye.set(c.x + f.eye[0], f.eye[1], -f.eye[2]);
+    eye.set(c.x + f.eye[0], f.eye[1], -(c.filmSide ?? 1) * f.eye[2]);
     aim.set(c.x + f.aim[0], c.radius + f.aim[1], 0);
     return CLOSEUP.bikeFov;
   }
@@ -235,6 +237,9 @@ export function closeupLocal(c: CornerGeometry, eye: Vector3, aim: Vector3): num
 /** Body-frame corner geometry for every corner of the current simulation (array order = TelemetryFrame.corners). */
 export function cornerGeometry(sim: Simulation, t: TelemetryFrame): CornerGeometry[] {
   const v = sim.vehicle;
+  const s = sim.suspension;
+  // A single-sided swingarm is filmed from its own side (sim +y = left), where the arm and shock are.
+  const rearSide = s.vehicleClass === 'motorcycle' && s.rear.kind === 'swingarm' && s.rear.singleSided && s.rear.shockLower[1] < 0 ? -1 : 1;
   return t.corners.map((c) => {
     const axle = v[c.axle];
     const front = c.axle === 'front';
@@ -244,6 +249,7 @@ export function cornerGeometry(sim: Simulation, t: TelemetryFrame): CornerGeomet
       side: c.side,
       front,
       radius: axle.tyre.radius,
+      filmSide: front ? 1 : rearSide,
     };
   });
 }
@@ -295,6 +301,8 @@ export class CameraRig {
   private readonly bodyUp = new Vector3();
   private readonly unroll = new Quaternion();
   private shotScale = 1;
+  /** Suspension the corner layout was read for (a bike's film side depends on its swingarm). */
+  private layoutFor = '';
   private lastLapTime = Number.NaN;
   private started = false;
 
@@ -306,6 +314,7 @@ export class CameraRig {
   /** Re-read corner layout (call after `sim:vehicle`). */
   layout(t: TelemetryFrame): void {
     this.corners = cornerGeometry(this.sim(), t);
+    this.layoutFor = this.sim().suspension.id;
     const bike = this.sim().vehicle.class === 'motorcycle';
     this.chase.framing = bike ? BIKE_CHASE : CHASE;
     this.shotScale = bike ? BIKE_SHOT_SCALE : 1;
@@ -362,7 +371,7 @@ export class CameraRig {
     this.lastLapTime = t.lapTime;
     if (jumped || !Number.isFinite(this.chase.heading)) this.chase.reset(this.frame, speed01);
     else this.chase.step(dt, this.frame, speed01, this.aheadLocal);
-    if (this.corners.length !== t.corners.length) this.layout(t);
+    if (this.corners.length !== t.corners.length || this.layoutFor !== sim.suspension.id) this.layout(t);
 
     if (this.shot) {
       this.shot.age += dt;
