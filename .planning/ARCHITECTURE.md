@@ -183,7 +183,7 @@ The authoritative text is the header of `src/contracts/units.ts` (§5.1). Summar
 - **Signs**: roll + = left side up · pitch + = nose down · yaw + = left · curvature + = left turn · ay + = left ·
   camber − = top inboard (both sides) · toe + = toe-in (both sides) · steer + = left · travel + = bump ·
   lateral offset l + = left · bank + = left edge up · spring/damper force + = compression.
-  Check: in a left turn (κ>0, ay>0) the body rolls right (roll < 0), right wheels go into bump (travel > 0) and load up.
+  Check: in a left turn (κ>0, ay>0) the body rolls right, i.e. right side down, left side up (roll > 0), right wheels go into bump (travel > 0) and load up.
 - **three.js**: scene stays Y-up. The ONLY conversion is `simToThree()` / `simQuatToThree()` in `contracts/units.ts`
   (three.x = x, three.y = z, three.z = −y). glTF assets are Y-up with their own forward axis; each visual builder
   applies its fixed root rotation (DB11: forward is glTF +Z → rotate the model root by +π/2 about three Y so
