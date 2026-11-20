@@ -291,6 +291,7 @@
 .sl-controls-help {
   top: calc(var(--margin) + 52px);
   right: var(--margin);
+  z-index: 1; /* a transient card: above the camber trace that lives in the same corner */
   width: 272px;
   padding: var(--sp-3);
   border-radius: var(--radius-panel);
