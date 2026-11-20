@@ -55,8 +55,8 @@ test.describe('04-03 telemetry panel + insights', () => {
     await expect(caption).toBeVisible();
     await expect(page.locator('.sl-insights-text')).toHaveText(/rolls toward the outside/);
     await expect(page.locator('.sl-insights')).toHaveAttribute('aria-live', 'polite');
-    // composed when it fired (a moment earlier): steady roll, so within a few tenths, and nowhere near the x2.5 pose
-    expect(Math.abs(num(await page.locator('.sl-insights-chip').textContent()) - Math.abs(f.roll * RAD))).toBeLessThan(0.3);
+    // the section chip reads the live TRUE frame (15 Hz), like the card: nowhere near the x2.5 pose
+    expect(Math.abs(num(await page.locator('.sl-insights-chip').textContent()) - Math.abs(f.roll * RAD))).toBeLessThan(0.11);
 
     // swap: after a 1 s settle, the delta chip compares the same place on the lap; the ghost legend names the old one
     await page.evaluate(() => globalThis.__app!.set('suspensionId', 'double-wishbone'));

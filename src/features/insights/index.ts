@@ -9,7 +9,7 @@ import type { TelemetryFrame } from '../../contracts/telemetry';
 import type { Phenomenon } from '../../contracts/track';
 import { h, mount } from '../../ui/dom';
 import { computeDelta, formatDelta, LapRecord } from './lap-record';
-import { InsightEngine, type Insight } from './rules';
+import { fill, InsightEngine, type Insight } from './rules';
 import './insights.css';
 
 const SAMPLE_DT = 1 / 30;
@@ -39,6 +39,9 @@ interface State {
   quiet: boolean;
   /** Simulation time the caption starts leaving; +LEAVE_S it is hidden. */
   hideAt: number;
+  /** Section caption on screen: its chip keeps reading the live frame so it matches the telemetry card. */
+  live: Insight | null;
+  ticks: number;
 }
 
 let st: State | undefined;
@@ -48,6 +51,7 @@ function phenomenonAt(c: FeatureContext, index: number): Phenomenon | undefined 
 }
 
 function present(s: State, id: string, text: string, chip: readonly (Node | string)[], warn: boolean): void {
+  s.live = null;
   s.hideAt = s.ctx.sim.frame.simTime + VISIBLE_S;
   s.text.textContent = text;
   s.chip.replaceChildren(...chip);
@@ -63,6 +67,8 @@ function present(s: State, id: string, text: string, chip: readonly (Node | stri
 
 function showInsight(s: State, i: Insight): void {
   present(s, i.id, i.text, i.chip ? [i.chip] : [], i.warn);
+  // event captions describe a moment (a wheel went light): their numbers stay as they were
+  if (i.rule.chip && !i.rule.event) s.live = i;
 }
 
 function suspensionLabel(c: FeatureContext, id: string): string {
@@ -123,6 +129,8 @@ const insights: FeatureModule = {
       swap: null,
       quiet: false,
       hideAt: Number.POSITIVE_INFINITY,
+      live: null,
+      ticks: 0,
     };
     st = s;
     resetVehicle(s);
@@ -162,11 +170,16 @@ const insights: FeatureModule = {
       if (t.simTime >= s.hideAt + LEAVE_S) {
         s.caption.hidden = true;
         s.hideAt = Number.POSITIVE_INFINITY;
+        s.live = null;
       }
     }
     if (t.simTime - s.lastSimTime < SAMPLE_DT - 1e-9) return;
     s.lastSimTime = t.simTime;
     s.rec.write(t.suspensionId, t);
+    if (s.live && s.ticks++ % 2 === 0) {
+      const chip = fill(s.live.rule.chip!, t, s.live.corner);
+      if (chip !== s.chip.textContent) s.chip.textContent = chip;
+    }
     if (t.sectionIndex !== s.section) {
       s.section = t.sectionIndex;
       s.engine.resetSection();

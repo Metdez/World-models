@@ -33,6 +33,9 @@ export interface Rule {
 
 export interface Insight {
   readonly id: string;
+  readonly rule: Rule;
+  /** Corner the placeholders describe. */
+  readonly corner: number;
   readonly text: string;
   readonly chip: string;
   readonly warn: boolean;
@@ -196,7 +199,7 @@ export function fill(template: string, t: TelemetryFrame, corner: number): strin
 }
 
 export function compose(rule: Rule, t: TelemetryFrame, corner: number): Insight {
-  return { id: rule.id, text: fill(rule.text, t, corner), chip: rule.chip ? fill(rule.chip, t, corner) : '', warn: rule.warn ?? false };
+  return { id: rule.id, rule, corner, text: fill(rule.text, t, corner), chip: rule.chip ? fill(rule.chip, t, corner) : '', warn: rule.warn ?? false };
 }
 
 /** Minimum time between two captions, s. */
