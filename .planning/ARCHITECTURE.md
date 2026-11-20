@@ -2045,12 +2045,16 @@ lists as in 03 §1/§2). Tolerances: angles ±0.03°, lengths ±1 mm, RC ±2 mm.
 
 | Set | Checks |
 |---|---|
-| Sedan double wishbone, R = 0.3266 | camber +0.80° @−50 mm, +0.44° @−25, −0.52° @+25, −1.13° @+50; toe +2.28° @−50, −1.37° @+50; RC 162 mm; KPI 10.0°; caster 5.3°; scrub +6.2 mm; trail +10 mm |
-| Generic MacPherson, R = 0.40 | camber −0.55° @+50, +0.89° @−50; toe −1.78° @+50, +1.54° @−50; RC 126 mm; KPI 11.9°; caster 6.6° |
+| Sedan double wishbone, R = 0.3266 | camber +0.80° @−50 mm, +0.44° @−25, −0.52° @+25, −1.13° @+50; toe +2.28° @−50, −1.37° @+50; RC 162 mm; KPI 10.0°; caster 5.3°; scrub +5.26 mm; trail +10.93 mm (solver screw axis; the ball-joint line gives +5.6 / +11.9) |
+| Generic MacPherson, R = 0.40 | camber −0.55° @+50, +0.89° @−50; toe −1.78° @+50, +1.54° @−50; RC 126 mm; KPI 11.9°; caster 6.6°; scrub +103.0 mm; trail +41.9 mm |
 | Sedan 5-link, R = 0.3266 | camber −0.84° @+25, −1.85° @+50, +1.20° @−50; bump steer +0.02°/10 mm (±0.01); RC 39 mm |
 | opensus DW sample (expected values only) | camber gain −0.317°/10 mm; RC 89.9 mm; KPI = caster = 5.19°; scrub 39.1 mm; bump steer 0.000 |
 Plus property tests: no NaN over the full travel × rack grid for every definition; left/right mirror symmetry;
 residual < 1e-9 at every grid node; continuity (no jump > 2 mm between neighbouring nodes).
+Scrub/trail note (02-02): research 03's prototype found the steer-axis point with an ill-conditioned solve, so its
+scrub/trail digits were noise; the values above are the solver's analytic screw axis, as asserted in
+`tests/sim-core/kinematics-reference.test.ts`. For the shipped GT definitions (not regression references) the current
+values after 02-05 are front scrub MP 26.0 / DW 21.8 / ML 12.9 mm and trail 15.5 / 17.0 / 33.6 mm.
 
 ### 7.4 Tuning gates for the shipped car definitions (KIN-03; asserted in `tests/sim-core/kinematics-gates.test.ts`)
 Seeds: DW = Chrono Sedan_DoubleWishbone, MacPherson = Chrono generic MacPhersonStrut, multi-link = Chrono
