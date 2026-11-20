@@ -1,3 +1,182 @@
-import type { FeatureModule } from '../../contracts/app';
-/** STUB — owner: plan 04-03. Keep id/requires/phase/defaultEnabled; replace the body. */
-export default { id: 'insights', requires: [], phase: 'overlay' } satisfies FeatureModule;
+/**
+ * Insights (plan 04-03, research 14 D7 / A7): one caption line bottom-centre, driven by the section's phenomenon
+ * and simulation events (rules.ts), at most one per 8 s, 6 s visible, announced politely to screen readers and
+ * on the bus (`insight:shown`). On a suspension swap, after 1 s of settling, a delta chip compares the previous
+ * suspension with the new one at the same place on the lap (lap-record.ts). Silent during attract mode.
+ */
+import type { FeatureContext, FeatureModule, FrameInfo } from '../../contracts/app';
+import type { TelemetryFrame } from '../../contracts/telemetry';
+import type { Phenomenon } from '../../contracts/track';
+import { h, mount } from '../../ui/dom';
+import { computeDelta, formatDelta, LapRecord } from './lap-record';
+import { InsightEngine, type Insight } from './rules';
+import './insights.css';
+
+const SAMPLE_DT = 1 / 30;
+const SETTLE_S = 1;
+const VISIBLE_MS = 6000;
+const LEAVE_MS = 300;
+
+interface Swap {
+  readonly previous: string;
+  readonly at: number;
+  readonly s: number;
+  section: number;
+}
+
+interface State {
+  readonly ctx: FeatureContext;
+  readonly root: HTMLElement;
+  readonly caption: HTMLElement;
+  readonly text: HTMLElement;
+  readonly chip: HTMLElement;
+  readonly engine: InsightEngine;
+  rec: LapRecord;
+  lastSimTime: number;
+  section: number;
+  swap: Swap | null;
+  quiet: boolean;
+  timer: ReturnType<typeof setTimeout> | undefined;
+}
+
+let st: State | undefined;
+
+function phenomenonAt(c: FeatureContext, index: number): Phenomenon | undefined {
+  return c.sim.current.track.sections[index]?.def.phenomenon;
+}
+
+function present(s: State, id: string, text: string, chip: readonly (Node | string)[], warn: boolean): void {
+  clearTimeout(s.timer);
+  s.text.textContent = text;
+  s.chip.replaceChildren(...chip);
+  s.chip.hidden = chip.length === 0;
+  s.caption.classList.toggle('is-warn', warn);
+  s.caption.classList.remove('is-leaving');
+  // restart the enter animation for back-to-back captions
+  s.caption.hidden = true;
+  void s.caption.offsetWidth;
+  s.caption.hidden = false;
+  s.timer = setTimeout(() => {
+    s.caption.classList.add('is-leaving');
+    s.timer = setTimeout(() => (s.caption.hidden = true), LEAVE_MS);
+  }, VISIBLE_MS);
+  s.ctx.bus.emit('insight:shown', { id, text: s.caption.textContent ?? text });
+}
+
+function showInsight(s: State, i: Insight): void {
+  present(s, i.id, i.text, i.chip ? [i.chip] : [], i.warn);
+}
+
+function suspensionLabel(c: FeatureContext, id: string): string {
+  return c.registries.suspensions.get(id)?.copy.label ?? id;
+}
+
+function showDelta(s: State, t: TelemetryFrame, swap: Swap): boolean {
+  const c = s.ctx;
+  const p = phenomenonAt(c, t.sectionIndex);
+  const d = computeDelta(s.rec, swap.previous, t, p, swap.section === t.sectionIndex ? swap.s : null);
+  if (!d) return false;
+  const f = formatDelta(d, d.corner < 0 ? '' : t.corners[d.corner]!.id.toUpperCase());
+  present(
+    s,
+    'delta',
+    `${suspensionLabel(c, swap.previous)} → ${suspensionLabel(c, c.sim.current.suspension.id)}`,
+    [
+      h('span', { class: 'sl-insights-chip-label' }, f.label),
+      h('span', { class: 'sl-insights-before' }, f.before),
+      h('span', { class: 'sl-insights-arrow', 'aria-label': 'to' }, '→'),
+      h('span', { class: 'sl-insights-after' }, f.after),
+    ],
+    false,
+  );
+  return true;
+}
+
+function resetVehicle(s: State): void {
+  const sim = s.ctx.sim.current;
+  s.rec = new LapRecord(s.ctx.sim.frame.corners.length, sim.track.length);
+  s.swap = null;
+  s.section = -1;
+  s.engine.resetSection();
+}
+
+const insights: FeatureModule = {
+  id: 'insights',
+  requires: [],
+  phase: 'overlay',
+
+  init(c) {
+    const text = h('span', { class: 'sl-insights-text' });
+    const chip = h('span', { class: 'sl-insights-chip sl-num', hidden: true });
+    const caption = h('p', { class: 'sl-insights-caption', hidden: true }, text, chip);
+    const root = h('div', { class: 'sl-insights', 'aria-live': 'polite', 'aria-atomic': 'true' }, caption);
+    c.addDisposer(mount(c.dom.overlay, root));
+
+    const s: State = {
+      ctx: c,
+      root,
+      caption,
+      text,
+      chip,
+      engine: new InsightEngine(),
+      rec: new LapRecord(1, 1),
+      lastSimTime: Number.NEGATIVE_INFINITY,
+      section: -1,
+      swap: null,
+      quiet: false,
+      timer: undefined,
+    };
+    st = s;
+    resetVehicle(s);
+
+    c.on('sim:vehicle', () => resetVehicle(s));
+    c.on('sim:suspension', ({ previous }) => {
+      const t = c.sim.frame;
+      s.swap = { previous, at: t.simTime, s: t.s, section: t.sectionIndex };
+    });
+    c.on('sim:seek', () => {
+      s.rec.break();
+      s.engine.resetSection();
+      s.lastSimTime = Number.NEGATIVE_INFINITY;
+      if (s.swap) s.swap.section = -1; // the before-swap position is no longer "just before"
+    });
+    c.on('sim:event', (e) => {
+      if (s.quiet || e.kind === 'section' || e.kind === 'lap') return;
+      const t = c.sim.frame;
+      const i = s.engine.event(e, t, t.simTime);
+      if (i) showInsight(s, i);
+    });
+    c.watch((state) => {
+      s.quiet = state.attract || !state.hudVisible;
+      root.hidden = s.quiet;
+    });
+    c.addDisposer(() => {
+      clearTimeout(s.timer);
+      st = undefined;
+    });
+  },
+
+  update(frame: FrameInfo) {
+    const s = st;
+    if (!s) return;
+    const t = frame.t;
+    if (t.simTime - s.lastSimTime < SAMPLE_DT) return;
+    s.lastSimTime = t.simTime;
+    s.rec.write(t.suspensionId, t);
+    if (t.sectionIndex !== s.section) {
+      s.section = t.sectionIndex;
+      s.engine.resetSection();
+    }
+    if (s.swap && t.simTime - s.swap.at >= SETTLE_S) {
+      const swap = s.swap;
+      s.swap = null;
+      if (!s.quiet && showDelta(s, t, swap)) s.engine.markShown(t.simTime);
+      return;
+    }
+    if (s.quiet) return;
+    const i = s.engine.tick(t, phenomenonAt(s.ctx, t.sectionIndex), t.simTime);
+    if (i) showInsight(s, i);
+  },
+};
+
+export default insights;

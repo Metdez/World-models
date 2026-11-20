@@ -1,0 +1,80 @@
+/* Insight caption (research 14 D7/D8): one line, bottom-centre above the suspension control. Tokens only. */
+.sl-insights {
+  --sl-insights-controls: 76px; /* clearance for the suspension segmented control below */
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--margin) + var(--sl-insights-controls));
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: min(640px, calc(100vw - 2 * var(--margin)));
+  pointer-events: none;
+}
+#overlay > .sl-insights {
+  pointer-events: none;
+}
+.sl-insights[hidden],
+.sl-insights [hidden] {
+  display: none;
+}
+
+.sl-insights-caption {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: var(--sp-2) var(--sp-4);
+  color: var(--text-1);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-panel);
+  animation: sl-insights-in var(--dur-caption-in) var(--ease);
+  transition: opacity var(--dur-caption-out) cubic-bezier(0.5, 0, 0.75, 0);
+}
+.sl-insights-caption.is-leaving {
+  opacity: 0;
+}
+
+@keyframes sl-insights-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.sl-insights-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding-left: var(--sp-3);
+  border-left: 1px solid var(--hair-strong);
+  color: var(--accent);
+  white-space: nowrap;
+}
+.sl-insights-caption.is-warn .sl-insights-chip {
+  color: var(--warn);
+}
+.sl-insights-chip-label {
+  color: var(--text-2);
+  font-family: var(--font-sans);
+  font-size: var(--fs-label);
+  font-weight: 500;
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+}
+.sl-insights-before,
+.sl-insights-arrow {
+  color: var(--text-2);
+}
+
+@media (max-width: 640px) {
+  .sl-insights-caption {
+    flex-wrap: wrap;
+    row-gap: var(--sp-1);
+    border-radius: var(--radius-panel);
+  }
+}
