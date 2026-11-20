@@ -159,10 +159,14 @@ export interface CornerGlyph {
   loadRatio: number;
   /** 0..1 stop engagement. */
   stop: number;
+  /** rad, needle full-scale each way (CAMBER_RANGE; a leaning motorcycle needs LEAN_RANGE). */
+  range: number;
 }
 
 /** Camber arc span each way, rad (six degrees). */
 export const CAMBER_RANGE = (6 * Math.PI) / 180;
+/** Needle span for a single-track vehicle, whose wheel camber to the road is its lean, rad (fifty degrees). */
+export const LEAN_RANGE = (50 * Math.PI) / 180;
 
 /** Per-corner glyph: camber arc with needle + static tick, travel bar between the stops, load square. */
 export function drawCorner(s: Surface, p: Palette, dpr: number, c: CornerGlyph): void {
@@ -177,14 +181,14 @@ export function drawCorner(s: Surface, p: Palette, dpr: number, c: CornerGlyph):
   g.arc(cx, cy, r, Math.PI, TAU);
   g.stroke();
   // static tick
-  const a0 = needleAngle(c.staticCamber, lean);
+  const a0 = needleAngle(c.staticCamber, lean, c.range);
   g.strokeStyle = p.text3;
   g.beginPath();
   g.moveTo(cx + Math.cos(a0) * (r - 3), cy + Math.sin(a0) * (r - 3));
   g.lineTo(cx + Math.cos(a0) * (r + 2), cy + Math.sin(a0) * (r + 2));
   g.stroke();
   // arc from vertical (zero camber) to the needle, then the needle (the wheel's vertical axis)
-  const a = needleAngle(c.camber, lean);
+  const a = needleAngle(c.camber, lean, c.range);
   const up = 1.5 * Math.PI;
   g.strokeStyle = p.accent;
   g.lineWidth = 2;
@@ -237,7 +241,7 @@ export function drawCorner(s: Surface, p: Palette, dpr: number, c: CornerGlyph):
   g.strokeRect(qx, qy, q, q);
 }
 
-const needleAngle = (camber: number, lean: number) => 1.5 * Math.PI - clamp(camber / CAMBER_RANGE, -1, 1) * 0.5 * Math.PI * lean;
+const needleAngle = (camber: number, lean: number, range: number) => 1.5 * Math.PI - clamp(camber / range, -1, 1) * 0.5 * Math.PI * lean;
 const barY = (t: number, c: CornerGlyph, top: number, bottom: number) =>
   bottom - ((clamp(t, -c.droop, c.bump) + c.droop) / (c.bump + c.droop)) * (bottom - top);
 

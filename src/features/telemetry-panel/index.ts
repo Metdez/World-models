@@ -9,13 +9,15 @@ import type { TelemetryFrame } from '../../contracts/telemetry';
 import { G } from '../../contracts/units';
 import { h, mount } from '../../ui/dom';
 import { deg, fmt, gUnits, kN, mm } from '../../ui/format';
-import { begin, drawCorner, drawGg, drawSpark, GgTrail, readPalette, surface, type CornerGlyph, type Palette, type SparkScale, type Surface } from './draw';
+import { begin, CAMBER_RANGE, drawCorner, drawGg, drawSpark, GgTrail, LEAN_RANGE, readPalette, surface, type CornerGlyph, type Palette, type SparkScale, type Surface } from './draw';
 import { History, METRICS, metricValue, type Metric } from './history';
 import './telemetry-panel.css';
 
 const SAMPLE_DT = 1 / 30;
 const TRAIL = 45; // 1.5 s at 30 Hz
 const METRIC_LABEL: Readonly<Record<Metric, string>> = { camber: 'Camber', travel: 'Travel', load: 'Load' };
+/** A motorcycle's wheel camber to the road is its lean: same field, honest name. */
+const BIKE_LABEL: Readonly<Record<Metric, string>> = { ...METRIC_LABEL, camber: 'Lean' };
 /** Smallest sparkline span per metric (SI), so a quiet signal is not magnified into noise. */
 const MIN_SPAN: Readonly<Record<Metric, number>> = { camber: (1 * Math.PI) / 180, travel: 0.02, load: 1000 };
 
@@ -69,6 +71,7 @@ interface State {
   readonly spark: Surface;
   readonly latG: HTMLElement;
   readonly roll: HTMLElement;
+  readonly rollLabel: HTMLElement;
   readonly scaleNote: HTMLElement;
   readonly liveLegend: HTMLElement;
   readonly ghostLegend: HTMLElement;
@@ -143,7 +146,7 @@ function buildCorners(s: State): void {
       button,
       value,
       glyph: surface(canvas, 64, 30),
-      state: { camber: 0, staticCamber: 0, side: c.side, travel: 0, bump: 0.1, droop: 0.1, loadRatio: 1, stop: 0 },
+      state: { camber: 0, staticCamber: 0, side: c.side, travel: 0, bump: 0.1, droop: 0.1, loadRatio: 1, stop: 0, range: twoColumns ? CAMBER_RANGE : LEAN_RANGE },
     };
   });
 }
@@ -172,6 +175,12 @@ function resetVehicle(s: State): void {
   s.trail.clear();
   buildCorners(s);
   configure(s);
+  // Single track: both wheels lean with the bike, so camber (= lean) is shown as Lean and Travel is the default trace.
+  const bike = s.ctx.sim.current.vehicle.class === 'motorcycle';
+  const labels = bike ? BIKE_LABEL : METRIC_LABEL;
+  s.tabs.forEach((b, i) => (b.textContent = labels[METRICS[i]!]));
+  s.rollLabel.textContent = bike ? 'Lean' : 'Roll';
+  setMetric(s, bike ? METRICS.indexOf('travel') : 0);
 }
 
 /** Writes text only when the displayed digits change (the only allocation in the loop). */
@@ -223,6 +232,7 @@ const telemetryPanel: FeatureModule = {
     const spark = h('canvas', { class: 'sl-telemetry-panel-spark', 'aria-hidden': 'true' });
     const latG = h('b', { class: 'sl-telemetry-panel-hero' }, '—');
     const roll = h('b', { class: 'sl-telemetry-panel-hero' }, '—');
+    const rollLabel = h('span', { class: 'sl-label' }, 'Roll');
     const scaleNote = h('span', { class: 'sl-telemetry-panel-note sl-label', hidden: true }, 'True scale');
     const cornerGrid = h('div', { class: 'sl-telemetry-panel-corners' });
     const tabs = METRICS.map((m, i) =>
@@ -246,7 +256,7 @@ const telemetryPanel: FeatureModule = {
             'div',
             { class: 'sl-telemetry-panel-heroes' },
             h('span', { class: 'sl-telemetry-panel-stat' }, h('span', { class: 'sl-label', title: 'Lateral acceleration' }, 'Lat'), latG),
-            h('span', { class: 'sl-telemetry-panel-stat' }, h('span', { class: 'sl-label' }, 'Roll'), roll),
+            h('span', { class: 'sl-telemetry-panel-stat' }, rollLabel, roll),
           ),
         ),
         cornerGrid,
@@ -270,6 +280,7 @@ const telemetryPanel: FeatureModule = {
       spark: surface(spark, 290, 44),
       latG,
       roll,
+      rollLabel,
       scaleNote,
       liveLegend,
       ghostLegend,
