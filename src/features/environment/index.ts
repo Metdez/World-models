@@ -45,7 +45,7 @@ const LOOKS = {
     environmentIntensity: 1,
     backgroundBlurriness: 0.06,
     backgroundIntensity: 1,
-    fog: [140, 1100],
+    fog: [80, 700],
   },
   studio: {
     asset: 'hdri/ferndale_studio_03_1k',
@@ -54,7 +54,7 @@ const LOOKS = {
     sunRange: [0.8, 2.5],
     environmentIntensity: 1.1,
     backgroundBlurriness: 0.25,
-    backgroundIntensity: 0.6,
+    backgroundIntensity: 0.35,
     fog: [60, 600],
   },
 } as const satisfies Record<string, EnvironmentLook>;
@@ -67,11 +67,11 @@ const SHADOW_HALF = 12;
 const SUN_DISTANCE = 60;
 const BLOB_OPACITY = 0.8;
 /** Contact blob margin around wheelbase × track, m. */
-const BLOB_MARGIN = { length: 1.5, width: 0.55 } as const;
+const BLOB_MARGIN = { length: 2.2, width: 1.1 } as const;
 
 let frameHandler: ((frame: FrameInfo) => void) | undefined;
 
-/** Soft rounded-rectangle alpha falloff, black RGB: a grounding shadow under the car (no extra render pass). */
+/** Soft rounded-rectangle falloff for an alphaMap (three reads its green channel): grounding shadow, no extra pass. */
 function blobTexture(size = 64): DataTexture {
   const data = new Uint8Array(size * size * 4);
   for (let y = 0; y < size; y++) {
@@ -81,7 +81,7 @@ function blobTexture(size = 64): DataTexture {
       // Superellipse distance: flat core, soft rim.
       const d = Math.pow(Math.pow(u, 4) + Math.pow(v, 4), 0.25);
       const t = Math.min(1, Math.max(0, (1 - d) / 0.55));
-      data[(y * size + x) * 4 + 3] = Math.round(255 * t * t * (3 - 2 * t));
+      data.fill(Math.round(255 * t * t * (3 - 2 * t)), (y * size + x) * 4, (y * size + x) * 4 + 4);
     }
   }
   const texture = new DataTexture(data, size, size, RGBAFormat);
