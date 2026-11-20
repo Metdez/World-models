@@ -64,6 +64,22 @@ describe('renderer governor (§10)', () => {
     expect(g.ratio).toBe(1.5);
   });
 
+  it('never oscillates: a load with a cliff settles on one ratio and stays there', () => {
+    // A cliff (e.g. a bandwidth limit): above 1.42 the frame is slow, below it fast enough to invite a climb.
+    const g = createGovernor(1.5);
+    const cost = (r: number) => (r > 1.42 ? 20 : 12);
+    let changes = 0;
+    let last = g.ratio;
+    for (let t = 0; t < 600; t += cost(g.ratio) / 1000) {
+      stepGovernor(g, cost(g.ratio) / 1000, high);
+      if (g.ratio !== last) changes++;
+      last = g.ratio;
+    }
+    // 1.5 → 1.4 → 1.45 (slow again) → 1.35 → 1.4, then flat for the remaining minutes.
+    expect(changes).toBeLessThanOrEqual(4);
+    expect(cost(g.ratio)).toBeLessThan(18.5);
+  });
+
   it('ignores non-positive dt', () => {
     const g = createGovernor(1);
     expect(stepGovernor(g, 0, high)).toBe('none');

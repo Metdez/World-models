@@ -76,6 +76,7 @@ export default {
       if (s.quality === tier) return;
       tier = s.quality;
       governor.ratio = ctx.flags.e2e ? 1 : startRatio(deviceRatio(), quality());
+      governor.ceiling = Infinity; // a new tier has its own costs
       applyRatio();
       post.setQuality(quality());
     });

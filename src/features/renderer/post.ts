@@ -3,6 +3,7 @@ import {
   BloomEffect,
   EffectComposer,
   EffectPass,
+  FXAAEffect,
   RenderPass,
   SMAAEffect,
   SMAAPreset,
@@ -16,7 +17,7 @@ import type { QualitySettings } from '../../contracts/app';
 
 /**
  * Post stack (research 13 B6, restrained): Render (HalfFloat) → N8AO half-res (high only) → ONE merged EffectPass
- * [SMAA, Bloom, Vignette, AgX tone map], dithered against banding. The renderer must use NoToneMapping.
+ * [SMAA (FXAA on the low tier), Bloom, Vignette, AgX tone map], dithered against banding. The renderer must use NoToneMapping.
  */
 export function createPost(renderer: WebGLRenderer, scene: Scene, camera: PerspectiveCamera) {
   const composer = new EffectComposer(renderer, { frameBufferType: HalfFloatType });
@@ -34,8 +35,9 @@ export function createPost(renderer: WebGLRenderer, scene: Scene, camera: Perspe
     let pass = finals.get(key);
     if (!pass) {
       const effects: Effect[] = [];
-      // SMAA first: it is the pass's only convolution effect and must see the un-graded image.
-      if (q.smaa) effects.push(new SMAAEffect({ preset: SMAAPreset.HIGH }));
+      // AA first: it is the pass's only convolution effect and must see the un-graded image. Tiers without SMAA
+      // still get FXAA: one cheap fetch-and-blend inside the same pass, no extra render target.
+      effects.push(q.smaa ? new SMAAEffect({ preset: SMAAPreset.HIGH }) : new FXAAEffect());
       // Threshold is in linear scene units: the horizon sky is ~1.5, so only sun glints and HDR highlights bloom.
       if (q.bloom) effects.push(new BloomEffect({ mipmapBlur: true, luminanceThreshold: 3, luminanceSmoothing: 0.5, intensity: 0.3, radius: 0.65 }));
       effects.push(new VignetteEffect({ darkness: 0.38, offset: 0.3 }), new ToneMappingEffect({ mode: ToneMappingMode.AGX }));
