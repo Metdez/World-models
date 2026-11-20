@@ -101,11 +101,28 @@ describe('InsightEngine', () => {
     expect(e.event({ kind: 'section', index: 1, id: 'x' }, frame(CAR), 20)).toBeNull();
   });
 
-  it('2-corner frame: two-track rules stay quiet, events and vertical rules work', () => {
+  it('2-corner frame: two-track rules stay quiet, lean / fork dive / squat speak, events and vertical rules work', () => {
     const e = new InsightEngine();
     const t = frame(MOTO, { ay: lat(0.8) });
-    for (let k = 0; k < 40; k++) expect(e.tick(t, 'steady-state-roll', k * 0.1)).toBeNull();
+    const said: string[] = [];
+    for (let k = 0; k < 40; k++) {
+      const i = e.tick(t, 'steady-state-roll', k * 0.1);
+      if (i) said.push(i.id);
+    }
+    expect(said).toEqual(['lean']);
     expect(e.event({ kind: 'bump-stop', corner: 1 }, t, 10)?.text).toBe('The rear wheel reached its bump stop.');
+    const brake = frame(MOTO, { ax: -0.8 * G });
+    brake.corners[0]!.travel = 0.05;
+    brake.trail = 0.0735;
+    const de = new InsightEngine();
+    expect(de.tick(brake, 'brake-dive', 0)).toBeNull(); // sustain
+    expect(de.tick(brake, 'brake-dive', 0.5)).toMatchObject({ id: 'fork-dive', chip: 'Travel front +50 mm · trail 74 mm · pitch ' + fmt(Math.abs(deg(brake.pitch)), 1) + '°' });
+    const power = frame(MOTO, { ax: 0.3 * G });
+    power.corners[1]!.travel = -0.004;
+    power.axles[1]!.antiPitch = 1.27;
+    const se = new InsightEngine();
+    se.tick(power, 'ride-resonance', 0);
+    expect(se.tick(power, 'ride-resonance', 0.6)).toMatchObject({ id: 'squat', chip: 'Travel rear −4 mm · anti-squat 127%' });
     const bump = frame(MOTO);
     bump.corners[0]!.travel = 0.04;
     expect(e.tick(bump, 'single-wheel-bump', 30)?.chip).toBe('Travel front +40 mm');

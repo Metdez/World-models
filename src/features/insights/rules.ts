@@ -74,6 +74,12 @@ function twoTrack(t: TelemetryFrame): boolean {
   for (let i = 0; i < t.corners.length; i++) if (t.corners[i]!.side !== 0) return true;
   return false;
 }
+const singleTrack = (t: TelemetryFrame) => !twoTrack(t);
+const accel = (t: TelemetryFrame) => gUnits(t.ax);
+const cornerOf = (axle: 'front' | 'rear') => (t: TelemetryFrame) => {
+  for (let i = 0; i < t.corners.length; i++) if (t.corners[i]!.axle === axle) return i;
+  return 0;
+};
 const hasRollCentres = (t: TelemetryFrame) => twoTrack(t) && Number.isFinite(t.axles[0]!.rollCentreHeight) && Number.isFinite(t.axles[1]!.rollCentreHeight);
 
 export const RULES: readonly Rule[] = [
@@ -125,8 +131,42 @@ export const RULES: readonly Rule[] = [
     signal: braking,
     threshold: 0.5,
     sustain: 0.3,
+    applies: twoTrack,
     text: 'Braking moves load forward and the nose dives.',
     chip: 'Pitch {pitch}',
+  },
+  // ---- single track (motorcycle): no roll centre or body roll; the whole bike leans and the fork carries the dive
+  {
+    id: 'lean',
+    phenomena: ROLL,
+    signal: absAy,
+    threshold: 0.35,
+    sustain: 0.6,
+    applies: singleTrack,
+    text: 'The bike leans into the turn until gravity balances the cornering force.',
+    chip: 'Lean {roll} · lateral {ay}',
+  },
+  {
+    id: 'fork-dive',
+    phenomena: ['brake-dive'],
+    signal: braking,
+    threshold: 0.5,
+    sustain: 0.3,
+    applies: singleTrack,
+    focus: cornerOf('front'),
+    text: 'Braking loads the front: the fork compresses and the steering geometry changes.',
+    chip: 'Travel front {travel} · trail {trail} · pitch {pitch}',
+  },
+  {
+    id: 'squat',
+    phenomena: ['ride-resonance', 'steering-lock', 'settle'],
+    signal: accel,
+    threshold: 0.25,
+    sustain: 0.5,
+    applies: singleTrack,
+    focus: cornerOf('rear'),
+    text: 'Under power the chain pulls the swingarm; geometry decides squat or rise.',
+    chip: 'Travel rear {travel} · anti-squat {antiPitch}',
   },
   {
     id: 'steer',
@@ -134,6 +174,7 @@ export const RULES: readonly Rule[] = [
     signal: steer,
     threshold: 5,
     sustain: 0.3,
+    applies: twoTrack,
     text: 'Tight turn: the steered wheels turn about their steering axes.',
     chip: 'Steer {steer}',
   },
@@ -192,6 +233,8 @@ export function fill(template: string, t: TelemetryFrame, corner: number): strin
     travel: () => signed(mm(c.travel), 0, ' mm'),
     load: () => fmt(kN(c.load), 1) + ' kN',
     grip: () => fmt(c.gripUse * 100, 0) + '%',
+    trail: () => fmt(mm(t.trail), 0) + ' mm',
+    antiPitch: () => fmt(t.axles[c.axle === 'front' ? 0 : 1]!.antiPitch * 100, 0) + '%',
     rcFront: () => rc(0),
     rcRear: () => rc(1),
   };

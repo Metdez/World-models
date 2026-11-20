@@ -13,9 +13,12 @@ export type DeltaMetric = 'camber' | 'travel' | 'pitch';
 const STEADY: readonly Phenomenon[] = ['steady-state-roll', 'sustained-roll', 'settle'];
 const VERTICAL: readonly Phenomenon[] = ['heave', 'single-wheel-bump', 'harshness', 'ride-resonance'];
 
-/** The quantity a section is about: pitch under braking, wheel travel over bumps, camber everywhere else. */
-export function deltaMetric(p: Phenomenon | undefined): DeltaMetric {
-  return p === 'brake-dive' ? 'pitch' : p !== undefined && VERTICAL.includes(p) ? 'travel' : 'camber';
+/**
+ * The quantity a section is about: pitch under braking, wheel travel over bumps, camber everywhere else. A single-track
+ * vehicle's wheel camber is its lean, which the suspension does not set, so it compares travel instead.
+ */
+export function deltaMetric(p: Phenomenon | undefined, singleTrack = false): DeltaMetric {
+  return p === 'brake-dive' ? 'pitch' : singleTrack || (p !== undefined && VERTICAL.includes(p)) ? 'travel' : 'camber';
 }
 
 export function isSteady(p: Phenomenon | undefined): boolean {
@@ -104,7 +107,7 @@ function current(t: TelemetryFrame, metric: DeltaMetric, corner: number): number
  * driven by the previous suspension and the section is steady. Null when no honest comparison exists.
  */
 export function computeDelta(rec: LapRecord, previous: string, t: TelemetryFrame, phenomenon: Phenomenon | undefined, fallbackS: number | null): Delta | null {
-  const metric = deltaMetric(phenomenon);
+  const metric = deltaMetric(phenomenon, t.corners.every((c) => c.side === 0));
   const pick = (s: number, back: number): Delta | null => {
     if (metric === 'pitch') {
       const before = rec.value(previous, s, metric, 0, back);
