@@ -1,18 +1,19 @@
 import {
   BoxGeometry,
   BufferGeometry,
+  CircleGeometry,
   CylinderGeometry,
   Group,
   HemisphereLight,
   Line,
   LineBasicMaterial,
   Mesh,
-  MeshLambertMaterial,
+  MeshStandardMaterial,
   Quaternion,
   Vector3,
   type PerspectiveCamera,
 } from 'three';
-import type { SimHost } from '../../contracts/app';
+import type { Registries, SimHost } from '../../contracts/app';
 import type { TelemetryFrame } from '../../contracts/telemetry';
 import { simQuatToThree, simToThree, type XYZ } from '../../contracts/units';
 
@@ -21,15 +22,25 @@ const TRACK_STEP = 2;
 const CHASE_BACK = 9;
 const CHASE_UP = 3.2;
 const AIM_UP = 0.8;
+const GROUND_RADIUS = 600;
 
 /**
  * Walking-skeleton scene: track centreline, body box, one cylinder per wheel, posed from POSE fields.
  * shortcut: placeholder geometry only; the track (03-01), vehicle-view (03-03) and camera (04-01) features replace it.
+ * It hides itself once a real vehicle visual is registered; delete this file when those features have landed.
  */
-export function createPlaceholder(sim: SimHost) {
+export function createPlaceholder(sim: SimHost, registries: Registries) {
   const root = new Group();
   root.name = 'placeholder';
-  root.add(new HemisphereLight(0xdfe8ff, 0x20242a, 2.5));
+  root.visible = registries.vehicleVisuals.list().length === 0;
+  // Fill only: the environment feature's IBL and sun do the real lighting.
+  root.add(new HemisphereLight(0xdfe8ff, 0x20242a, 0.4));
+  // Ground disc so the sun shadow and contact blob have something to land on.
+  const groundMaterial = new MeshStandardMaterial({ color: 0x2b2d30, roughness: 0.92 });
+  const ground = new Mesh(new CircleGeometry(GROUND_RADIUS, 64).rotateX(-Math.PI / 2), groundMaterial);
+  ground.position.y = -0.01;
+  ground.receiveShadow = true;
+  root.add(ground);
 
   const track = sim.current.track;
   const points: Vector3[] = [];
@@ -44,8 +55,8 @@ export function createPlaceholder(sim: SimHost) {
   const trackLine = new Line(new BufferGeometry().setFromPoints(points), new LineBasicMaterial({ color: 0x7cf0d4 }));
   root.add(trackLine);
 
-  const bodyMaterial = new MeshLambertMaterial({ color: 0x8a94a3 });
-  const wheelMaterial = new MeshLambertMaterial({ color: 0x2a2e35 });
+  const bodyMaterial = new MeshStandardMaterial({ color: 0x9aa3ad, metalness: 0.7, roughness: 0.3 });
+  const wheelMaterial = new MeshStandardMaterial({ color: 0x1a1c1f, roughness: 0.85 });
   const body = new Group();
   root.add(body);
   let box: Mesh | undefined;
@@ -65,11 +76,13 @@ export function createPlaceholder(sim: SimHost) {
     // Vehicle frame: origin on the ground under the CG; box spans the wheelbase plus overhangs.
     box = new Mesh(new BoxGeometry(v.wheelbase + 1.2, v.cgHeight, width * 0.8), bodyMaterial);
     box.position.set(v.cgToFront - v.wheelbase / 2, v.cgHeight, 0);
+    box.castShadow = true;
     body.add(box);
     wheels = sim.frame.corners.map((c) => {
       const r = v[c.axle].tyre.radius;
       // Cylinder axis is local Y; the wheel spins about sim +Y, which is three -Z.
       const wheel = new Mesh(new CylinderGeometry(r, r, 0.22, 24).rotateX(Math.PI / 2), wheelMaterial);
+      wheel.castShadow = true;
       root.add(wheel);
       return wheel;
     });
@@ -111,6 +124,8 @@ export function createPlaceholder(sim: SimHost) {
       box?.geometry.dispose();
       for (const w of wheels) w.geometry.dispose();
       trackLine.geometry.dispose();
+      ground.geometry.dispose();
+      groundMaterial.dispose();
       (trackLine.material as LineBasicMaterial).dispose();
       bodyMaterial.dispose();
       wheelMaterial.dispose();
