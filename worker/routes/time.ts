@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
-import { API } from '../../src/contracts/net';
+import { API, type TimeResponse } from '../../src/contracts/net';
 
-/** STUB — owner: plan 01-03. Replace the handlers; keep the default export shape. */
 const r = new Hono<{ Bindings: Env }>();
-r.all(API.time, (c) => c.json({ error: 'not_implemented' }, 501));
+// Stamped as late as possible: clients estimate offset from the round trip around this value.
+r.get(API.time, (c) => c.json({ t: Date.now() } satisfies TimeResponse, 200, { 'Cache-Control': 'no-store' }));
 
 export default r;

@@ -1,8 +1,10 @@
 import { Hono } from 'hono';
-import { API } from '../../src/contracts/net';
+import { API, type HealthResponse } from '../../src/contracts/net';
 
-/** STUB — owner: plan 01-03. Replace the handlers; keep the default export shape. */
 const r = new Hono<{ Bindings: Env }>();
-r.all(API.health, (c) => c.json({ error: 'not_implemented' }, 501));
+r.get(API.health, (c) => {
+  const body: HealthResponse = { ok: true, version: c.env.APP_VERSION, time: Date.now() };
+  return c.json(body, 200, { 'Cache-Control': 'no-store' });
+});
 
 export default r;
