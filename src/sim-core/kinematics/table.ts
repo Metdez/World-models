@@ -296,16 +296,9 @@ export function solveAxleKinematics(axle: AxleLinkage, opts: SolveOptions): { ta
     for (let j = 1; j < nr; j++) if (!(steerTab[j]! > steerTab[j - 1]!)) throw new Error('kinematics: steer is not monotonic in rack');
   }
 
-  // ---- Sampling (no allocation: the cell and weights live in closure scalars).
-  let a00 = 0;
-  let a01 = 0;
-  let a10 = 0;
-  let a11 = 0;
-  let w00 = 0;
-  let w01 = 0;
-  let w10 = 0;
-  let w11 = 0;
-  const at = (k: number): number => rec[a00 + k]! * w00 + rec[a01 + k]! * w01 + rec[a10 + k]! * w10 + rec[a11 + k]! * w11;
+  // ---- Sampling: blend the four cell records into one scratch record in a single loop. (No helper call
+  // returning a double: a non-inlined call boxes its result.)
+  const tmp = new Float64Array(stride);
   const table: KinematicsTable = {
     pointOrder: sp.names,
     travelRange: [tMin, tMax],
@@ -326,40 +319,41 @@ export function solveAxleKinematics(axle: AxleLinkage, opts: SolveOptions): { ta
         j1 = j + 1;
         fj = w - j;
       }
-      w00 = (1 - fi) * (1 - fj);
-      w01 = (1 - fi) * fj;
-      w10 = fi * (1 - fj);
-      w11 = fi * fj;
-      a00 = (i * nr + j) * stride;
-      a01 = (i * nr + j1) * stride;
-      a10 = ((i + 1) * nr + j) * stride;
-      a11 = ((i + 1) * nr + j1) * stride;
+      const w00 = (1 - fi) * (1 - fj);
+      const w01 = (1 - fi) * fj;
+      const w10 = fi * (1 - fj);
+      const w11 = fi * fj;
+      const c00 = (i * nr + j) * stride;
+      const c01 = (i * nr + j1) * stride;
+      const c10 = ((i + 1) * nr + j) * stride;
+      const c11 = ((i + 1) * nr + j1) * stride;
+      for (let k = 0; k < stride; k++) tmp[k] = rec[c00 + k]! * w00 + rec[c01 + k]! * w01 + rec[c10 + k]! * w10 + rec[c11 + k]! * w11;
       out.travel = t;
       out.rack = r;
-      out.camber = at(CAMBER);
-      out.toe = at(TOE);
-      out.wheelCentre.x = at(WC);
-      out.wheelCentre.y = at(WC + 1);
-      out.wheelCentre.z = at(WC + 2);
-      out.contactPatch.x = at(CP);
-      out.contactPatch.y = at(CP + 1);
-      out.contactPatch.z = at(CP + 2);
-      out.instantCentre.x = at(IC);
-      out.instantCentre.y = at(IC + 1);
-      out.instantCentre.z = at(IC + 2);
-      const qx = at(QUAT);
-      const qy = at(QUAT + 1);
-      const qz = at(QUAT + 2);
-      const qw = at(QUAT + 3);
+      out.camber = tmp[CAMBER]!;
+      out.toe = tmp[TOE]!;
+      out.wheelCentre.x = tmp[WC]!;
+      out.wheelCentre.y = tmp[WC + 1]!;
+      out.wheelCentre.z = tmp[WC + 2]!;
+      out.contactPatch.x = tmp[CP]!;
+      out.contactPatch.y = tmp[CP + 1]!;
+      out.contactPatch.z = tmp[CP + 2]!;
+      out.instantCentre.x = tmp[IC]!;
+      out.instantCentre.y = tmp[IC + 1]!;
+      out.instantCentre.z = tmp[IC + 2]!;
+      const qx = tmp[QUAT]!;
+      const qy = tmp[QUAT + 1]!;
+      const qz = tmp[QUAT + 2]!;
+      const qw = tmp[QUAT + 3]!;
       const ql = Math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
       out.rotation.x = qx / ql;
       out.rotation.y = qy / ql;
       out.rotation.z = qz / ql;
       out.rotation.w = qw / ql;
-      out.springLength = at(SPRING);
-      out.motionRatio = at(MR);
+      out.springLength = tmp[SPRING]!;
+      out.motionRatio = tmp[MR]!;
       const p = out.points;
-      for (let k = 0; k < np * 3; k++) p[k] = at(POINTS + k);
+      for (let k = 0; k < np * 3; k++) p[k] = tmp[POINTS + k]!;
       return out;
     },
     rackForSteer(steer) {

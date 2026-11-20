@@ -19,3 +19,22 @@ export const GT_GEOMETRY = {
     tyreRadius: 0.382,
   },
 } as const;
+
+const DEG = Math.PI / 180;
+
+/**
+ * Corner design data shared by EVERY car suspension type, so that differences between types come only from the
+ * linkage: wheel centre (AXLE frame, left side: half track, tyre radius above ground), static alignment and
+ * usable travel (ARCHITECTURE §7.4).
+ */
+export const GT_CORNER = {
+  front: {
+    wheelCentre: [0, GT_GEOMETRY.front.track / 2, GT_GEOMETRY.front.tyreRadius] as const,
+    alignment: { camber: -1.5 * DEG, toe: 0 },
+  },
+  rear: {
+    wheelCentre: [0, GT_GEOMETRY.rear.track / 2, GT_GEOMETRY.rear.tyreRadius] as const,
+    alignment: { camber: -1.2 * DEG, toe: 0.1 * DEG },
+  },
+  travel: { bump: 0.07, droop: 0.07 },
+} as const;
