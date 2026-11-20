@@ -35,8 +35,9 @@ const openAi = (content: string, tools: { name: string; arguments: string }[] = 
 });
 const limiter = (ok: boolean, keys: string[] = []) => ({ limit: async ({ key }: { key: string }) => (keys.push(key), { success: ok }) });
 const env = (over: Record<string, unknown> = {}) => ({ APP_VERSION: 't', RL_ENGINEER: limiter(true), ...over }) as unknown as Env;
+let ipSeq = 0; // a fresh address per call keeps the route's in-memory limiter out of unrelated tests
 const post = (body: unknown, e: Env, headers: Record<string, string> = {}) =>
-  app.request('/api/engineer', { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body), headers: { 'content-type': 'application/json', ...headers } }, e);
+  app.request('/api/engineer', { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body), headers: { 'content-type': 'application/json', 'cf-connecting-ip': `192.0.2.${++ipSeq}`, ...headers } }, e);
 
 describe('model normaliser (recorded Workers AI responses)', () => {
   it('reads text and JSON-string tool arguments from the recorded tool-call reply', async () => {
@@ -209,6 +210,17 @@ describe('POST /api/engineer', () => {
     expect(await res.json()).toEqual({ error: 'busy' });
     await post(request('Why?'), env({ RL_ENGINEER: limiter(false, keys) }), { 'x-client-id': 'bad id!', 'cf-connecting-ip': '203.0.113.9' });
     expect(keys).toEqual(['c:client-123456', 'ip:203.0.113.9']);
+  });
+
+  it('also throttles in memory per client id and per address when the binding lets everything through', async () => {
+    const e = env();
+    const codes: number[] = [];
+    for (let i = 0; i < 8; i++) codes.push((await post(request('Why?'), e, { 'x-client-id': 'memory-client-1', 'cf-connecting-ip': '198.51.100.7' })).status);
+    expect(codes).toEqual([200, 200, 200, 200, 200, 200, 429, 429]);
+    const rotating: number[] = [];
+    for (let i = 0; i < 40; i++) rotating.push((await post(request('Why?'), e, { 'x-client-id': `rotating-id-${i}`, 'cf-connecting-ip': '198.51.100.8' })).status);
+    expect(rotating.filter((s) => s === 429)).toHaveLength(0);
+    expect((await post(request('Why?'), e, { 'x-client-id': 'rotating-id-x', 'cf-connecting-ip': '198.51.100.8' })).status).toBe(429);
   });
 
   it('rejects invalid, oversized and injected-label input with 400/413 before any model call', async () => {

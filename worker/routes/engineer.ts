@@ -49,6 +49,20 @@ export async function answer(req: EngineerRequest, ai: Ai | undefined): Promise<
   return { body: { text, actions, source: 'model' }, outcome: 'model', detail: run.model };
 }
 
+/** Per-isolate fixed windows backing up the RL_ENGINEER binding, which did not throttle in the live test. */
+export const MEMORY_LIMITS = { client: 6, ip: 40, windowMs: 60_000 } as const;
+const windows = new Map<string, { start: number; count: number }>();
+
+function allow(key: string, limit: number, now = Date.now()): boolean {
+  if (windows.size > 10_000) for (const [k, w] of windows) if (now - w.start >= MEMORY_LIMITS.windowMs) windows.delete(k);
+  const w = windows.get(key);
+  if (!w || now - w.start >= MEMORY_LIMITS.windowMs) {
+    windows.set(key, { start: now, count: 1 });
+    return true;
+  }
+  return ++w.count <= limit;
+}
+
 const r = new Hono<{ Bindings: Env }>();
 
 r.post(API.engineer, async (c) => {
@@ -66,10 +80,13 @@ r.post(API.engineer, async (c) => {
   if (!parsed.success) return c.json({ error: 'bad_request' }, 400, noStore);
 
   // Keyed by the anonymous client id so a venue behind one NAT is not throttled as one visitor.
-  // shortcut: a client can rotate ids; the account's Workers AI daily allocation is the hard backstop.
+  // shortcut: limits are per isolate / per location; the account's Workers AI daily allocation is the hard backstop.
+  // An IP ceiling (memory only; the address is never stored beyond one window) bounds id rotation.
   const clientId = c.req.header('x-client-id');
-  const key = clientId && /^[\w-]{8,64}$/.test(clientId) ? `c:${clientId}` : `ip:${c.req.header('cf-connecting-ip') ?? 'anon'}`;
-  if (c.env.RL_ENGINEER && !(await c.env.RL_ENGINEER.limit({ key })).success) return c.json({ error: 'busy' }, 429, noStore);
+  const ip = `ip:${c.req.header('cf-connecting-ip') ?? 'anon'}`;
+  const key = clientId && /^[\w-]{8,64}$/.test(clientId) ? `c:${clientId}` : ip;
+  const ok = allow(key, MEMORY_LIMITS.client) && allow(ip, MEMORY_LIMITS.ip) && (!c.env.RL_ENGINEER || (await c.env.RL_ENGINEER.limit({ key })).success);
+  if (!ok) return c.json({ error: 'busy' }, 429, noStore);
 
   // Cast only for exactOptionalPropertyTypes: zod types optional corners as `X | undefined` (absent at runtime).
   const req = parsed.data as EngineerRequest;
