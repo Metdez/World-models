@@ -38,7 +38,7 @@ interface Scenario {
   readonly station: string;
 }
 
-const SCENARIOS: Readonly<Record<string, Scenario>> = {
+const SCENARIOS: Readonly<Record<'liftoff' | 'understeer' | 'abs' | 'traction' | 'lockup' | 'steady', Scenario>> = {
   // R 40 m at 18 m/s, 0.7 throttle, released at 1.2 s (tests/sim-core/drive-events.test.ts)
   liftoff: {
     suspension: 'macpherson',
@@ -112,7 +112,7 @@ const SCENARIOS: Readonly<Record<string, Scenario>> = {
 };
 
 /** Runs a scenario; returns the payload built at the captured event (or at the end), as the browser would. */
-function generate(name: string): EngineerTelemetry & { readonly drive: NonNullable<EngineerTelemetry['drive']> } {
+function generate(name: keyof typeof SCENARIOS): EngineerTelemetry & { readonly drive: NonNullable<EngineerTelemetry['drive']> } {
   const sc = SCENARIOS[name]!;
   const r = rig({ suspension: sc.suspension, ...(sc.aids ? { aids: sc.aids } : {}) });
   sc.start(r);
@@ -153,7 +153,8 @@ const env = (globalThis as { process?: { env: Record<string, string | undefined>
 const { existsSync, readFileSync, writeFileSync } = fs;
 const fixture = (name: string): string => decodeURIComponent(new URL(`../fixtures/${name}`, (import.meta as unknown as { url: string }).url).pathname);
 const FIXTURE = fixture('12-03-drive-scenarios.json');
-const generated = Object.fromEntries(Object.keys(SCENARIOS).map((n) => [n, generate(n)])) as Record<string, ReturnType<typeof generate>>;
+type Name = 'liftoff' | 'understeer' | 'abs' | 'traction' | 'lockup' | 'steady';
+const generated = Object.fromEntries((Object.keys(SCENARIOS) as (keyof typeof SCENARIOS)[]).map((n) => [n, generate(n)])) as Record<Name, ReturnType<typeof generate>>;
 if (env.UPDATE_FIXTURES === '1' || !existsSync(FIXTURE)) writeFileSync(FIXTURE, `${JSON.stringify(generated, null, 2)}\n`);
 const S = JSON.parse(readFileSync(FIXTURE, 'utf8')) as typeof generated;
 const req = (question: string, telemetry: EngineerTelemetry): EngineerRequest => ({ question, telemetry, history: [] });
