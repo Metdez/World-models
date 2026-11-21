@@ -41,15 +41,15 @@ export default {
     const mode = () => store.get().driveMode;
 
     // --- DOM
-    const recDot = h('span', { class: 'sl-replay-rec', title: COPY.recording }, h('span', { class: 'sl-replay-rec-dot', 'aria-hidden': 'true' }), h('span', { class: 'sl-replay-rec-text' }, COPY.recording));
+    const recDot = h('span', { class: 'sl-replay-rec', title: COPY.recording }, h('span', { class: 'sl-replay-rec-dot', 'aria-hidden': 'true' }), h('span', { class: 'sl-replay-rec-text sl-drive-action-label' }, COPY.recording));
     const momentBtn = h(
       'button',
       { type: 'button', class: 'sl-replay-btn', 'data-action': 'moment', title: COPY.momentTitle, 'aria-keyshortcuts': 'Q' },
       icon(ICON_REPLAY),
-      COPY.moment,
+      h('span', { class: 'sl-drive-action-label' }, COPY.moment),
       h('kbd', { class: 'sl-drive-kbd' }, 'Q'),
     );
-    const shareBtn = h('button', { type: 'button', class: 'sl-replay-btn', 'data-action': 'share', title: COPY.shareTitle, 'aria-expanded': 'false', 'aria-controls': 'sl-replay-share' }, icon(ICON_SHARE), COPY.share);
+    const shareBtn = h('button', { type: 'button', class: 'sl-replay-btn', 'data-action': 'share', title: COPY.shareTitle, 'aria-expanded': 'false', 'aria-controls': 'sl-replay-share' }, icon(ICON_SHARE), h('span', { class: 'sl-drive-action-label' }, COPY.share));
     const recRow = h('div', { class: 'sl-replay-row', 'data-row': 'record', hidden: true }, recDot, momentBtn, shareBtn);
 
     const playLabel = h('span', { class: 'sl-replay-label' }, COPY.replay);

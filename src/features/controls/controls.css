@@ -594,3 +594,45 @@ button.sl-controls-help-row:hover {
     display: inline;
   }
 }
+
+/* 11-05 driving layout: while the visitor drives (the drive feature's .sl-drive.is-driving) the suspension control
+   docks compact under the vehicle tag, so the bottom centre holds one slim row and the car's tyres stay clear. The
+   swap keys (1 2 3) and the control itself keep working; the descriptor line rests. */
+:root:has(#overlay > .sl-drive.is-driving:not(.is-hidden)) .sl-controls-bc {
+  left: var(--margin);
+  top: calc(var(--margin) + var(--sl-hud-tag-h) + var(--sl-hud-gap));
+  bottom: auto;
+  right: auto;
+  transform: none;
+  justify-items: start;
+}
+:root:has(#overlay > .sl-drive.is-driving:not(.is-hidden)) .sl-controls-descriptor {
+  display: none;
+}
+:root:has(#overlay > .sl-drive.is-driving:not(.is-hidden)) .sl-controls-susp {
+  width: auto;
+}
+:root:has(#overlay > .sl-drive.is-driving:not(.is-hidden)) .sl-controls-susp .sl-controls-segment {
+  flex: none;
+  height: 36px;
+  padding: 0 var(--sp-3);
+  font-size: 13px;
+}
+:root:has(#overlay > .sl-drive.is-driving:not(.is-hidden)) .sl-controls-susp .sl-controls-segment-label {
+  display: none;
+}
+:root:has(#overlay > .sl-drive.is-driving:not(.is-hidden)) .sl-controls-susp .sl-controls-segment-short {
+  display: inline;
+}
+@media (pointer: coarse) {
+  :root:has(#overlay > .sl-drive.is-driving:not(.is-hidden)) .sl-controls-susp .sl-controls-segment {
+    height: 44px;
+  }
+}
+/* ... and below 1400 px the view control drops its key hints (F E C still work, the help card lists them) so the
+   driving pill, with every aid lamp lit, keeps clear of it */
+@media (max-width: 1400px) {
+  :root:has(#overlay > .sl-drive.is-driving:not(.is-hidden)) .sl-controls-view .sl-controls-kbd {
+    display: none;
+  }
+}

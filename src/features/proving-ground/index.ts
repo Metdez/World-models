@@ -17,6 +17,8 @@ import {
 } from 'three';
 import type { FeatureModule } from '../../contracts/app';
 import { RENDER, type RenderService } from '../../contracts/services';
+import type { TelemetryFrame } from '../../contracts/telemetry';
+import { simToThree } from '../../contracts/units';
 import type { GroundHit, GroundWorld } from '../../contracts/world';
 import { provingGround } from '../../sim-core/content/proving-ground';
 import { compileZones, type CompiledZone } from '../../sim-core/world/zones';
@@ -64,9 +66,11 @@ declare global {
    *  (x, y, height above the GroundWorld there). Bypasses the post chain (AgX tone mapping only, no AA/bloom): for
    *  overview and close-up test shots. */
   var __annexView: ((eye: View, target: View, fovDeg?: number, fog?: boolean) => string) | undefined;
+  /** e2e only (11-05): the current frame's tyre contact points in CSS px of the viewport, through the main camera. */
+  var __screenContacts: (() => { x: number; y: number }[]) | undefined;
 }
 
-function installViewHook(render: RenderService, world: GroundWorld): () => void {
+function installViewHook(render: RenderService, world: GroundWorld, frame: () => TelemetryFrame): () => void {
   const hit: GroundHit = { h: 0, base: 0, surface: 'asphalt', zone: '', s: NaN, l: NaN };
   const ground = (p: View) => p[2] + world.sample(p[0], p[1], NaN, hit).h;
   const camera = new PerspectiveCamera(50, 16 / 9, 1, 4000);
@@ -103,8 +107,16 @@ function installViewHook(render: RenderService, world: GroundWorld): () => void 
     renderer.toneMapping = mapping;
     return c.toDataURL('image/png');
   };
+  const p = new Vector3();
+  globalThis.__screenContacts = () =>
+    frame().corners.map((c) => {
+      simToThree(c.contactPatch.x, c.contactPatch.y, c.contactPatch.z, p);
+      p.project(render.camera);
+      return { x: ((p.x + 1) / 2) * innerWidth, y: ((1 - p.y) / 2) * innerHeight };
+    });
   return () => {
     globalThis.__annexView = undefined;
+    globalThis.__screenContacts = undefined;
     target.dispose();
     blit.dispose();
     quad.geometry.dispose();
@@ -178,7 +190,7 @@ export default {
     });
 
     ctx.addDisposer(render.add(root));
-    if (ctx.flags.e2e) ctx.addDisposer(installViewHook(render, world));
+    if (ctx.flags.e2e) ctx.addDisposer(installViewHook(render, world, () => ctx.sim.frame));
     ctx.addDisposer(() => {
       root.traverse((o) => {
         if (!(o instanceof Mesh)) return;

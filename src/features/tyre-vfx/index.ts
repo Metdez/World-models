@@ -62,8 +62,7 @@ export default {
         title: 'Grip rings under each tyre: ring = grip available, dot = grip used. Simplified tyre model.',
       },
       h('span', { class: 'sl-tyre-vfx-glyph', 'aria-hidden': 'true' }),
-      'Grip rings',
-      h('span', { class: 'sl-tyre-vfx-tag' }, 'model'),
+      h('span', { class: 'sl-drive-action-label' }, 'Grip rings ', h('span', { class: 'sl-tyre-vfx-tag' }, 'model')),
     );
     ctx.addDisposer(mount(ctx.dom.overlay, chip));
 

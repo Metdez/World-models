@@ -165,13 +165,30 @@ export default {
     );
 
     const pill = h('div', { class: 'sl-drive-pill' }, toggle, readout, returnChip, lamps, stationsBtn, aidsBtn, note);
+    // 11-05: the shared action row (other features' `.sl-drive-action` chips: Grip rings, Replay, Compare): chips
+    // mounted on the overlay are adopted into it (and handed back on dispose); drive.css places the row
+    const actions = h('div', { class: 'sl-drive-actions' });
     const root = h('div', { class: 'sl-drive' }, hint, pill, aidsPanel, stationsPanel);
     const fade = h('div', { class: 'sl-drive-fade', 'aria-hidden': 'true' });
     const announce = h('div', { class: 'sl-visually-hidden', 'aria-live': 'polite' });
     c.dom.overlay.prepend(fade); // under the HUD: the pill stays readable through a fade
     c.addDisposer(() => fade.remove());
     c.addDisposer(mount(c.dom.overlay, root));
+    c.addDisposer(mount(c.dom.overlay, actions));
     c.addDisposer(mount(c.dom.overlay, announce));
+    const overlay = c.dom.overlay;
+    const adopt = (n: Node) => {
+      if (n instanceof HTMLElement && n.parentElement === overlay && n.classList.contains('sl-drive-action')) actions.append(n);
+    };
+    for (const el of [...overlay.children]) adopt(el);
+    const adopter = new MutationObserver((records) => {
+      for (const r of records) r.addedNodes.forEach(adopt);
+    });
+    adopter.observe(overlay, { childList: true });
+    c.addDisposer(() => {
+      adopter.disconnect();
+      for (const el of [...actions.children]) overlay.append(el);
+    });
     const say = (text: string) => {
       if (announce.textContent !== text) announce.textContent = text;
     };
@@ -533,6 +550,8 @@ export default {
         shown.mode = m;
         shown.available = can;
         pill.dataset.mode = driving ? 'manual' : 'auto';
+        root.classList.toggle('is-driving', driving);
+        actions.classList.toggle('is-driving', driving);
         pill.classList.toggle('is-unavailable', !can && !driving);
         pill.classList.toggle('is-returning', m === 'returning');
         autoLabel.textContent = driving ? 'Auto' : MODE_LABEL[m];

@@ -1,5 +1,6 @@
-/* "Grip rings" chip in the drive action row (ARCHITECTURE-M2 §10.2, the row is positioned by drive.css). Tokens only. */
-#overlay > .sl-tyre-vfx {
+/* "Grip rings" chip in the drive action row (ARCHITECTURE-M2 §10.2; the drive feature adopts it into its pill row and
+   hides `.sl-drive-action-label` while driving: the glyph stays, the title and accessible name keep the words). */
+.sl-drive-action.sl-tyre-vfx {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
@@ -24,17 +25,17 @@
     color var(--dur-fast) var(--ease),
     border-color var(--dur-fast) var(--ease);
 }
-#overlay > .sl-tyre-vfx[hidden] {
+.sl-drive-action.sl-tyre-vfx[hidden] {
   display: none;
 }
-#overlay > .sl-tyre-vfx:hover {
+.sl-drive-action.sl-tyre-vfx:hover {
   border-color: var(--hair-strong);
 }
-#overlay > .sl-tyre-vfx:focus-visible {
+.sl-drive-action.sl-tyre-vfx:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
-#overlay > .sl-tyre-vfx[aria-pressed='true'] {
+.sl-drive-action.sl-tyre-vfx[aria-pressed='true'] {
   color: var(--text-1);
 }
 /* a ring with a dot: filled while on */

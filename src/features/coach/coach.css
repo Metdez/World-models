@@ -1,7 +1,8 @@
 /*
- * Coach line (11-02): the same place and look as the insights caption (04-03; insights speak in Auto, the coach while
- * driving, so they never overlap): one line, bottom-centre above the suspension control and the drive pill (04-05
- * layout, --sl-hud-* from controls.css); never wider than the gap between the two columns. Tokens only.
+ * Coach line (11-02): the look of the insights caption (04-03; insights speak in Auto, the coach while driving, so they
+ * never overlap). 11-05: while driving it sits at the top centre, under the top row and between the two columns, so
+ * the car and its tyres stay clear; touch-driving keeps it just above the dock, between the slider and the pedals.
+ * Tokens only.
  */
 .sl-coach {
   /* the suspension control and its descriptor, the drive pill and hint (--sl-hud-drive-h, inside --sl-hud-susp-h) and
@@ -18,6 +19,26 @@
 }
 #overlay > .sl-coach {
   pointer-events: none;
+}
+:where(:root:has(#overlay > .sl-drive.is-driving)) .sl-coach {
+  top: calc(var(--margin) + var(--sl-hud-top-h, 44px) + var(--sl-hud-gap, 8px));
+  bottom: auto;
+}
+#overlay:has(> .sl-drive-touch:not([hidden])) > .sl-coach {
+  top: auto;
+  bottom: calc(max(var(--margin), env(safe-area-inset-bottom)) + var(--sl-hud-drive-h, 60px));
+  left: calc(max(var(--margin), env(safe-area-inset-left)) + var(--sl-drive-steer-w, 280px) + var(--sl-hud-gap, 8px));
+  right: calc(max(var(--margin), env(safe-area-inset-right)) + var(--sl-drive-pad-w, 76px) + var(--sl-hud-gap, 8px));
+  width: auto;
+  max-width: none;
+  transform: none;
+  display: flex;
+  justify-content: center;
+}
+#overlay:has(> .sl-drive-touch:not([hidden])) > .sl-coach .sl-coach-caption {
+  flex-wrap: wrap;
+  row-gap: var(--sp-1);
+  border-radius: var(--radius-panel);
 }
 .sl-coach[hidden],
 .sl-coach [hidden] {

@@ -205,3 +205,21 @@
     display: none;
   }
 }
+
+/* 11-05 touch-driving (the drive feature's touch controls are up): the card folds to its compact form (g-g and the
+   two numbers) above the steering slider; on a landscape phone there is no room beside the car, so it rests. */
+#overlay:has(> .sl-drive-touch:not([hidden])) > .sl-telemetry-panel {
+  width: auto;
+  bottom: calc(max(var(--margin), env(safe-area-inset-bottom)) + 72px + var(--sl-hud-gap, 8px));
+}
+#overlay:has(> .sl-drive-touch:not([hidden])) > .sl-telemetry-panel .sl-telemetry-panel-top {
+  grid-template-columns: 88px;
+}
+#overlay:has(> .sl-drive-touch:not([hidden])) > .sl-telemetry-panel :is(.sl-telemetry-panel-corners, .sl-telemetry-panel-sparkhead, .sl-telemetry-panel-spark, .sl-telemetry-panel-note) {
+  display: none;
+}
+@media (max-height: 500px) {
+  #overlay:has(> .sl-drive-touch:not([hidden])) > .sl-telemetry-panel {
+    display: none;
+  }
+}

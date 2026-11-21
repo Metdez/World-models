@@ -1,6 +1,7 @@
 /*
- * Replay chip (11-03) in the drive feature's action row (.sl-drive-action: positioned and spaced by drive.css, one
- * 40 px row between the pill and the hint). The share panel and the note open above the row. Tokens only.
+ * Replay chip (11-03) in the drive feature's action row (.sl-drive-action: adopted into the pill's row by the drive
+ * feature, which lays the chips side by side and hides `.sl-drive-action-label` while driving). The share panel and
+ * the note open above the row. Tokens only.
  */
 .sl-replay {
   display: flex;
@@ -10,12 +11,6 @@
 }
 .sl-replay[hidden] {
   display: none;
-}
-/* The action row is shared (drive.css places every .sl-drive-action at its centre): while another feature's chip is
- * shown there (e.g. a single centred toggle), this chip starts just right of it instead of on top of it. */
-#overlay:has(> .sl-drive-action:not(.sl-replay):not([hidden])) > .sl-replay {
-  transform: translateX(var(--sl-replay-shift, 84px));
-  align-items: flex-start;
 }
 
 .sl-replay-row {

@@ -1,8 +1,13 @@
 /*
  * Drive pill, hint and idle cue (ARCHITECTURE-M2 §10.2). Bottom centre, directly above the suspension control (04-05
- * layout, --sl-hud-* from controls.css), from the bottom: suspension control → pill → (reserved action row:
- * .sl-drive-action, other features) → hint. While mounted it adds its rows to --sl-hud-drive-h, which controls.css folds into --sl-hud-susp-h, so
- * the insight caption above keeps clear. Tokens only.
+ * layout, --sl-hud-* from controls.css), from the bottom: suspension control → pill → action row (.sl-drive-actions:
+ * other features' .sl-drive-action chips) → hint. While mounted it adds its rows to --sl-hud-drive-h, which
+ * controls.css folds into --sl-hud-susp-h, so the caption above keeps clear. Tokens only.
+ *
+ * 11-05 driving layout (.is-driving): the car and the ground around its tyres stay clear. One slim row sits low at the
+ * bottom centre (the pill); the chips fold to icons at the right edge above the view control; the suspension control
+ * docks compact under the vehicle tag (controls.css) and the coach line moves to the top centre (coach.css).
+ * Touch-driving: the pill sits between the steering slider and the pedals, the chips under the view control.
  */
 :root:has(#overlay > .sl-drive:not(.is-hidden)) {
   --sl-hud-drive-h: calc(var(--sl-drive-pill-h) + var(--sl-hud-gap));
@@ -17,9 +22,17 @@
   --sl-drive-pill-h: 44px;
   --sl-drive-hint-h: 34px;
   --sl-drive-action-h: 0px;
+  /* the touch controls' footprint (10-04): slider width, pedal column */
+  --sl-drive-steer-w: clamp(180px, 28vw, 280px);
+  --sl-drive-pad-w: 76px;
 }
-:root:has(#overlay > .sl-drive-action:not([hidden])) {
+/* not driving: a shown chip takes the row between the pill and the hint */
+:root:has(#overlay > .sl-drive-actions:not(.is-driving) > .sl-drive-action:not([hidden])) {
   --sl-drive-action-h: calc(40px + var(--sl-hud-gap));
+}
+/* driving: nothing under the pill (the suspension control has moved up) */
+:root:has(#overlay > .sl-drive.is-driving:not(.is-hidden)) {
+  --sl-hud-susp-base-h: 0px;
 }
 
 .sl-drive {
@@ -38,13 +51,76 @@
   pointer-events: none;
 }
 
-/* the action row other features fill (Moment replay, Compare, Share): between the pill and the hint */
-#overlay > .sl-drive-action {
+/* the shared action row (Grip rings, Replay, Compare: other features' .sl-drive-action chips, adopted by index.ts):
+   side by side at every width. Not driving: between the pill and the hint. */
+#overlay > .sl-drive-actions {
   position: absolute;
   left: 50%;
   bottom: calc(var(--margin) + var(--sl-hud-susp-base-h, 96px) + var(--sl-drive-pill-h) + var(--sl-hud-gap, 8px));
   transform: translateX(-50%);
   zoom: var(--sl-hud-zoom, 1);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  pointer-events: none;
+}
+#overlay > .sl-drive-actions:not(:has(> .sl-drive-action:not([hidden]))),
+#overlay:has(> .sl-drive.is-hidden) > .sl-drive-actions,
+#overlay:has(> .sl-drive.is-attract) > .sl-drive-actions {
+  display: none;
+}
+.sl-drive-actions > :where(.sl-drive-action) {
+  position: relative;
+  flex: none;
+  pointer-events: auto;
+}
+/* driving: the row goes to the right edge above the view control (below 1200 px the view control is at the top and
+   the row takes the corner); the chips fold to their icons, the words stay in the accessible name and the title */
+#overlay > .sl-drive-actions.is-driving {
+  left: auto;
+  right: var(--margin);
+  bottom: calc(var(--margin) + var(--sl-hud-view-h, 48px) + var(--sl-hud-gap, 8px));
+  transform: none;
+}
+@media (max-width: 1200px) {
+  #overlay > .sl-drive-actions.is-driving {
+    bottom: var(--margin);
+  }
+}
+.sl-drive-actions.is-driving .sl-drive-action-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+/* driving: the lamps keep their icon and warn border (the title names them; the Approximate badge keeps its word) and
+   the toggle drops its key (the control hint names Enter) so the pill stays one slim row between the corner pills */
+.sl-drive.is-driving .sl-drive-lamp:not([data-lamp='approximate']) {
+  padding: 0 5px;
+}
+.sl-drive.is-driving .sl-drive-lamp:not([data-lamp='approximate']) .sl-drive-lamp-text,
+.sl-drive.is-driving .sl-drive-toggle .sl-drive-kbd {
+  display: none;
+}
+
+/* touch-driving: the pill sits between the slider and the pedals (centred in that span), the chips at the top right
+   under the view control (the coach line takes the span above the pill) */
+#overlay:has(> .sl-drive-touch:not([hidden])) > .sl-drive {
+  left: calc(max(var(--margin), env(safe-area-inset-left)) + var(--sl-drive-steer-w) + var(--sl-hud-gap));
+  right: calc(max(var(--margin), env(safe-area-inset-right)) + var(--sl-drive-pad-w) + var(--sl-hud-gap));
+  bottom: max(var(--margin), env(safe-area-inset-bottom));
+  transform: none;
+}
+#overlay:has(> .sl-drive-touch:not([hidden])) > .sl-drive-actions.is-driving {
+  top: calc(var(--margin) + 52px + var(--sl-hud-view-h, 48px) + var(--sl-hud-gap));
+  right: max(var(--margin), env(safe-area-inset-right));
+  bottom: auto;
+}
+/* ... below the amplification chip when it shows there (controls.css, below 1200 px) */
+#overlay:has(> .sl-drive-touch:not([hidden])):has(.sl-controls-amp:not([hidden])) > .sl-drive-actions.is-driving {
+  top: calc(var(--margin) + 52px + var(--sl-hud-view-h, 48px) + 40px + 2 * var(--sl-hud-gap));
 }
 
 /* ---------------------------------------------------------------- pill */
@@ -756,6 +832,10 @@
 #overlay > .sl-drive-touch {
   z-index: 3;
 }
+/* 11-05: the slider owns the bottom-left corner while touch-driving; the engineer pill under it steps aside */
+#overlay:has(> .sl-drive-touch:not([hidden])) > .sl-engineer {
+  visibility: hidden;
+}
 .sl-drive-touch {
   position: absolute;
   inset: 0;
@@ -778,7 +858,7 @@
   bottom: max(var(--margin), env(safe-area-inset-bottom));
   display: grid;
   place-items: center;
-  width: clamp(180px, 28vw, 280px);
+  width: var(--sl-drive-steer-w);
   height: 72px;
 }
 .sl-drive-steer-track {
@@ -829,7 +909,7 @@
 .sl-drive-pad {
   display: grid;
   place-items: center;
-  width: 76px;
+  width: var(--sl-drive-pad-w);
   height: 64px;
   border-radius: var(--radius-panel);
   background: var(--glass);
