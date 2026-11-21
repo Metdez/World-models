@@ -1,6 +1,7 @@
 /**
  * Friction rings: one instanced quad per corner on the car's road plane at the contact patch, drawn by a signed-distance
- * fragment shader (research m2/19 §6). ONE draw call for all four. Strokes are pixel-constant (fwidth) with a dark
+ * fragment shader (research m2/19 §6). One draw call for all four, plus one faint x-ray draw for the parts the car
+ * body hides. Strokes are pixel-constant (fwidth) with a dark
  * casing so they read on dark tarmac, wet tiles and painted lines alike; the whole ring fades with camera distance.
  * Within the limit: neutral ink ring, filled dot, a thin line from the centre to the dot.
  * Past the limit (warn level 1): warn colour, the ring breaks into dashes and the dot opens into a circle: colour is
@@ -10,6 +11,7 @@ import {
   BufferAttribute,
   Color,
   DynamicDrawUsage,
+  GreaterDepth,
   InstancedBufferGeometry,
   InstancedInterleavedBuffer,
   InterleavedBufferAttribute,
@@ -97,7 +99,10 @@ void main() {
 `;
 
 export interface Rings {
+  /** Visible pass (depth tested). */
   readonly mesh: Mesh<InstancedBufferGeometry, ShaderMaterial>;
+  /** X-ray pass: the parts hidden by the car (or the ground), faint. Shares the geometry. */
+  readonly xray: Mesh<InstancedBufferGeometry, ShaderMaterial>;
   /** Per-instance data (I_STRIDE floats per corner), exposed for tests. */
   readonly data: Float32Array;
   /**
@@ -146,8 +151,18 @@ export function createRings(ink: string, warn: string): Rings {
   mesh.frustumCulled = false; // instances move every frame; bounds are never recomputed
   mesh.renderOrder = 6;
   mesh.visible = false;
+  // The car body hides most of each ring from the chase camera: draw the hidden parts faintly (one more draw call).
+  const xrayMaterial = material.clone();
+  xrayMaterial.depthFunc = GreaterDepth;
+  xrayMaterial.uniforms.uOpacity!.value = 0.38;
+  const xray = new Mesh(g, xrayMaterial);
+  xray.name = 'tyre-vfx:rings-xray';
+  xray.frustumCulled = false;
+  xray.renderOrder = 7;
+  xray.visible = false;
   return {
     mesh,
+    xray,
     data,
     write(i, cx, cy, cz, fx, fy, fz, lx, ly, lz, radius, dotX, dotY, warnLevel) {
       const o = i * I_STRIDE;
@@ -169,10 +184,12 @@ export function createRings(ink: string, warn: string): Rings {
     setCount(n) {
       g.instanceCount = n;
       mesh.visible = n > 0;
+      xray.visible = n > 0;
     },
     dispose() {
       g.dispose();
       material.dispose();
+      xrayMaterial.dispose();
     },
   };
 }

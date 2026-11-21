@@ -1,0 +1,68 @@
+/* "Grip rings" chip in the drive action row (ARCHITECTURE-M2 §10.2, the row is positioned by drive.css). Tokens only. */
+#overlay > .sl-tyre-vfx {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 32px;
+  margin: 0;
+  padding: 0 var(--sp-3) 0 10px;
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-pill);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: var(--shadow-panel);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+#overlay > .sl-tyre-vfx[hidden] {
+  display: none;
+}
+#overlay > .sl-tyre-vfx:hover {
+  border-color: var(--hair-strong);
+}
+#overlay > .sl-tyre-vfx:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+#overlay > .sl-tyre-vfx[aria-pressed='true'] {
+  color: var(--text-1);
+}
+/* a ring with a dot: filled while on */
+.sl-tyre-vfx-glyph {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid currentColor;
+  border-radius: var(--radius-pill);
+  opacity: 0.55;
+}
+.sl-tyre-vfx-glyph::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 1px;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+}
+.sl-tyre-vfx[aria-pressed='true'] .sl-tyre-vfx-glyph {
+  opacity: 1;
+}
+.sl-tyre-vfx-tag {
+  font-size: var(--fs-label);
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--text-3);
+}

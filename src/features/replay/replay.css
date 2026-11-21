@@ -1,0 +1,244 @@
+/*
+ * Replay chip (11-03) in the drive feature's action row (.sl-drive-action: positioned and spaced by drive.css, one
+ * 40 px row between the pill and the hint). The share panel and the note open above the row. Tokens only.
+ */
+.sl-replay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+}
+.sl-replay[hidden] {
+  display: none;
+}
+
+.sl-replay-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 40px;
+  padding: 2px 3px 2px var(--sp-3);
+  border-radius: var(--radius-pill);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--hair);
+  box-shadow: var(--shadow-panel);
+  pointer-events: auto;
+  white-space: nowrap;
+}
+.sl-replay-row[hidden] {
+  display: none;
+}
+.sl-replay-row.is-playing {
+  border-color: var(--accent-dim);
+  padding-left: var(--sp-3);
+}
+
+/* recording: a quiet dot, the word for screen readers and wide screens */
+.sl-replay-rec {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: var(--sp-2);
+  font-size: var(--fs-label);
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.sl-replay-rec-dot,
+.sl-replay-play-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--warn);
+  box-shadow: 0 0 0 3px rgba(255, 180, 84, 0.18);
+  animation: sl-replay-pulse 2.4s var(--ease) infinite;
+}
+.sl-replay-play-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+@keyframes sl-replay-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.sl-replay-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  margin: 0;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--hair-strong);
+  border-radius: var(--radius-pill);
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-1);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+.sl-replay-btn:hover {
+  background: var(--hair);
+  border-color: var(--accent-dim);
+}
+.sl-replay-btn:focus-visible,
+.sl-replay-link:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.sl-replay-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.sl-replay-btn.is-primary {
+  border-color: var(--accent-dim);
+  background: var(--accent-dim);
+}
+/* offered after a detected slide, lock-up, wheelspin or assist (MD-43) */
+.sl-replay-btn.is-offered {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+.sl-replay-btn .sl-drive-kbd {
+  margin-left: 2px;
+}
+.sl-replay-icon {
+  display: inline-grid;
+  color: var(--text-2);
+}
+
+/* playing */
+.sl-replay-label {
+  margin-left: var(--sp-2);
+  font-size: var(--fs-label);
+  font-weight: 500;
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--text-1);
+}
+.sl-replay-tag {
+  padding: 2px var(--sp-2);
+  border: 1px dashed var(--hair-strong);
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  color: var(--text-2);
+}
+.sl-replay-tag[hidden] {
+  display: none;
+}
+.sl-replay-bar {
+  position: relative;
+  width: 120px;
+  height: 3px;
+  margin: 0 var(--sp-2);
+  border-radius: var(--radius-pill);
+  background: var(--hair);
+  overflow: hidden;
+}
+.sl-replay-bar-fill {
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  transform-origin: left center;
+  transform: scaleX(0);
+}
+
+/* share panel and note: above the row */
+.sl-replay-share,
+.sl-replay-note {
+  position: absolute;
+  bottom: calc(100% + var(--sp-2));
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--hair);
+  box-shadow: var(--shadow-panel);
+}
+.sl-replay-share {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  width: min(420px, calc(100vw - 2 * var(--margin)));
+  padding: var(--sp-3);
+  border-radius: var(--radius-panel);
+}
+.sl-replay-share[hidden],
+.sl-replay-note[hidden] {
+  display: none;
+}
+.sl-replay-share-row {
+  display: flex;
+  gap: var(--sp-2);
+}
+.sl-replay-link {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--hair-strong);
+  border-radius: var(--radius-chip);
+  background: var(--bg-1);
+  font: 400 12px / 1 var(--font-mono);
+  color: var(--text-1);
+}
+.sl-replay-share-msg {
+  font-size: 12px;
+  color: var(--text-1);
+}
+.sl-replay-share-msg:empty {
+  display: none;
+}
+.sl-replay-share-fine {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.sl-replay-note {
+  max-width: min(460px, calc(100vw - 2 * var(--margin)));
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-chip);
+  font-size: 12px;
+  line-height: var(--lh-body);
+  color: var(--text-1);
+  white-space: normal;
+  text-align: center;
+}
+/* the share panel wins the space above the row */
+.sl-replay-share:not([hidden]) ~ .sl-replay-note,
+.sl-replay-note:has(~ .sl-replay-share:not([hidden])) {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .sl-replay-rec-text {
+    display: none;
+  }
+  .sl-replay-bar {
+    width: 64px;
+  }
+  .sl-replay-btn .sl-drive-kbd {
+    display: none;
+  }
+}
+@media (pointer: coarse) {
+  .sl-replay-btn {
+    height: 36px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sl-replay-rec-dot,
+  .sl-replay-play-dot {
+    animation: none;
+  }
+}

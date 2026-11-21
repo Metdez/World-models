@@ -16,8 +16,9 @@ import type { CarDefinition, TyreHandling, TyreParams, VehicleDefinition } from 
 import { tyreCoefficients, type TyreCoefficients } from '../../sim-core/drive/tyre';
 import { peakMu } from '../../sim-core/ride/tyre';
 
-/** Ring radius at the static load on dry asphalt, m (ARCH-M2 §10.5). */
-export const RING_RADIUS = 0.25;
+/** Ring radius at the static load on dry asphalt, m. ARCH-M2 §10.5 says 0.25 m; at that size the ring hides under the
+ * tyre's own footprint (0.27 m wide) and the car body from the chase camera, so it is 0.4 m (deviation, 11-01 SUMMARY). */
+export const RING_RADIUS = 0.4;
 /** Largest drawn dot offset, in ring radii (Auto demand estimates can exceed the capacity). */
 export const DOT_MAX = 1.25;
 /** Slip beyond the peak (in peak-slip units) at which the over-limit intensity saturates. */

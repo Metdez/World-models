@@ -54,6 +54,10 @@ export interface DriveHost extends DriveControl {
   stateChecksum(): number;
   /** simulation.setSuspension while driving: recorded; from the user during a replay it branches into manual. */
   noteSuspension(id: string): void;
+  /** Ticks the current run holds (0 in auto): cheap, for UI gating. */
+  readonly recordedTicks: number;
+  /** Whether `play(replay)` would accept it here, and how it would be labelled (the feature's messages). */
+  check(replay: DecodedReplay): ReplayFit;
 }
 
 /** What a replay is doing (the replay feature reads it every frame; plain mutable fields, no allocation per step). */
@@ -384,6 +388,12 @@ export function createDriveControl(deps: DriveControlDeps): DriveHost {
     },
     get replay() {
       return status;
+    },
+    get recordedTicks() {
+      return mode === 'auto' || !recorder ? 0 : recorder.ticks - recorder.base;
+    },
+    check(replay) {
+      return replayFit(replay, target);
     },
     stateChecksum() {
       return plant() ? stateChecksum(currentSnapshot()) : 0;
