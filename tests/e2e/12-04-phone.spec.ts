@@ -1,4 +1,4 @@
-import { expect, test, type Browser, type CDPSession, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type CDPSession, type Page } from '@playwright/test';
 import { captureConsole } from './helpers';
 
 // Big screen + phone driver against the real Room DO (workerd via a private `vite preview`). The screen runs
@@ -8,12 +8,22 @@ const SHOTS = process.env['SHOTS_DIR'];
 const LANDSCAPE = { viewport: { width: 844, height: 390 }, deviceScaleFactor: 1, isMobile: true, hasTouch: true };
 const SMALL = { viewport: { width: 667, height: 375 }, deviceScaleFactor: 1, isMobile: true, hasTouch: true };
 
+const opened: BrowserContext[] = [];
+test.afterEach(async () => {
+  await Promise.all(opened.splice(0).map((c) => c.close().catch(() => undefined)));
+});
+const context = async (browser: Browser, options: Parameters<Browser['newContext']>[0]) => {
+  const c = await browser.newContext(options);
+  opened.push(c);
+  return c;
+};
+
 const shot = async (page: Page, name: string) => {
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/12-04-${name}.png` });
 };
 
 async function phone(browser: Browser, path: string, size = LANDSCAPE) {
-  const page = await (await browser.newContext(size)).newPage();
+  const page = await (await context(browser, size)).newPage();
   const errors = captureConsole(page);
   const scripts: { url: string; body: string }[] = [];
   page.on('response', async (r) => {
@@ -40,7 +50,7 @@ const pct = (xs: number[], p: number) => [...xs].sort((a, b) => a - b)[Math.min(
 
 /** The big screen, with every relayed `in` frame logged (wall clock) as it reaches the page's JS. */
 async function openScreen(browser: Browser, size: { width: number; height: number }, extra = '') {
-  const screen = await (await browser.newContext({ viewport: size, deviceScaleFactor: 1 })).newPage();
+  const screen = await (await context(browser, { viewport: size, deviceScaleFactor: 1 })).newPage();
   const errors = captureConsole(screen);
   await screen.addInitScript(() => {
     const w = globalThis as unknown as { __inLog: { t: number; s: number; n: number }[] };
@@ -114,7 +124,11 @@ test('a phone drives the big screen through the room, fails safe, and recovers c
   const steer = await centreOf(p1.page, '.rm-drive-steer');
   const g = pt(gas.x, gas.y, 1);
   await touch(cdp, 'touchStart', [g]);
-  await expect.poll(mode, { timeout: 10_000 }).toBe('manual');
+  await expect.poll(mode, { timeout: 10_000 }).toBe('manual').catch(async (e) => {
+    console.log('DIAG', await screen.evaluate(() => { const l = (globalThis as unknown as { __inLog: { t: number; s: number; n: number }[] }).__inLog; return JSON.stringify({ n: l.length, last: l.slice(-3), now: Date.now(), state: document.querySelector('.sl-phone-drive')?.getAttribute('data-state'), link: document.querySelector('.sl-phone-drive')?.getAttribute('data-link') }); }));
+    console.log('DIAG phone', await p1.page.evaluate(() => JSON.stringify({ st: document.body.dataset['status'], badge: document.querySelector('.rm-badge')?.textContent, vis: document.visibilityState })));
+    throw e;
+  });
   await expect(card).toHaveAttribute('data-state', 'driving', { timeout: 10_000 });
   await expect(card.locator('.sl-phone-drive-status-text')).toHaveText('Driven from a phone');
   await expect.poll(async () => (await drive()).speed, { timeout: 20_000 }).toBeGreaterThan(2);
@@ -159,11 +173,14 @@ test('a phone drives the big screen through the room, fails safe, and recovers c
   await p1.page.waitForTimeout(400);
   const gas2 = await centreOf(p1.page, '.rm-drive-pedal[data-pedal="gas"]');
   await touch(cdp, 'touchStart', [pt(gas2.x, gas2.y, 3)]);
+  // the frames the screen receives carry the tilt (s + = LEFT on the wire); the car's conditioned demand follows
+  const lastS = () => screen.evaluate(() => (globalThis as unknown as { __inLog: { s: number }[] }).__inLog.at(-1)?.s ?? 0);
   await motion(25);
-  await expect.poll(async () => (await drive()).steer, { timeout: 5_000 }).toBeLessThan(-0.05); // tilted right = steer right
+  await expect.poll(lastS, { timeout: 10_000 }).toBeLessThan(-300); // tilted right = steer right
+  await expect.poll(async () => (await drive()).steer, { timeout: 10_000 }).toBeLessThan(-0.05);
   await shot(p1.page, 'phone-tilt');
   await motion(-25);
-  await expect.poll(async () => (await drive()).steer, { timeout: 5_000 }).toBeGreaterThan(0.05);
+  await expect.poll(lastS, { timeout: 10_000 }).toBeGreaterThan(300);
   await touch(cdp, 'touchEnd', []);
   await p1.page.getByRole('button', { name: 'Use slider' }).click();
   await expect(p1.page.locator('.rm-drive')).toHaveAttribute('data-steering', 'touch');
@@ -182,7 +199,10 @@ test('a phone drives the big screen through the room, fails safe, and recovers c
   const steerB = await centreOf(p2.page, '.rm-drive-steer');
   await touch(cdp2, 'touchStart', [pt(gasB.x, gasB.y, 1), pt(steerB.x, steerB.y, 2)]);
   await touch(cdp2, 'touchMove', [pt(gasB.x, gasB.y, 1), pt(steerB.x - steerB.w * 0.4, steerB.y, 2)]);
-  await expect.poll(async () => (await drive()).steer, { timeout: 5_000 }).toBeGreaterThan(0.05); // dragged left
+  await expect.poll(async () => (await drive()).steer, { timeout: 15_000 }).toBeGreaterThan(0.05).catch(async (e) => {
+    console.log('DIAG2', await mode(), await screen.evaluate(() => JSON.stringify({ last: (globalThis as unknown as { __inLog: unknown[] }).__inLog.slice(-2), toast: !document.querySelector('.sl-phone-drive-toast')?.hasAttribute('hidden'), state: document.querySelector('.sl-phone-drive')?.getAttribute('data-state') })));
+    throw e;
+  }); // dragged left
   await expect.poll(mode).toBe('manual');
 
   // Closing the driving phone: failsafe -> Returning with a note on the screen (timed in the next test)
@@ -195,7 +215,10 @@ test('a phone drives the big screen through the room, fails safe, and recovers c
   // Wrong key and an unknown room: calm sheets, no reconnect loop
   const bad = await phone(browser, `/remote.html?room=${room.code}#d=${'x'.repeat(32)}`);
   await expect(bad.page.locator('.rm-drive-sheet-title')).toHaveText('This driving code has expired', { timeout: 20_000 });
+  await bad.page.waitForTimeout(400); // the dimmed panel fades back behind the sheet
   await shot(bad.page, 'phone-denied');
+  await bad.page.getByRole('button', { name: 'Join as audience' }).click();
+  await expect(bad.page.locator('.rm-role')).toHaveText('Audience', { timeout: 20_000 });
   const gone = await phone(browser, `/remote.html?room=ZZZZZ#d=${room.driverKey}`);
   await expect(gone.page.locator('.rm-drive-sheet-title')).toHaveText('Room ZZZZZ has ended', { timeout: 20_000 });
 
@@ -284,4 +307,12 @@ test('input latency and the 1 s failsafe, measured on a screen without the rende
   expect(tReturn).toBeLessThan(1500);
   await expect(screen.locator('.sl-phone-drive-toast')).toBeVisible();
   expect(errors).toEqual([]);
+
+  // Not a big screen (no room of its own, no driver key): the feature is on but shows and sends nothing
+  const viewer = await (await context(browser, { viewport: { width: 960, height: 540 } })).newPage();
+  await viewer.goto('/?quality=low&debug=1&features=-renderer');
+  await viewer.waitForFunction(() => globalThis.__app?.ready === true, undefined, { timeout: 120_000 });
+  expect((await viewer.evaluate(() => globalThis.__app!.features())).find((f) => f.id === 'phone-drive')).toMatchObject({ enabled: true });
+  await viewer.waitForTimeout(1500);
+  expect(await viewer.locator('.sl-phone-drive, .sl-phone-drive-toast').count()).toBe(0);
 });

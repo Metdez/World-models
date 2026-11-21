@@ -6,9 +6,9 @@
  * pulses the vibration motor on kerb / grip-limit bits where the browser has one (not iOS). Keeps the screen awake.
  * Calm sheets for "another phone took the wheel", "code rejected" and "room ended".
  */
-import type { ClientMessage, ServerMessage } from '../contracts/net';
+import { REMOTE_PAGE, type ClientMessage, type ServerMessage } from '../contracts/net';
 import { h } from '../ui/dom';
-import type { LinkStatus, RemoteLink } from './connection';
+import { forgetHostKey, type LinkStatus, type RemoteLink } from './connection';
 import './driver.css';
 import { inFrame, learnSign, OneEuro, pedalStep, rawAngle, sliderSteer, steerFromAngle, wrap180 } from './tilt';
 
@@ -381,6 +381,14 @@ export function createDriverPanel(code: string, link: () => RemoteLink | null): 
     }
   }
 
+  function forgetKey(): void {
+    try {
+      forgetHostKey(code, sessionStorage);
+    } catch {
+      /* storage blocked: nothing stored */
+    }
+  }
+
   function release(): void {
     held.gas = held.brake = steerId = -1;
     level.gas = level.brake = touchSteer = 0;
@@ -404,13 +412,19 @@ export function createDriverPanel(code: string, link: () => RemoteLink | null): 
       onAlt = null;
       showSheet('Another phone took the wheel', 'One phone drives at a time and the newest one wins. You can take the wheel back.', 'Take the wheel back', null, 'status');
     } else if (s === 'denied') {
-      onPrimary = () => location.reload();
+      onPrimary = () => {
+        forgetKey();
+        location.replace(`${REMOTE_PAGE}?room=${code}`);
+      };
       onAlt = null;
-      showSheet('This driving code has expired', 'Scan the "Drive from your phone" code on the big screen again.', 'Try again', null, 'status');
+      showSheet('This driving code has expired', 'Scan the "Drive from your phone" code on the big screen again, or follow along from here.', 'Join as audience', null, 'status');
     } else if (s === 'gone') {
-      onPrimary = () => location.reload();
+      onPrimary = () => {
+        forgetKey();
+        location.assign(REMOTE_PAGE);
+      };
       onAlt = null;
-      showSheet(`Room ${code} has ended`, 'Scan the new code on the big screen to drive again.', 'Try again', null, 'status');
+      showSheet(`Room ${code} has ended`, 'Scan the new code on the big screen to drive again.', 'Enter a code', null, 'status');
     }
   }
 
