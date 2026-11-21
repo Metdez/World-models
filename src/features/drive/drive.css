@@ -217,6 +217,203 @@
   }
 }
 
+/* ---------------------------------------------------------------- handling HUD (09-05, Manual only) */
+
+.sl-drive-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+.sl-drive-icon svg {
+  display: block;
+}
+
+/* lamps and the Approximate badge: shown only while lit (presence + text + icon); warn is the past-the-limit accent */
+.sl-drive-lamps {
+  display: none;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.sl-drive-pill[data-mode='manual'] .sl-drive-lamps.is-lit {
+  display: inline-flex;
+  padding-left: var(--sp-2);
+}
+.sl-drive-lamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 var(--sp-2) 0 6px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-1);
+  white-space: nowrap;
+}
+.sl-drive-lamp[hidden] {
+  display: none;
+}
+.sl-drive-lamp .sl-drive-icon {
+  color: var(--warn);
+}
+.sl-drive-lamp[data-lamp='approximate'] {
+  border-style: dashed;
+}
+
+/* Assists button and popover */
+.sl-drive-aids-btn {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  min-width: 44px;
+  margin: 0 0 0 var(--sp-1);
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.sl-drive-pill[data-mode='manual'] .sl-drive-aids-btn {
+  display: inline-flex;
+}
+.sl-drive-aids-btn:hover,
+.sl-drive-aids-btn.is-open {
+  color: var(--text-1);
+  background: var(--hair);
+}
+.sl-drive-aids-tag {
+  padding: 1px 6px;
+  border: 1px solid var(--hair-strong);
+  border-radius: var(--radius-pill);
+  font-size: 10px;
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--text-1);
+}
+.sl-drive-aids-tag[hidden] {
+  display: none;
+}
+
+.sl-drive-aids-panel {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--sl-drive-pill-h) + var(--sl-hud-gap, 8px));
+  z-index: 2;
+  width: 300px;
+  transform: translateX(-50%);
+  padding: var(--sp-3) var(--sp-4) var(--sp-2);
+  border-radius: var(--radius-panel);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--hair);
+  box-shadow: var(--shadow-panel);
+  pointer-events: auto;
+  animation: sl-drive-pop var(--dur-hud) var(--ease);
+}
+.sl-drive-aids-panel[hidden] {
+  display: none;
+}
+@keyframes sl-drive-pop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 4px);
+  }
+}
+.sl-drive-aids-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding-bottom: var(--sp-1);
+}
+.sl-drive-aids-title {
+  font-size: var(--fs-label);
+  font-weight: 500;
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--text-1);
+}
+.sl-drive-aids-model {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.sl-drive-aid {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-height: 44px;
+  border-top: 1px solid var(--hair);
+  cursor: pointer;
+}
+.sl-drive-aid-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 0;
+}
+.sl-drive-aid-name {
+  font-size: 13px;
+  color: var(--text-1);
+}
+.sl-drive-aid-hint {
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--text-2);
+}
+
+/* switch: the knob's side says on/off (not colour alone) */
+.sl-drive-switch {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 20px;
+  margin: 0;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--hair-strong);
+  background: var(--hair);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+.sl-drive-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-pill);
+  background: var(--text-2);
+  transition:
+    transform var(--dur-thumb) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.sl-drive-switch:checked {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+.sl-drive-switch:checked::after {
+  transform: translateX(16px);
+  background: var(--accent);
+}
+
 /* ---------------------------------------------------------------- hint and idle cue */
 
 .sl-drive-hint {
