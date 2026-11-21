@@ -1,7 +1,7 @@
 /*
  * Drive pill, hint and idle cue (ARCHITECTURE-M2 §10.2). Bottom centre, directly above the suspension control (04-05
- * layout, --sl-hud-* from controls.css): suspension control → (reserved action row: .sl-drive-action, other features)
- * → pill → hint. While mounted it adds its rows to --sl-hud-drive-h, which controls.css folds into --sl-hud-susp-h, so
+ * layout, --sl-hud-* from controls.css), from the bottom: suspension control → pill → (reserved action row:
+ * .sl-drive-action, other features) → hint. While mounted it adds its rows to --sl-hud-drive-h, which controls.css folds into --sl-hud-susp-h, so
  * the insight caption above keeps clear. Tokens only.
  */
 :root:has(#overlay > .sl-drive:not(.is-hidden)) {
@@ -26,7 +26,7 @@
   transform: translateX(-50%);
   zoom: var(--sl-hud-zoom, 1);
   display: flex;
-  flex-direction: column-reverse;
+  flex-direction: column;
   align-items: center;
   gap: calc(var(--sl-hud-gap, 8px) + var(--sl-drive-action-h));
   pointer-events: none;
