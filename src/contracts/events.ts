@@ -1,4 +1,5 @@
 import type { Emitter } from 'mitt';
+import type { DecodedReplay, DriveEvent, DriveMode } from './drive';
 import type { PresenterCue } from './net';
 import type { SimEvent } from './sim';
 import type { ComponentRole } from './suspension';
@@ -32,6 +33,16 @@ export type AppEvents = {
   'room:cue': { cue: PresenterCue };
   /** Any pointer/keyboard/touch input on the app (attract mode exits on it). */
   'user:activity': undefined;
+  /** REQUEST: who drives. 'auto' from manual = returning (autopilot); `immediate` = release now and rejoin the live lap (a cut). */
+  'drive:request': { mode: 'auto' | 'manual'; immediate?: boolean };
+  /** REQUEST (manual only): at rest on the nearest driving-line point, or at a station's spawn. */
+  'drive:reset': { spawn?: string };
+  /** REQUEST: replay a decoded run in the plant (mode 'replay'). */
+  'drive:play': { replay: DecodedReplay };
+  /** Emitted by the kernel AFTER the drive mode changed (store.driveMode is already updated). `cut` = discontinuous pose. */
+  'drive:mode': { mode: DriveMode; previous: DriveMode; cut: boolean };
+  /** Forwarded from Simulation.drive.drainEvents() (mode changes included). */
+  'drive:event': DriveEvent;
 };
 
 export type AppBus = Emitter<AppEvents>;

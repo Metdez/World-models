@@ -36,6 +36,10 @@ function toDataPoint(e: AnalyticsEvent): AnalyticsEngineDataPoint {
       return { indexes: [e.type], blobs: [e.type, e.suspension, ''], doubles: [1] };
     case 'session':
       return { indexes: [e.type], blobs: [e.type, e.quality, ''], doubles: [e.fps] };
+    case 'drive-session':
+      return { indexes: [e.type], blobs: [e.type, e.vehicle, e.suspension], doubles: [e.seconds] };
+    case 'station-visit':
+      return { indexes: [e.type], blobs: [e.type, e.station, e.suspension], doubles: [e.speed] };
   }
 }
 

@@ -25,6 +25,8 @@ describe('POST /api/event', () => {
       { type: 'view-changed', view: 'closeup' },
       { type: 'engineer-asked', suspension: 'macpherson' },
       { type: 'session', quality: 'high', fps: 58.5 },
+      { type: 'drive-session', vehicle: 'gt-coupe', suspension: 'macpherson', seconds: 95 },
+      { type: 'station-visit', station: 'skidpad', suspension: 'multilink', speed: 14 },
     ];
     for (const e of events) expect((await post(JSON.stringify(e), env)).status).toBe(204);
     expect(points).toEqual([
@@ -32,6 +34,8 @@ describe('POST /api/event', () => {
       { indexes: ['view-changed'], blobs: ['view-changed', 'closeup', ''], doubles: [1] },
       { indexes: ['engineer-asked'], blobs: ['engineer-asked', 'macpherson', ''], doubles: [1] },
       { indexes: ['session'], blobs: ['session', 'high', ''], doubles: [58.5] },
+      { indexes: ['drive-session'], blobs: ['drive-session', 'gt-coupe', 'macpherson'], doubles: [95] },
+      { indexes: ['station-visit'], blobs: ['station-visit', 'skidpad', 'multilink'], doubles: [14] },
     ]);
   });
 
@@ -54,6 +58,10 @@ describe('POST /api/event', () => {
     ['bad view', { type: 'view-changed', view: 'cockpit' }],
     ['non-finite-ish fps', { type: 'session', quality: 'high', fps: 1e6 }],
     ['fps as string', { type: 'session', quality: 'high', fps: '60' }],
+    ['fractional drive seconds', { type: 'drive-session', vehicle: 'gt-coupe', suspension: 'multilink', seconds: 1.5 }],
+    ['drive seconds over a day', { type: 'drive-session', vehicle: 'gt-coupe', suspension: 'multilink', seconds: 86401 }],
+    ['station speed over 100', { type: 'station-visit', station: 'skidpad', suspension: 'multilink', speed: 101 }],
+    ['negative station speed', { type: 'station-visit', station: 'skidpad', suspension: 'multilink', speed: -1 }],
     ['empty batch', []],
     ['batch too long', Array.from({ length: 9 }, () => ({ type: 'view-changed', view: 'follow' }))],
     ['one bad event spoils the batch', [{ type: 'view-changed', view: 'follow' }, { type: 'nope' }]],

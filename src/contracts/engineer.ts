@@ -37,6 +37,24 @@ export interface EngineerTelemetry {
   readonly corners: Readonly<Partial<Record<CornerId, EngineerCorner>>>;
   /** Extra computed values, e.g. { roll_centre_front_mm: 62, camber_gain_front_deg_per_10mm: -0.4 }. */
   readonly derived: Readonly<Record<string, number>>;
+  /** Present while the visitor drives (M2): driver inputs and the event a sim-core detector fired. */
+  readonly drive?: EngineerDrive;
+}
+
+/** Manual Drive context (M2). The model explains `detected`; it never infers events from raw numbers. */
+export interface EngineerDrive {
+  readonly mode: 'manual' | 'returning' | 'replay';
+  /** Plain-language label of the detected event, no digits, e.g. "rear slide after lifting off" or "none". */
+  readonly detected: string;
+  readonly steer_deg: number;
+  readonly throttle_pct: number;
+  readonly brake_pct: number;
+  readonly sideslip_deg: number;
+  readonly yaw_rate_dps: number;
+  readonly gear: number;
+  /** Surface label under the car, e.g. "Wet basalt tiles". */
+  readonly surface: string;
+  readonly aids_active: readonly ('abs' | 'traction' | 'stability')[];
 }
 
 export interface EngineerTurn {

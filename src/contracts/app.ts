@@ -6,6 +6,7 @@ import type { SuspensionDefinition } from './suspension';
 import type { TelemetryFrame } from './telemetry';
 import type { TrackDefinition } from './track';
 import type { VehicleDefinition } from './vehicle';
+import type { WorldDefinition } from './world';
 
 // ---------------------------------------------------------------- registries
 
@@ -24,6 +25,8 @@ export interface Registries {
   readonly tracks: Registry<TrackDefinition>;
   readonly vehicleVisuals: Registry<VehicleVisualDefinition>;
   readonly suspensionVisuals: Registry<SuspensionVisualDefinition>;
+  /** Worlds around tracks (M2); the kernel passes the one whose trackId matches to the simulation. */
+  readonly worlds: Registry<WorldDefinition>;
 }
 
 // ---------------------------------------------------------------- services (typed DI-light)
@@ -97,6 +100,10 @@ export interface ResolvedFlags {
   readonly debug: boolean;
   /** ?e2e=1: deterministic test mode (no idle attract, no network room, fixed DPR 1, window.__app hooks). */
   readonly e2e: boolean;
+  /** ?drive=manual: request Manual Drive after the first frame (M2). */
+  readonly drive?: 'manual';
+  /** ?spawn=<station id>: with Manual Drive, place the car at that station (M2). */
+  readonly spawn?: string;
 }
 
 // ---------------------------------------------------------------- clock, assets

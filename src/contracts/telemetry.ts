@@ -1,5 +1,7 @@
+import { createDriveFrame, type DriveFrame } from './drive';
 import type { VehicleClass } from './suspension';
 import type { AxleId, CornerId, XYZ, XYZW } from './units';
+import type { SurfaceKind } from './world';
 
 /**
  * Preallocated per-corner telemetry. Written by sim-core `sample()`, read by everything else.
@@ -39,6 +41,19 @@ export interface CornerFrame {
   gripUse: number;
   /** 0..1 bump-stop (or rebound-stop) engagement. */
   stop: number;
+  /** N, tyre force in the WHEEL frame (x along the wheel heading, y left). Auto: the demand estimate behind gripUse. */
+  fx: number;
+  fy: number;
+  /** N, model peak force available (peak mu at this load and camber x surface scale x load). Label "model". */
+  capacity: number;
+  /** Tangent of the contact-patch slip angle (+ = patch sliding left of the wheel heading). 0 in auto. */
+  slipAngle: number;
+  /** Longitudinal slip ratio (+ = driving). 0 in auto. */
+  slipRatio: number;
+  /** rad/s, wheel spin rate (+ = rolling forward). */
+  omega: number;
+  /** Surface under the contact patch. */
+  surface: SurfaceKind;
 
   // ---- POSE (world, sim frame, amplified) ----
   readonly wheelPosition: XYZ;
@@ -109,6 +124,8 @@ export interface TelemetryFrame {
 
   readonly corners: CornerFrame[];
   readonly axles: AxleFrame[];
+  /** Manual Drive telemetry (M2); in auto it mirrors the path (mode 'auto'). */
+  readonly drive: DriveFrame;
 }
 
 /** Maximum named points per corner (capacity of CornerFrame.points). */
@@ -162,6 +179,13 @@ export function createTelemetryFrame(vehicleClass: VehicleClass, corners: readon
       motionRatio: 1,
       gripUse: 0,
       stop: 0,
+      fx: 0,
+      fy: 0,
+      capacity: 0,
+      slipAngle: 0,
+      slipRatio: 0,
+      omega: 0,
+      surface: 'asphalt',
       wheelPosition: xyz(),
       wheelRotation: { x: 0, y: 0, z: 0, w: 1 },
       spin: 0,
@@ -171,5 +195,6 @@ export function createTelemetryFrame(vehicleClass: VehicleClass, corners: readon
       springLength: 0,
     })),
     axles: (['front', 'rear'] as const).map((id) => ({ id, rollCentreHeight: Number.NaN, antiPitch: 0, rollCentre: xyz() })),
+    drive: createDriveFrame(),
   };
 }

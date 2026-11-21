@@ -1,14 +1,14 @@
-/** Layering rules (ARCHITECTURE §2). Run by `npm run lint:deps`, part of `npm run check`. */
+/** Layering rules (ARCHITECTURE §2, ARCHITECTURE-M2 §2). Run by `npm run lint:deps`, part of `npm run check`. */
 /** @type {import('dependency-cruiser').IConfiguration} */
 module.exports = {
   forbidden: [
     {
       name: 'sim-core-pure',
       comment:
-        'sim-core imports only itself and contracts/{units,suspension,vehicle,track,telemetry,sim}.ts: no npm, no node, no kernel/features/ui/DOM (§2 rule 1).',
+        'sim-core imports only itself and contracts/{units,suspension,vehicle,track,telemetry,sim,drive,world}.ts: no npm, no node, no kernel/features/ui/DOM (§2 rule 1).',
       severity: 'error',
       from: { path: '^src/sim-core/' },
-      to: { pathNot: '^src/(sim-core/|contracts/(units|suspension|vehicle|track|telemetry|sim)\\.ts$)' },
+      to: { pathNot: '^src/(sim-core/|contracts/(units|suspension|vehicle|track|telemetry|sim|drive|world)\\.ts$)' },
     },
     {
       name: 'contracts-only-contracts',

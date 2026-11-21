@@ -271,6 +271,11 @@ export function reduceMessage(att: Attachment, msg: ClientMessage, room: RoomVie
       if (!p || !p.open || p.id !== msg.pollId || msg.choice >= p.options.length) return [];
       return [{ k: 'vote', pollId: p.id, voterId: att.id, choice: msg.choice }];
     }
+    // shortcut: M2 driver/telemetry/ghost frames are refused until 12-02 (driver role) and 12-07 (live ghosts).
+    case 'in':
+    case 'tel':
+    case 'gst':
+      return [forbidden];
   }
 }
 

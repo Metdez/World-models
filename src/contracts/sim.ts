@@ -1,13 +1,17 @@
+import type { DriveControl } from './drive';
 import type { SuspensionDefinition, VehicleKinematics } from './suspension';
 import type { TelemetryFrame } from './telemetry';
 import type { BuiltTrack, TrackDefinition } from './track';
 import type { VehicleDefinition } from './vehicle';
+import type { GroundWorld, WorldDefinition } from './world';
 
 /** Lookup the simulation uses to resolve ids (the kernel passes registry getters). */
 export interface SimCatalog {
   track(id: string): TrackDefinition | undefined;
   vehicle(id: string): VehicleDefinition | undefined;
   suspension(id: string): SuspensionDefinition | undefined;
+  /** The world registered around a track (M2); absent = the loop and the terrain only. */
+  world?(trackId: string): WorldDefinition | undefined;
 }
 
 export interface SimulationOptions {
@@ -55,9 +59,14 @@ export interface Simulation {
   readonly track: BuiltTrack;
   readonly vehicle: VehicleDefinition;
   readonly suspension: SuspensionDefinition;
+  /** Manual Drive control (M2). Absent only in test fakes; `drive.available` is false for vehicles without a plant. */
+  readonly drive?: DriveControl;
+  /** The analytic ground (loop + world zones + terrain) shared by the plant and the renderer (M2). */
+  readonly world?: GroundWorld;
   /** Duration of one lap for the current vehicle, s (speed profile; identical for all suspension types). */
   readonly lapDuration: number;
-  /** Lap time of the CURRENT fixed step, s. */
+  /** Lap time of the CURRENT fixed step, s. Outside auto it is the detached clock: lapTimeAt(projected s) while the
+   * car is within the loop corridor, else held. */
   readonly lapTime: number;
   readonly simTime: number;
 
@@ -69,11 +78,14 @@ export interface Simulation {
    * `amplification` (>= 1) scales roll, pitch, heave and wheel travel in POSE fields only.
    */
   sample(alpha: number, amplification?: number): TelemetryFrame;
-  /** Swap suspension (same vehicle class). Path position is kept; ride state continues. Throws on class mismatch. */
+  /** Swap suspension (same vehicle class). Path position is kept; ride state continues. Throws on class mismatch.
+   * Outside auto the plant state (pose, velocities, ride state) is kept and only tables/extras change (no pre-roll). */
   setSuspension(id: string): void;
-  /** Swap vehicle (+ optional suspension, default vehicle.defaultSuspension). Allocates a new frame; keeps lap phase fraction. */
+  /** Swap vehicle (+ optional suspension, default vehicle.defaultSuspension). Allocates a new frame; keeps lap phase
+   * fraction. Outside auto it first releases the plant (mode auto, a cut). */
   setVehicle(id: string, suspensionId?: string): void;
-  /** Jump to lap time: path set from stateAt(), ride model initialised at equilibrium and pre-rolled for SEEK_SETTLE_S. */
+  /** Jump to lap time: path set from stateAt(), ride model initialised at equilibrium and pre-rolled for SEEK_SETTLE_S.
+   * Outside auto it first releases the plant (mode auto, a cut). */
   seek(lapTime: number): void;
   /** PURE: path state at a lap time (no side effects). Same answer on every device for the same vehicle. */
   stateAt(lapTime: number, out: PathState): PathState;

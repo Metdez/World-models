@@ -1,5 +1,6 @@
 import type { MapStore } from 'nanostores';
 import type { QualityTier } from './app';
+import { DEFAULT_AIDS, type DriveAids, type DriveMode } from './drive';
 import type { RoomRole } from './net';
 import type { CornerId } from './units';
 
@@ -44,6 +45,10 @@ export interface AppState {
   engineerOpen: boolean;
   quality: QualityTier;
   reducedMotion: boolean;
+  /** Mirror of the simulation's drive mode. Written ONLY by the kernel; request changes with bus 'drive:request'. */
+  driveMode: DriveMode;
+  /** Driver aids chosen by the visitor; the kernel applies them to the plant. */
+  driveAids: DriveAids;
   /** 0..1 loading progress; 1 = ready. */
   loading: number;
   room: RoomStatus;
@@ -79,6 +84,8 @@ export function initialState(): AppState {
     engineerOpen: false,
     quality: 'high',
     reducedMotion: false,
+    driveMode: 'auto',
+    driveAids: DEFAULT_AIDS,
     loading: 0,
     room: { code: null, role: null, connected: false, viewers: 0, dist: {} },
   };

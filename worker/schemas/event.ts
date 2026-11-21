@@ -9,6 +9,8 @@ export const analyticsEventSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('view-changed'), view: z.enum(['follow', 'explore', 'closeup']) }).readonly(),
   z.strictObject({ type: z.literal('engineer-asked'), suspension: id }).readonly(),
   z.strictObject({ type: z.literal('session'), quality: id, fps: z.number().finite().min(0).max(1000) }).readonly(),
+  z.strictObject({ type: z.literal('drive-session'), vehicle: id, suspension: id, seconds: z.number().int().min(0).max(86400) }).readonly(),
+  z.strictObject({ type: z.literal('station-visit'), station: id, suspension: id, speed: z.number().int().min(0).max(100) }).readonly(),
 ]);
 
 /** Max events per request (the client batches up to this many). */

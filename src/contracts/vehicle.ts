@@ -1,4 +1,4 @@
-import type { VehicleClass } from './suspension';
+import type { ComponentRole, VehicleClass } from './suspension';
 
 export interface TyreParams {
   /** Unloaded radius, m. */
@@ -76,12 +76,93 @@ export interface CarAxleSpec {
   readonly brakeShare: number;
 }
 
+// ---------------------------------------------------------------- Manual Drive (M2): REPRESENTATIVE model inputs
+
+/** Simplified Magic Formula tyre for the plant (research m2/04). Peak mu, its load sensitivity and the camber loss
+ * come from TyreParams (the same peakMu() as Auto); these add the slip behaviour. Model values, never data. */
+export interface TyreHandling {
+  /** Cornering stiffness per unit load at nominal load, 1/rad (C_alpha / Fz). */
+  readonly corneringStiffness: number;
+  /** Longitudinal slip stiffness per unit load at nominal load (C_kappa / Fz). */
+  readonly slipStiffness: number;
+  /** Load shape k: C(Fz) = C0 * g(Fz / (k * Fz0)) / g(1 / k) with g(x) = 2x / (1 + x^2) (= sin(2 atan x)). */
+  readonly stiffnessLoadShape: number;
+  /** Magic Formula shape C and curvature E of the one normalised combined-slip curve. */
+  readonly shape: number;
+  readonly curvature: number;
+  /** Camber stiffness / cornering stiffness (equivalent slip per unit inclination). */
+  readonly camberRatio: number;
+  /** Relaxation lengths of the contact-patch deflection states, m. */
+  readonly relaxationLateral: number;
+  readonly relaxationLongitudinal: number;
+  /** Rotating inertia of wheel, tyre, hub and brake disc, kg m^2. */
+  readonly wheelInertia: number;
+}
+
+export interface CarPowertrain {
+  /** Full-throttle engine torque (N m) at rpm knots (ascending), linear between knots. */
+  readonly torqueCurve: { readonly rpm: readonly number[]; readonly torque: readonly number[] };
+  readonly idleRpm: number;
+  readonly redlineRpm: number;
+  /** Closed-throttle engine braking torque = a + b * rpm, N m. */
+  readonly frictionTorque: readonly [a: number, b: number];
+  /** Engine + flywheel + converter rotating inertia, kg m^2 (reflected to the driven wheels through the ratio). */
+  readonly engineInertia: number;
+  /** Forward ratios (first gear first), reverse ratio (> 0), final drive, driveline efficiency. */
+  readonly gears: readonly number[];
+  readonly reverse: number;
+  readonly finalDrive: number;
+  readonly efficiency: number;
+  /** Automatic shift: torque cut, ramp back and lockout (s); upshift rpm at light and full throttle; downshift rpm. */
+  readonly shift: { readonly cut: number; readonly ramp: number; readonly lockout: number };
+  readonly upshiftRpm: readonly [light: number, full: number];
+  readonly downshiftRpm: number;
+  /** Speed-sensitive limited-slip ratio of the driven axle (Jolt form); Infinity = open differential. */
+  readonly limitedSlipRatio: number;
+  /** Reverse: speed cap (m/s) and throttle scale. */
+  readonly reverseSpeedCap: number;
+  readonly reverseThrottle: number;
+}
+
+export interface CarBrakes {
+  /** Total brake torque at full pedal, N m, split by each CarAxleSpec.brakeShare. */
+  readonly maxTorque: number;
+  /** Rear-axle handbrake torque at full lever, N m. */
+  readonly handbrakeTorque: number;
+}
+
+export interface CarSteering {
+  /** Steering actuator: first-order lag (s) and road-wheel rate limit (rad/s). */
+  readonly lag: number;
+  readonly rate: number;
+}
+
+/** Elastokinematics (research m2/23): ONE shared role-based bushing table for every suspension type. */
+export interface CarCompliance {
+  /** Axial stiffness of a link's chassis-side bushing (N/m) by component role; strut = top-mount radial rate. */
+  readonly bushingRates: Readonly<Partial<Record<ComponentRole, number>>>;
+  /** Clamp on compliance toe and camber, rad. */
+  readonly maxAngle: number;
+  /** First-order filter on the compliance angles, s. */
+  readonly filter: number;
+}
+
+export interface CarHandling {
+  readonly tyres: { readonly front: TyreHandling; readonly rear: TyreHandling };
+  readonly powertrain: CarPowertrain;
+  readonly brakes: CarBrakes;
+  readonly steering: CarSteering;
+  readonly compliance: CarCompliance;
+}
+
 export interface CarDefinition extends VehicleBase {
   readonly class: 'car';
   readonly front: CarAxleSpec;
   readonly rear: CarAxleSpec;
   /** Max road-wheel steer angle, rad (Ackermann applied by sim-core). */
   readonly maxSteer: number;
+  /** Manual Drive plant inputs (M2). Absent = this car is Auto-only. */
+  readonly handling?: CarHandling;
 }
 
 export interface MotoEndSpec {

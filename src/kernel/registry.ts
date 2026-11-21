@@ -27,5 +27,6 @@ export function createRegistries(): Registries {
     tracks: createRegistry('track'),
     vehicleVisuals: createRegistry('vehicle visual'),
     suspensionVisuals: createRegistry('suspension visual'),
+    worlds: createRegistry('world'),
   };
 }

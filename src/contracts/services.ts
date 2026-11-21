@@ -3,6 +3,7 @@
  */
 import type { Object3D, PerspectiveCamera, Scene, WebGLRenderer } from 'three';
 import { serviceKey, type Assets, type QualitySettings } from './app';
+import type { DriveIntent, DriveSource } from './drive';
 import type { ClientMessage, RoomRole, ServerMessage } from './net';
 import type { ComponentRole, SuspensionDefinition } from './suspension';
 import type { TelemetryFrame } from './telemetry';
@@ -58,14 +59,32 @@ export interface RoomService {
   readonly role: RoomRole | null;
   /** Only set on the big screen that created the room (shown as QR fragment #k=). */
   readonly hostKey: string | null;
+  /** Phone-driver pairing key, only on the big screen that created the room (QR fragment #d=) (M2). */
+  readonly driverKey?: string | null;
   readonly connected: boolean;
   send(message: ClientMessage): void;
   on<T extends ServerMessage['t']>(type: T, handler: (message: Extract<ServerMessage, { t: T }>) => void): () => void;
 }
 
+/** An input device feeding Manual Drive (M2): keyboard, gamepad, touch (drive feature), phone (phone-drive). */
+export interface DriveIntentSource {
+  readonly id: DriveSource;
+  /** Writes the device's current intent; returns true while it shows deliberate input (beyond dead zones). */
+  read(out: DriveIntent): boolean;
+}
+
+/** Provided by the `drive` feature: arbitrates sources (most recent deliberate input wins, 1 s hysteresis) and feeds
+ * Simulation.drive.setIntent; requests Manual on a fresh deliberate input while in auto or returning. */
+export interface DriveService {
+  /** Returns the remover (register it with ctx.addDisposer). */
+  addSource(source: DriveIntentSource): () => void;
+  readonly activeSource: DriveSource | null;
+}
+
 export const RENDER = serviceKey<RenderService>('render');
 export const CAMERA = serviceKey<CameraService>('camera');
 export const ROOM = serviceKey<RoomService>('room');
+export const DRIVE = serviceKey<DriveService>('drive');
 
 // ---------------------------------------------------------------- visual builders (contributed via registries)
 

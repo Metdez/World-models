@@ -21,9 +21,9 @@ describe('registry', () => {
     expect(r.list()).toHaveLength(1);
   });
 
-  it('creates all five registries empty', () => {
+  it('creates all six registries empty', () => {
     const regs = createRegistries();
-    expect(Object.keys(regs).sort()).toEqual(['suspensionVisuals', 'suspensions', 'tracks', 'vehicleVisuals', 'vehicles']);
+    expect(Object.keys(regs).sort()).toEqual(['suspensionVisuals', 'suspensions', 'tracks', 'vehicleVisuals', 'vehicles', 'worlds']);
     for (const r of Object.values(regs)) expect(r.list()).toEqual([]);
   });
 });
