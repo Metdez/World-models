@@ -21,46 +21,25 @@
  *
  * Det kernels only; a ghost step does not allocate (buffers are per run).
  */
-import {
-  CONTROL_TICKS,
-  DEFAULT_AIDS,
-  type DecodedReplay,
-  type DriveAids,
-  type DriveEvent,
-} from "../../contracts/drive";
-import type { PathState, SimEvent, Simulation } from "../../contracts/sim";
-import type { TelemetryFrame } from "../../contracts/telemetry";
-import { SIM_DT } from "../../contracts/units";
-import type { CarDefinition } from "../../contracts/vehicle";
-import type { Frenet } from "../../contracts/world";
-import type { DriveHost } from "../drive/control";
-import { PLANT_SNAPSHOT_LENGTH, type VehiclePlant } from "../drive/plant";
-import {
-  recordedLine,
-  RECORDED_DS,
-  type ReferenceLine,
-} from "../drive/reference";
-import {
-  createDriveCommand,
-  type DriveCommand,
-  type PlantView,
-} from "../drive/types";
-import { datan, datan2, dwrapPi } from "../math/det";
-import { parseAids } from "../replay/format";
-import { plantOf } from "../simulation";
+import { CONTROL_TICKS, DEFAULT_AIDS, type DecodedReplay, type DriveAids, type DriveEvent } from '../../contracts/drive';
+import type { PathState, SimEvent, Simulation } from '../../contracts/sim';
+import type { TelemetryFrame } from '../../contracts/telemetry';
+import { SIM_DT } from '../../contracts/units';
+import type { CarDefinition } from '../../contracts/vehicle';
+import type { Frenet } from '../../contracts/world';
+import type { DriveHost } from '../drive/control';
+import { PLANT_SNAPSHOT_LENGTH, type VehiclePlant } from '../drive/plant';
+import { recordedLine, RECORDED_DS, type ReferenceLine } from '../drive/reference';
+import { createDriveCommand, type DriveCommand, type PlantView } from '../drive/types';
+import { datan, datan2, dwrapPi } from '../math/det';
+import { parseAids } from '../replay/format';
+import { plantOf } from '../simulation';
 
 /** Trace and feed-forward spacing along the line, m. */
 export const GHOST_DS = RECORDED_DS;
 /** Trace channels (SI: rad, m). steer = mean front road-wheel angle; slips = mean axle slip angle; offset = CG
  *  distance from the visitor's line (+ left). */
-export const CHANNELS = [
-  "steer",
-  "frontSlip",
-  "rearSlip",
-  "sideslip",
-  "roll",
-  "offset",
-] as const;
+export const CHANNELS = ['steer', 'frontSlip', 'rearSlip', 'sideslip', 'roll', 'offset'] as const;
 export type Channel = (typeof CHANNELS)[number];
 
 export interface Trace {
@@ -99,14 +78,9 @@ export interface GhostCourse {
   readonly visitor: Trace;
 }
 
-export type CourseRefusal = "unfit" | "short";
+export type CourseRefusal = 'unfit' | 'short';
 
-export type GhostStatus =
-  | "running"
-  | "finished"
-  | "lost"
-  | "stopped"
-  | "timeout";
+export type GhostStatus = 'running' | 'finished' | 'lost' | 'stopped' | 'timeout';
 
 /** A fresh simulation of the visitor's track and vehicle with this suspension (the caller owns the catalog). */
 export type SimFactory = (suspensionId: string) => Simulation;
@@ -117,24 +91,17 @@ function createTrace(capacity: number): Trace {
   return { n: 0, ch };
 }
 
-const clamp = (x: number, lo: number, hi: number): number =>
-  x < lo ? lo : x > hi ? hi : x;
+const clamp = (x: number, lo: number, hi: number): number => (x < lo ? lo : x > hi ? hi : x);
 
 /** The trace channels of the plant's current state into sample k (frame = scratch telemetry of that plant). */
-function writeSample(
-  trace: Trace,
-  k: number,
-  plant: VehiclePlant,
-  frame: TelemetryFrame,
-  offset: number,
-): void {
+function writeSample(trace: Trace, k: number, plant: VehiclePlant, frame: TelemetryFrame, offset: number): void {
   plant.sample(1, 1, frame);
   const c = frame.corners;
   let f = 0;
   let r = 0;
   for (let i = 0; i < c.length; i++) {
     const a = datan(c[i]!.slipAngle);
-    if (c[i]!.axle === "front") f += a;
+    if (c[i]!.axle === 'front') f += a;
     else r += a;
   }
   const ch = trace.ch;
@@ -148,14 +115,11 @@ function writeSample(
 }
 
 const noSim = (): never => {
-  throw new Error("ghost: the simulation has no plant");
+  throw new Error('ghost: the simulation has no plant');
 };
 
 /** Starts `span` playing in `sim` (beforeStep restores it at the first step). */
-function playIn(
-  sim: Simulation,
-  span: DecodedReplay,
-): { host: DriveHost; plant: VehiclePlant } | null {
+function playIn(sim: Simulation, span: DecodedReplay): { host: DriveHost; plant: VehiclePlant } | null {
   const host = sim.drive as DriveHost | undefined;
   if (!host || !host.play(span)) return null;
   return { host, plant: plantOf(sim) ?? noSim() };
@@ -165,30 +129,26 @@ function playIn(
  * The comparison course of a recorded span (ARCH-M2 §7.14 `replayLine`): stretch, line, feed-forward, the visitor's
  * traces and the start state. Two exact re-simulations of the span (the first finds the stretch).
  */
-export function buildCourse(
-  span: DecodedReplay,
-  makeSim: SimFactory,
-): GhostCourse | CourseRefusal {
+export function buildCourse(span: DecodedReplay, makeSim: SimFactory): GhostCourse | CourseRefusal {
   const ticks = span.header.ticks;
   // --- pass 1: forward speed per tick state, direction per step
   const sim1 = makeSim(span.header.suspensionId);
   const run1 = playIn(sim1, span);
-  if (!run1) return "unfit";
+  if (!run1) return 'unfit';
   const u = new Float64Array(ticks + 1);
   const forward = new Uint8Array(ticks);
   sim1.step(SIM_DT);
   forward[0] = run1.plant.command.direction > 0 ? 1 : 0;
   u[1] = run1.plant.view.u;
   u[0] = u[1]!; // a stretch never starts at tick 0 (below)
-  for (let t = 1; t < ticks && run1.host.replay!.state === "playing"; t++) {
+  for (let t = 1; t < ticks && run1.host.replay!.state === 'playing'; t++) {
     sim1.step(SIM_DT);
     forward[t] = run1.plant.command.direction > 0 ? 1 : 0;
     u[t + 1] = run1.plant.view.u;
   }
   // events inside the span (tick > 0) may only start a stretch
   const starts = new Uint8Array(ticks + 1);
-  for (const e of span.events)
-    if (e.tick > 0 && e.tick <= ticks) starts[e.tick] = 1;
+  for (const e of span.events) if (e.tick > 0 && e.tick <= ticks) starts[e.tick] = 1;
   let bestA = 0;
   let bestLen = 0;
   let a = -1;
@@ -209,14 +169,14 @@ export function buildCourse(
     bestA = 1;
     bestLen -= 1;
   }
-  if (bestLen < MIN_WINDOW_S / SIM_DT) return "short";
+  if (bestLen < MIN_WINDOW_S / SIM_DT) return 'short';
   const offset = bestA;
   const end = bestA + bestLen;
 
   // --- pass 2: the stretch's line, feed-forward and traces
   const sim2 = makeSim(span.header.suspensionId);
   const run2 = playIn(sim2, span);
-  if (!run2) return "unfit";
+  if (!run2) return 'unfit';
   const plant = run2.plant;
   const frame = sim2.sample(1);
   const view = plant.view;
@@ -274,15 +234,11 @@ export function buildCourse(
   }
   putFf(bestLen, plant.command);
   // course angles unwrapped along the stretch (interpolation)
-  for (let j = 1; j <= bestLen; j++)
-    ff[FF_STRIDE * j + 5] =
-      ff[FF_STRIDE * (j - 1) + 5]! +
-      dwrapPi(ff[FF_STRIDE * j + 5]! - ff[FF_STRIDE * (j - 1) + 5]!);
+  for (let j = 1; j <= bestLen; j++) ff[FF_STRIDE * j + 5] = ff[FF_STRIDE * (j - 1) + 5]! + dwrapPi(ff[FF_STRIDE * j + 5]! - ff[FF_STRIDE * (j - 1) + 5]!);
   const n = k + 1;
-  if (n * GHOST_DS < MIN_WINDOW_M) return "short";
+  if (n * GHOST_DS < MIN_WINDOW_M) return 'short';
   let aids: DriveAids = DEFAULT_AIDS;
-  for (const e of span.events)
-    if (e.kind === "aids" && e.tick <= offset) aids = parseAids(e.value);
+  for (const e of span.events) if (e.kind === 'aids' && e.tick <= offset) aids = parseAids(e.value);
   return {
     span,
     suspensionId: span.header.suspensionId,
@@ -331,10 +287,7 @@ export interface GhostDriver {
   readonly offset: number;
 }
 
-export function createGhostDriver(
-  course: GhostCourse,
-  wheelbase: number,
-): GhostDriver {
+export function createGhostDriver(course: GhostCourse, wheelbase: number): GhostDriver {
   const st = new Float64Array(D_SLOTS);
   const fr: Frenet = { s: 0, l: 0, heading: 0, curvature: 0, converged: true };
   const line = course.line;
@@ -356,8 +309,7 @@ export function createGhostDriver(
     const f = d > 0 ? clamp((s - dist[j]!) / d, 0, 1) : 0;
     const o = FF_STRIDE * j;
     for (let c = 0; c < 4; c++) ref[c] = ff[o + c]!;
-    for (let c = 4; c < FF_STRIDE; c++)
-      ref[c] = ff[o + c]! + (ff[o + FF_STRIDE + c]! - ff[o + c]!) * f;
+    for (let c = 4; c < FF_STRIDE; c++) ref[c] = ff[o + c]! + (ff[o + FF_STRIDE + c]! - ff[o + c]!) * f;
   };
   st[D_S] = 0;
   return {
@@ -374,9 +326,7 @@ export function createGhostDriver(
       locate(fr.s);
       // course error against the visitor's own course at this point (the line's chord heading is half a sample off
       // at its ends)
-      st[D_PSI] = dwrapPi(
-        datan2(view.sinYaw, view.cosYaw) + view.beta - ref[5]!,
-      );
+      st[D_PSI] = dwrapPi(datan2(view.sinYaw, view.cosYaw) + view.beta - ref[5]!);
     },
     command(dt, view, out) {
       const u = view.u;
@@ -387,10 +337,7 @@ export function createGhostDriver(
       const kPsi = (2 * M.zeta * M.omega) / g;
       const kE = (M.omega * M.omega) / (uc * g);
       st[D_EI] = clamp(st[D_EI]! + e * dt, -1, 1);
-      const fb =
-        -kE * (e + M.offsetIntegral * st[D_EI]!) -
-        kPsi * st[D_PSI]! +
-        M.yawRate * (ref[4]! - view.r);
+      const fb = -kE * (e + M.offsetIntegral * st[D_EI]!) - kPsi * st[D_PSI]! + M.yawRate * (ref[4]! - view.r);
       out.steer = clamp(ref[0]! + fb, -view.maxSteer, view.maxSteer);
       // speed: the visitor's pedals at this point plus PI on the visitor's speed
       const ev = ref[6]! - u;
@@ -429,11 +376,7 @@ export interface Ghost {
  * A ghost of `course` in `sim` (a fresh simulation with the ghost's suspension; never stepped by anyone else): its
  * plant restored at the stretch start, driven by the ghost driver. `traces` samples the trace channels (headless runs).
  */
-export function createGhost(
-  sim: Simulation,
-  course: GhostCourse,
-  traces = true,
-): Ghost {
+export function createGhost(sim: Simulation, course: GhostCourse, traces = true): Ghost {
   const plant = plantOf(sim) ?? noSim();
   const frame = sim.sample(1);
   const path: PathState = {
@@ -455,10 +398,7 @@ export function createGhost(
   sim.stateAt(sim.lapTime, path);
   plant.engageFromPath(path, { ax: NaN, ay: NaN });
   plant.restore(course.start);
-  const driver = createGhostDriver(
-    course,
-    (sim.vehicle as CarDefinition).wheelbase,
-  );
+  const driver = createGhostDriver(course, (sim.vehicle as CarDefinition).wheelbase);
   const cmd = createDriveCommand();
   const simEvents: SimEvent[] = [];
   const driveEvents: DriveEvent[] = [];
@@ -470,10 +410,10 @@ export function createGhost(
   n[2] = 1;
   const limit = Math.round(course.ticks * 1.5) + 2 * CONTROL_TICKS * 60;
   const end = (course.n - 1) * GHOST_DS;
-  let status: GhostStatus = "running";
+  let status: GhostStatus = 'running';
   return {
     step() {
-      if (status !== "running") return;
+      if (status !== 'running') return;
       (view as { simTime: number }).simTime = n[0]! * SIM_DT;
       driver.command(SIM_DT, view, cmd);
       plant.step(SIM_DT, cmd, course.aids, simEvents, driveEvents);
@@ -482,6 +422,11 @@ export function createGhost(
       n[0] = n[0]! + 1;
       driver.project(view);
       const s = driver.s;
+      // at the line's end the projection clamps to its last point (the offset there includes the overshoot)
+      if (s >= end - 1e-9) {
+        status = 'finished';
+        return;
+      }
       const e = driver.offset;
       const ae = e < 0 ? -e : e;
       if (ae > n[1]!) n[1] = ae;
@@ -492,10 +437,9 @@ export function createGhost(
           n[2] = n[2]! + 1;
         }
       }
-      if (s >= end - 1e-9) status = "finished";
-      else if (ae > LOST_OFFSET) status = "lost";
-      else if (view.u < 0.5) status = "stopped";
-      else if (n[0]! >= limit) status = "timeout";
+      if (ae > LOST_OFFSET) status = 'lost';
+      else if (view.u < 0.5) status = 'stopped';
+      else if (n[0]! >= limit) status = 'timeout';
     },
     get status() {
       return status;
@@ -529,13 +473,9 @@ export interface GhostRun {
 }
 
 /** A headless ghost run of `course` with `suspensionId` (ARCH-M2 §7.14 `ghostTrace`). */
-export function runGhost(
-  course: GhostCourse,
-  makeSim: SimFactory,
-  suspensionId: string,
-): GhostRun {
+export function runGhost(course: GhostCourse, makeSim: SimFactory, suspensionId: string): GhostRun {
   const g = createGhost(makeSim(suspensionId), course, true);
-  while (g.status === "running") g.step();
+  while (g.status === 'running') g.step();
   return {
     suspensionId,
     status: g.status,

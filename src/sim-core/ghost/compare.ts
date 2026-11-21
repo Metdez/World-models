@@ -4,23 +4,24 @@
  * counts only when its peak exceeds MARGIN x that floor and a perceptual floor. When A' cannot repeat the visitor's
  * line (or does not finish it) the comparison is refused; when B leaves the line it is reported as such. Never ranks.
  */
-import { CHANNELS, type Channel, type GhostRun, type Trace } from "./ghost";
+import { CHANNELS, type Channel, type GhostRun, type Trace } from './ghost';
 
 /** A difference must exceed MARGIN x the A/A noise floor. */
 export const MARGIN = 3;
-/** Perceptual floors (rad, m): below these two runs read as the same whatever the noise floor. */
+/** Floors of notice (rad, m; a design choice, stated here): below these two runs read as the same whatever the noise
+ *  floor. Steer is the road-wheel angle (a quarter degree there is several degrees at the steering wheel). */
 export const FLOOR: Readonly<Record<Channel, number>> = {
   steer: 0.25 * (Math.PI / 180),
-  frontSlip: 0.15 * (Math.PI / 180),
-  rearSlip: 0.15 * (Math.PI / 180),
-  sideslip: 0.15 * (Math.PI / 180),
-  roll: 0.1 * (Math.PI / 180),
-  offset: 0.05,
+  frontSlip: 0.25 * (Math.PI / 180),
+  rearSlip: 0.25 * (Math.PI / 180),
+  sideslip: 0.25 * (Math.PI / 180),
+  roll: 0.2 * (Math.PI / 180),
+  offset: 0.1,
 };
 /** A' farther than this from the visitor's line (m) = the driver model cannot repeat the drive: no conclusion. */
 export const AA_MAX_OFFSET = 0.25;
-/** B farther than this (m) = it did not hold the line: the cars took different paths. */
-export const B_LOST_OFFSET = 0.75;
+/** B farther than this (m) = it did not hold the line (near the grip limit the paths part): the cars took different paths. */
+export const B_LOST_OFFSET = 0.5;
 /** Share of the line a run must cover to be compared. */
 const MIN_COVER = 0.95;
 
@@ -36,7 +37,7 @@ export interface ChannelStat {
   readonly significant: boolean;
 }
 
-export type Verdict = "refused" | "lost" | "same" | "different";
+export type Verdict = 'refused' | 'lost' | 'same' | 'different';
 
 export interface Comparison {
   readonly verdict: Verdict;
@@ -57,14 +58,9 @@ const MIN_MEAN_STEER = 0.5 * (Math.PI / 180);
 
 /** Sample 0 is the stretch's start state itself (identical by construction; a just-restored plant samples it without
  *  its previous step), so the comparison starts at sample 1. */
-export function compareRuns(
-  visitor: Trace,
-  a: GhostRun,
-  b: GhostRun,
-): Comparison {
+export function compareRuns(visitor: Trace, a: GhostRun, b: GhostRun): Comparison {
   const n = Math.min(visitor.n, a.trace.n, b.trace.n);
-  const covered = (r: GhostRun) =>
-    r.trace.n >= MIN_COVER * visitor.n && r.status !== "lost";
+  const covered = (r: GhostRun) => r.trace.n >= MIN_COVER * visitor.n && r.status !== 'lost';
   const channels = {} as Record<Channel, ChannelStat>;
   for (const c of CHANNELS) {
     const v = visitor.ch[c];
@@ -96,23 +92,14 @@ export function compareRuns(
     sa += Math.abs(a.trace.ch.steer[k]!);
     sb += Math.abs(b.trace.ch.steer[k]!);
   }
-  const steerEffort =
-    n > 1 && sa / (n - 1) >= MIN_MEAN_STEER ? sb / sa - 1 : NaN;
+  const steerEffort = n > 1 && sa / (n - 1) >= MIN_MEAN_STEER ? sb / sa - 1 : NaN;
   const aaOffset = a.maxOffset;
   const bOffset = b.maxOffset;
   const refused = !covered(a) || aaOffset > AA_MAX_OFFSET;
   const lost = !refused && (!covered(b) || bOffset > B_LOST_OFFSET);
   const order = CHANNELS.filter((c) => channels[c].significant).sort(
-    (p, q) =>
-      channels[q].peakDiff / channels[q].threshold -
-      channels[p].peakDiff / channels[p].threshold,
+    (p, q) => channels[q].peakDiff / channels[q].threshold - channels[p].peakDiff / channels[p].threshold,
   );
-  const verdict: Verdict = refused
-    ? "refused"
-    : lost
-      ? "lost"
-      : order.length > 0
-        ? "different"
-        : "same";
+  const verdict: Verdict = refused ? 'refused' : lost ? 'lost' : order.length > 0 ? 'different' : 'same';
   return { verdict, n, aaOffset, bOffset, steerEffort, channels, order };
 }
