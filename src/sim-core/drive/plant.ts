@@ -601,6 +601,11 @@ export function createPlant(core: CarCore, options: PlantOptions = {}): VehicleP
     core.derive(0, undefined, tyre);
     core.holdRecord();
     recordState();
+    // the faulted step may have written non-finite specific forces into the record
+    scal[3] = 0;
+    scal[4] = 0;
+    cur[RAX] = 0;
+    cur[RAY] = 0;
     prev.set(cur);
     locate(0, null);
     startRing();

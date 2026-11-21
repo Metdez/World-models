@@ -12,6 +12,7 @@ import { gtCoupe } from '../../src/sim-core/content/gt-coupe';
 import { provingLoop } from '../../src/sim-core/content/proving-loop';
 import { finiteFrame, plantRig, steps, SUSPENSION_IDS } from '../fixtures/08-02-drive';
 import { strip } from '../fixtures/08-02-test-tracks';
+import { flatWorld, rig } from '../fixtures/09-04-handling';
 
 const ts = (): TrackSample => ({ s: 0, x: 0, y: 0, z: 0, heading: 0, curvature: 0, bank: 0, grade: 0 });
 
@@ -220,5 +221,35 @@ describe('plant at standstill (S1 v0)', () => {
     }
     expect(rig.plant.faults).toBe(0);
     expect(Math.max(...watch.changes)).toBe(0);
+  });
+});
+
+describe('plant at standstill on a 5 % slope (S1, 09-04)', () => {
+  const slopeWorld = flatWorld(
+    (x) => 0.05 * x,
+    (x) => 0.05 * x,
+  );
+  it.each(SUSPENSION_IDS)('%s: brake (and handbrake alone) held 10 s on a 5 percent slope, nose up and down: creep < 1 mm; released, it rolls', (id) => {
+    const rows: string[] = [];
+    for (const heading of [0, Math.PI]) {
+      for (const hold of ['brake', 'handbrake'] as const) {
+        const r = rig({ suspension: id, world: slopeWorld });
+        r.place(10, 0, heading);
+        r.cmd[hold] = 1;
+        for (let k = 0; k < 24; k++) r.step(); // settle onto the slope at rest
+        const x0 = r.plant.view.x;
+        const y0 = r.plant.view.y;
+        for (let k = 0; k < steps(10); k++) r.step();
+        const creep = Math.hypot(r.plant.view.x - x0, r.plant.view.y - y0);
+        rows.push(`${heading === 0 ? 'nose up' : 'nose down'} ${hold} ${(creep * 1000).toFixed(4)} mm`);
+        expect(creep).toBeLessThan(1e-3);
+        expect(r.plant.faults).toBe(0);
+        // control: released, the slope pulls the car away
+        r.cmd[hold] = 0;
+        for (let k = 0; k < steps(3); k++) r.step();
+        expect(Math.hypot(r.plant.view.x - x0, r.plant.view.y - y0)).toBeGreaterThan(0.5);
+      }
+    }
+    console.log(`[standstill] ${id} 5 % slope: ${rows.join(', ')}`);
   });
 });
