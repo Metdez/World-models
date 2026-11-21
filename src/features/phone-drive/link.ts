@@ -1,8 +1,9 @@
 /**
  * Phone driver link, screen side (ARCHITECTURE-M2 §12.3; research m2/17 §5). Pure; times in ms.
- * Latest-wins `in` frames (u32 sequence, wrapping) become a TARGET: the output moves to it over one packet period
+ * Latest-wins `in` frames (u32 sequence, wrapping; a large jump back = another phone took the wheel) become a TARGET: the output moves to it over one packet period
  * (taken from the room's receive stamps `r`, so downlink jitter does not stretch it); no extrapolation. Silence:
  * after 250 ms the input decays to neutral over 300 ms while braking gently (moving only); after 1 s the link is lost.
+ * Silence is counted per screen frame, each frame adding at most `stallStepMs`.
  */
 import type { DriveMode } from '../../contracts/drive';
 
@@ -17,6 +18,9 @@ export const LINK = {
   periodMinMs: 10,
   periodMaxMs: 100,
   periodMs: 1000 / 30,
+  /** Longest step one screen frame adds to the silence, ms: a screen that itself stalled (a long frame, a busy main
+   * thread holding queued messages) does not blame the phone for it. */
+  stallStepMs: 100,
   /** Brake applied while decaying (only when the car moves). */
   brakeOnLoss: 0.5,
   /** Flags (contracts/net.ts `in.f`). */
@@ -27,6 +31,9 @@ export const LINK = {
 
 export type LinkPhase = 'idle' | 'live' | 'decay' | 'lost';
 export type LinkLevel = 'ok' | 'amber' | 'red';
+
+/** A jump back by more than this is a new sender (the relay is ordered: only duplicates come back), not a stale frame. */
+export const NEW_STREAM_BACK = 64;
 
 /** `a` is a newer u32 sequence number than `b` (wrapping; half-range rule). */
 export function seqNewer(a: number, b: number): boolean {
@@ -74,6 +81,8 @@ export interface PhoneLink {
   sample(now: number, moving: boolean, out: LinkOutput): LinkPhase;
   /** The driver left (presence): lost until the next frame. */
   drop(): void;
+  /** Silence since the last accepted frame as counted for the failsafe, ms. */
+  readonly silentMs: number;
   /** Local time of the last accepted frame (-Infinity before the first). */
   readonly lastArrival: number;
   /** Room receive stamp of the last accepted frame. */
@@ -91,6 +100,8 @@ export function createPhoneLink(): PhoneLink {
   let period: number = LINK.periodMs;
   let dropped = false;
   let flags = 0;
+  let silent = 0;
+  let lastSample = 0;
   // interpolation: from (output when the frame arrived) -> to (the frame), over `period`
   const from = { steer: 0, throttle: 0, brake: 0 };
   const to = { steer: 0, throttle: 0, brake: 0 };
@@ -105,8 +116,8 @@ export function createPhoneLink(): PhoneLink {
 
   return {
     receive(frame, now) {
-      if (has && !seqNewer(frame.n, last)) return false;
-      if (has && !dropped && now - arrival < LINK.lostAfterMs) {
+      if (has && !seqNewer(frame.n, last) && ((last - frame.n) >>> 0) <= NEW_STREAM_BACK) return false;
+      if (has && !dropped && silent < LINK.lostAfterMs) {
         interpolate(now);
         const gap = frame.r - rLast;
         period = Number.isFinite(gap) ? Math.min(LINK.periodMaxMs, Math.max(LINK.periodMinMs, gap)) : LINK.periodMs;
@@ -121,7 +132,8 @@ export function createPhoneLink(): PhoneLink {
       has = true;
       dropped = false;
       last = frame.n >>> 0;
-      arrival = now;
+      arrival = lastSample = now;
+      silent = 0;
       rLast = frame.r;
       flags = frame.f;
       to.steer = clamp1(frame.s / 1000);
@@ -136,7 +148,8 @@ export function createPhoneLink(): PhoneLink {
         out.wanted = false;
         return 'idle';
       }
-      const silent = now - arrival;
+      silent += Math.min(LINK.stallStepMs, Math.max(0, now - lastSample));
+      lastSample = now;
       const phase = dropped ? 'lost' : phaseOf(silent);
       out.wanted = phase !== 'lost' && (flags & LINK.flagWanted) !== 0;
       if (phase === 'lost') {
@@ -153,6 +166,9 @@ export function createPhoneLink(): PhoneLink {
     },
     drop() {
       dropped = true;
+    },
+    get silentMs() {
+      return has ? silent : Infinity;
     },
     get lastArrival() {
       return arrival;

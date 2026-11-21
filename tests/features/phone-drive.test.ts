@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createPhoneLink, deliberate, failsafeGain, LINK, linkLevel, phaseOf, seqNewer, telFrame, type LinkOutput } from '../../src/features/phone-drive/link';
 
 const out = (): LinkOutput => ({ steer: 0, throttle: 0, brake: 0, handbrake: 0, wanted: false });
-const frame = (n: number, r: number, s = 0, th = 0, br = 0, f = LINK.flagWanted) => ({ n, s, th, br, f, r });
+const frame = (n: number, r: number, s = 0, th = 0, br = 0, f: number = LINK.flagWanted) => ({ n, s, th, br, f, r });
 
 describe('sequence order (u32, wrapping)', () => {
   it('accepts newer, drops equal / older, survives the wrap', () => {
@@ -34,19 +34,34 @@ describe('failsafe timeline', () => {
     const o = out();
     expect(link.sample(0, true, o)).toBe('idle');
     link.receive(frame(1, 1000, -600, 800, 0), 0);
+    const walk = (from: number, to: number) => {
+      for (let t = from; t < to; t += 50) link.sample(t, true, o); // a healthy 20 Hz screen
+    };
     expect(link.sample(100, true, o)).toBe('live');
     expect(o.steer).toBeCloseTo(-0.6, 9);
     expect(o.throttle).toBeCloseTo(0.8, 9);
+    walk(150, 400);
     expect(link.sample(400, true, o)).toBe('decay');
     expect(o.steer).toBeCloseTo(-0.3, 9);
     expect(o.throttle).toBeCloseTo(0.4, 9);
     expect(o.brake).toBeCloseTo(LINK.brakeOnLoss * 0.5, 9);
     link.sample(400, false, o);
     expect(o.brake).toBe(0); // at a standstill a held brake would select reverse
+    walk(450, 600);
     expect(link.sample(600, true, o)).toBe('decay');
     expect([o.steer, o.throttle]).toEqual([-0, 0]);
+    walk(650, 1000);
     expect(link.sample(1000, true, o)).toBe('lost');
     expect([o.steer, o.throttle, o.brake, o.wanted]).toEqual([0, 0, 0, false]);
+  });
+
+  it('a stall of the screen itself (one long frame) is not counted as phone silence', () => {
+    const link = createPhoneLink();
+    const o = out();
+    link.receive(frame(1, 0, 500), 0);
+    expect(link.sample(2000, true, o)).toBe('live');
+    expect(link.silentMs).toBe(LINK.stallStepMs);
+    expect(o.steer).toBeCloseTo(0.5, 9);
   });
 
   it('presence drop = lost at once, until the next frame', () => {
@@ -97,12 +112,24 @@ describe('interpolation over one packet period', () => {
     expect(o.steer).toBeCloseTo(0.1, 9);
   });
 
+  it('a newer phone starting elsewhere in the sequence space is a new stream, not stale', () => {
+    const link = createPhoneLink();
+    const o = out();
+    link.receive(frame(5000, 0, 100), 0);
+    expect(link.receive(frame(4990, 30, 200), 30)).toBe(false); // a short step back: a duplicate/replay
+    expect(link.receive(frame(17, 60, 300), 60)).toBe(true); // far back: another sender
+    expect(link.receive(frame(18, 90, 400), 90)).toBe(true);
+    link.sample(200, true, o);
+    expect(o.steer).toBeCloseTo(0.4, 9);
+  });
+
   it('first frame after a loss ramps from neutral, not from the old state', () => {
     const link = createPhoneLink();
     const o = out();
     link.receive(frame(1, 0, 1000), 0);
-    link.sample(50, true, o);
-    link.receive(frame(2, 3000, -1000), 3000); // 3 s later
+    for (let t = 50; t < 3000; t += 50) link.sample(t, true, o); // 3 s of a running screen without frames: lost
+    expect(link.sample(3000, true, o)).toBe('lost');
+    link.receive(frame(2, 3000, -1000), 3000);
     link.sample(3000 + 1000 / 60, true, o);
     expect(o.steer).toBeCloseTo(-0.5, 2);
   });

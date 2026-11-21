@@ -1,10 +1,11 @@
-/** The remote's room socket (partysocket, no app kernel) and the room/host-key parsing of its URL. */
+/** The remote's room socket (partysocket, no app kernel) and the room / host-key / driver-key parsing of its URL. */
 import ReconnectingWebSocket from 'partysocket/ws';
 import { PROTOCOL_VERSION, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, WS_PREFIX, type ClientMessage, type RoomRole, type ServerMessage } from '../contracts/net';
 
 const HEARTBEAT_MS = 25_000;
 const CLIENT_ID_KEY = 'sl-client-id';
 const HOST_KEY_PREFIX = 'sl-remote-host:';
+const DRIVER_KEY_PREFIX = 'sl-remote-driver:';
 const CODE_RE = new RegExp(`^[${ROOM_CODE_ALPHABET}]{${ROOM_CODE_LENGTH}}$`);
 const KEY_RE = /^[A-Za-z0-9_-]{16,64}$/;
 
@@ -20,26 +21,46 @@ export function hostKeyFromHash(hash: string): string | null {
   return KEY_RE.test(key) ? key : null;
 }
 
+/** `#d=KEY` (the big screen's "Drive from your phone" QR, 12-04); anything else is no driver key. */
+export function driverKeyFromHash(hash: string): string | null {
+  const key = new URLSearchParams(hash.replace(/^#/, '')).get('d');
+  return key !== null && KEY_RE.test(key) ? key : null;
+}
+
 /**
- * Room and host key for this page. The key moves from the fragment into sessionStorage and the fragment is removed
- * from the address bar, so a reload keeps the role but a shared screenshot or copied link does not carry the key.
+ * Room and key for this page. A key moves from the fragment into sessionStorage and the fragment is removed from the
+ * address bar, so a reload keeps the role but a shared screenshot or copied link does not carry the key. A fresh
+ * fragment replaces the other role's stored key for that room (a phone is a driver or a presenter remote, not both).
  */
-export function readRemoteTarget(loc: Pick<Location, 'search' | 'hash' | 'pathname'>, storage: Storage | null): { code: string | null; hostKey: string | null } {
+export function readRemoteTarget(
+  loc: Pick<Location, 'search' | 'hash' | 'pathname'>,
+  storage: Storage | null,
+): { code: string | null; hostKey: string | null; driverKey: string | null } {
   const code = normaliseCode(new URLSearchParams(loc.search).get('room'));
-  if (!code) return { code: null, hostKey: null };
-  let hostKey = hostKeyFromHash(loc.hash);
+  if (!code) return { code: null, hostKey: null, driverKey: null };
+  let driverKey = driverKeyFromHash(loc.hash);
+  let hostKey = driverKey ? null : hostKeyFromHash(loc.hash);
   try {
-    if (hostKey) storage?.setItem(HOST_KEY_PREFIX + code, hostKey);
-    else hostKey = storage?.getItem(HOST_KEY_PREFIX + code) ?? null;
+    if (driverKey) {
+      storage?.setItem(DRIVER_KEY_PREFIX + code, driverKey);
+      storage?.removeItem(HOST_KEY_PREFIX + code);
+    } else if (hostKey) {
+      storage?.setItem(HOST_KEY_PREFIX + code, hostKey);
+      storage?.removeItem(DRIVER_KEY_PREFIX + code);
+    } else {
+      driverKey = storage?.getItem(DRIVER_KEY_PREFIX + code) ?? null;
+      hostKey = driverKey ? null : (storage?.getItem(HOST_KEY_PREFIX + code) ?? null);
+    }
   } catch {
     /* storage blocked: the key lives only as long as the fragment */
   }
-  return { code, hostKey };
+  return { code, hostKey, driverKey };
 }
 
 export function forgetHostKey(code: string, storage: Storage | null): void {
   try {
     storage?.removeItem(HOST_KEY_PREFIX + code);
+    storage?.removeItem(DRIVER_KEY_PREFIX + code);
   } catch {
     /* nothing stored */
   }
@@ -57,12 +78,13 @@ export function clientId(storage: Storage | null): string {
   }
 }
 
-export type LinkStatus = 'connecting' | 'live' | 'offline' | 'denied' | 'gone' | 'full' | 'outdated';
+export type LinkStatus = 'connecting' | 'live' | 'offline' | 'denied' | 'gone' | 'full' | 'outdated' | 'replaced';
 
-/** Close codes from the room (06-01): 4400 protocol, 4401 host key, 4404 unknown room, 4503 full. */
+/** Close codes from the room (06-01, 12-02): 4400 protocol, 4401 key, 4404 unknown room, 4409 another driver, 4503 full. */
 export function statusForClose(code: number): LinkStatus | null {
   if (code === 4400) return 'outdated';
   if (code === 4401) return 'denied';
+  if (code === 4409) return 'replaced';
   if (code === 4404) return 'gone';
   if (code >= 4400 && code < 4600) return 'full';
   return null;
@@ -70,14 +92,19 @@ export function statusForClose(code: number): LinkStatus | null {
 
 export interface RemoteLink {
   send(message: ClientMessage): void;
+  /** Bytes queued on the socket (the driver skips a tick while > 0: latest wins). */
+  readonly bufferedAmount: number;
+  /** Opens again after a final close (a driver taking the wheel back after 4409). */
+  reconnect(): void;
   close(): void;
 }
 
 export function connectRemote(opts: {
   readonly origin: string;
   readonly code: string;
-  readonly role: Extract<RoomRole, 'host' | 'audience'>;
-  readonly hostKey: string | null;
+  readonly role: Extract<RoomRole, 'host' | 'audience' | 'driver'>;
+  /** Host or driver key (sent as the first frame); ignored for the audience. */
+  readonly key: string | null;
   readonly clientId: string;
   readonly onMessage: (message: ServerMessage) => void;
   readonly onStatus: (status: LinkStatus) => void;
@@ -97,8 +124,8 @@ export function connectRemote(opts: {
     shouldReconnectOnClose: (e) => statusForClose(e.code) === null,
   });
   opts.onStatus('connecting');
-  // The host key is the first frame after every (re)open, never part of the URL (which lands in request logs).
-  const key = opts.role === 'host' ? opts.hostKey : null;
+  // The key is the first frame after every (re)open, never part of the URL (which lands in request logs).
+  const key = opts.role === 'audience' ? null : opts.key;
   if (key) ws.addEventListener('open', () => ws.send(JSON.stringify({ t: 'auth', k: key } satisfies ClientMessage)));
   ws.addEventListener('message', (e) => {
     if (typeof e.data !== 'string' || e.data[0] !== '{') return; // "pong"
@@ -119,6 +146,13 @@ export function connectRemote(opts: {
   return {
     send(message) {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
+    },
+    get bufferedAmount() {
+      return ws.bufferedAmount;
+    },
+    reconnect() {
+      opts.onStatus('connecting');
+      ws.reconnect();
     },
     close() {
       clearInterval(heartbeat);

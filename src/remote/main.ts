@@ -1,10 +1,12 @@
 /**
- * Phone remote (`/remote.html?room=CODE`): with `#k=HOSTKEY` it is the presenter's remote (host), otherwise the
- * audience vote panel. Imports no app kernel and no three.js; talks to the room over its own partysocket.
+ * Phone remote (`/remote.html?room=CODE`): with `#k=HOSTKEY` it is the presenter's remote (host), with `#d=DRIVERKEY`
+ * the phone driver (12-04), otherwise the audience vote panel. Imports no app kernel and no three.js; talks to the room
+ * over its own partysocket.
  */
 import { h, mount } from '../ui/dom';
 import { REMOTE_PAGE, type ClientMessage } from '../contracts/net';
 import { clientId, connectRemote, forgetHostKey, normaliseCode, readRemoteTarget, type LinkStatus, type RemoteLink } from './connection';
+import { createDriverPanel } from './driver-panel';
 import { createHostPanel } from './host-panel';
 import './remote.css';
 import { createVotePanel } from './vote-panel';
@@ -32,6 +34,7 @@ const STATUS_TEXT: Record<LinkStatus, string> = {
   gone: 'Room closed',
   full: 'Room full',
   outdated: 'Update needed',
+  replaced: 'Wheel taken',
 };
 
 function header(code: string | null, role: string | null): { el: HTMLElement; status(s: LinkStatus): void } {
@@ -92,7 +95,7 @@ function banner(text: string, action?: { label: string; run: () => void }): HTML
 }
 
 function start(root: HTMLElement): void {
-  const { code, hostKey } = readRemoteTarget(location, session);
+  const { code, hostKey, driverKey } = readRemoteTarget(location, session);
   // The key never stays in the address bar (screenshots, shared links, history sync).
   if (location.hash) history.replaceState(null, '', location.pathname + location.search);
 
@@ -103,23 +106,31 @@ function start(root: HTMLElement): void {
     return;
   }
 
-  const role = hostKey ? 'host' : 'audience';
-  const head = header(code, role === 'host' ? 'Presenter' : 'Audience');
+  const role = driverKey ? 'driver' : hostKey ? 'host' : 'audience';
+  const head = header(code, role === 'driver' ? 'Driver' : role === 'host' ? 'Presenter' : 'Audience');
   const notice = h('div', { class: 'rm-notice' });
   let link: RemoteLink | null = null;
   const send = (m: ClientMessage) => link?.send(m);
   const host = role === 'host' ? createHostPanel(send) : null;
   const vote = role === 'audience' ? createVotePanel(send) : null;
+  const driver = role === 'driver' ? createDriverPanel(code, () => link) : null;
+  if (driver) {
+    document.body.dataset['role'] = 'driver';
+    head.el.append(driver.badge);
+    // a wheel, not a page: no pinch or double-tap zoom while driving
+    document.querySelector('meta[name=viewport]')?.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover');
+  }
   mount(root, head.el);
   mount(root, notice);
-  mount(root, (host ?? vote)!.el);
+  mount(root, (host ?? vote ?? driver)!.el);
   link = connectRemote({
     origin: location.origin,
     code,
     role,
-    hostKey,
+    key: driverKey ?? hostKey,
     clientId: clientId(local),
     onMessage: (m) => {
+      if (driver) return driver.message(m);
       if (m.t === 'welcome') {
         host?.ctl(m.ctl);
         host?.poll(m.poll);
@@ -135,6 +146,11 @@ function start(root: HTMLElement): void {
     onStatus: (s) => {
       head.status(s);
       document.body.dataset['status'] = s;
+      if (driver) {
+        driver.status(s); // its own calm sheets for replaced / denied / gone
+        notice.replaceChildren(...(s === 'full' ? [banner('This room is full right now. Try again in a moment.')] : s === 'outdated' ? [banner('A newer version is live.', { label: 'Reload', run: () => location.reload() })] : []));
+        return;
+      }
       if (s === 'denied')
         notice.replaceChildren(
           banner('This presenter link is no longer valid for this room.', {
@@ -151,7 +167,10 @@ function start(root: HTMLElement): void {
       else notice.replaceChildren();
     },
   });
-  addEventListener('pagehide', () => link?.close());
+  addEventListener('pagehide', () => {
+    driver?.dispose();
+    link?.close();
+  });
 }
 
 const root = document.getElementById('remote');

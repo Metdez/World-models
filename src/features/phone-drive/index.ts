@@ -177,7 +177,7 @@ function init(ctx: FeatureContext): void {
     lastPhase = phase;
 
     // link badge: room → screen transit plus the silence since the last frame; worst level held for a second
-    const age = phase === 'idle' || phase === 'lost' ? Infinity : ageAtArrival + (now - link.lastArrival);
+    const age = phase === 'idle' || phase === 'lost' ? Infinity : ageAtArrival + link.silentMs;
     const level = linkLevel(age);
     if (LEVEL_RANK[level] >= LEVEL_RANK[worst] || now > worstUntil) {
       worst = level;

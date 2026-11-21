@@ -1,0 +1,363 @@
+/*
+ * Phone driver (12-04). Tokens only. A wheel, not a page: the whole viewport, no scrolling, thumb-sized targets.
+ * Landscape (844×390, 667×375): slider left, readout centre, GAS over BRAKE right; with tilt: BRAKE left, GAS right.
+ * Portrait still works (stacked) for people who do not turn the phone.
+ */
+body[data-role='driver'],
+html:has(body[data-role='driver']) {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body[data-role='driver'] #remote {
+  max-width: none;
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  padding: 0 max(var(--sp-3), env(safe-area-inset-right)) max(var(--sp-3), env(safe-area-inset-bottom)) max(var(--sp-3), env(safe-area-inset-left));
+}
+
+body[data-role='driver'] .rm-header {
+  position: relative;
+  margin: 0 calc(-1 * max(var(--sp-3), env(safe-area-inset-right))) var(--sp-2) calc(-1 * max(var(--sp-3), env(safe-area-inset-left)));
+  padding: calc(var(--sp-2) + env(safe-area-inset-top)) max(var(--sp-4), env(safe-area-inset-right)) var(--sp-2) max(var(--sp-4), env(safe-area-inset-left));
+}
+
+body[data-role='driver'] .rm-room {
+  margin-left: auto;
+}
+
+/* link badge (round trip to the room) */
+.rm-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-pill);
+  font: 400 var(--fs-label) / 1.4 var(--font-mono);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.rm-badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--text-3);
+}
+
+.rm-badge[data-level='ok'] .rm-badge-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.rm-badge[data-level='amber'] .rm-badge-dot,
+.rm-badge[data-level='red'] .rm-badge-dot {
+  background: var(--warn);
+}
+
+.rm-badge[data-level='red'] {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+/* ---------------------------------------------------------------- the controls */
+.rm-drive {
+  position: relative;
+  min-height: 0;
+  display: grid;
+  gap: var(--sp-3);
+  grid-template-columns: minmax(0, 1.3fr) minmax(176px, 1fr) minmax(120px, 0.62fr);
+  grid-template-rows: minmax(0, 1.35fr) minmax(0, 1fr);
+  grid-template-areas:
+    'steer centre gas'
+    'steer centre brake';
+}
+
+.rm-drive[data-steering='tilt'] {
+  grid-template-columns: minmax(120px, 0.7fr) minmax(0, 1.4fr) minmax(120px, 0.7fr);
+  grid-template-areas:
+    'brake centre gas'
+    'brake centre gas';
+}
+
+.rm-drive[data-steering='tilt'] .rm-drive-steer {
+  display: none;
+}
+
+.rm-drive [hidden] {
+  display: none !important;
+}
+
+.rm-drive-steer,
+.rm-drive-pedal {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.rm-drive-steer {
+  grid-area: steer;
+  position: relative;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: var(--sp-3);
+  min-height: 120px;
+  border-radius: var(--radius-panel);
+  background: var(--bg-1);
+  border: 1px solid var(--hair);
+}
+
+.rm-drive-track {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: calc(100% - 2 * var(--sp-4));
+  height: 76px;
+  border-radius: var(--radius-pill);
+  background: var(--glass);
+  border: 1px solid var(--hair);
+}
+
+.rm-drive-mark {
+  position: absolute;
+  left: 50%;
+  top: 12px;
+  bottom: 12px;
+  width: 1px;
+  background: var(--hair-strong);
+}
+
+.rm-drive-knob {
+  width: 68px;
+  height: 68px;
+  border-radius: var(--radius-pill);
+  background: var(--hair-strong);
+  border: 1px solid var(--hair-strong);
+  box-shadow:
+    var(--shadow-panel),
+    inset 0 0 0 9px var(--bg-1);
+  transition: transform var(--dur-thumb) var(--ease);
+}
+
+.rm-drive-steer.is-held .rm-drive-knob {
+  border-color: var(--accent);
+  transition: none;
+}
+
+.rm-drive-cap {
+  color: var(--text-3);
+  font-size: var(--fs-label);
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+}
+
+.rm-drive-pedal {
+  display: grid;
+  place-items: center;
+  min-height: 72px;
+  border-radius: var(--radius-panel);
+  background: var(--bg-1);
+  border: 1px solid var(--hair-strong);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--text-1);
+  transition:
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+
+.rm-drive-pedal[data-pedal='gas'] {
+  grid-area: gas;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.rm-drive-pedal[data-pedal='brake'] {
+  grid-area: brake;
+}
+
+.rm-drive-pedal.is-held {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--text-1);
+}
+
+.rm-drive-pedal[data-pedal='brake'].is-held {
+  background: var(--hair-strong);
+  border-color: var(--text-1);
+}
+
+/* centre: wheel, speed, gear, what the screen is doing, the few buttons */
+.rm-drive-centre {
+  grid-area: centre;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  text-align: center;
+}
+
+.rm-drive-wheel {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-pill);
+  border: 3px solid var(--hair-strong);
+  transition: transform 60ms linear;
+}
+
+.rm-drive-wheel-spoke {
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  width: 3px;
+  height: 14px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.rm-drive-readout {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.rm-drive-speed {
+  font-size: var(--fs-display);
+  font-weight: 500;
+  min-width: 3ch;
+  text-align: right;
+}
+
+.rm-drive-unit {
+  color: var(--text-3);
+  font-size: var(--fs-label);
+}
+
+.rm-drive-gear {
+  min-width: 2ch;
+  padding: 0 var(--sp-1);
+  border: 1px solid var(--hair-strong);
+  border-radius: var(--radius-chip);
+  color: var(--text-2);
+}
+
+.rm-drive-mode {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-label);
+}
+
+.rm-drive[data-mode='1'] .rm-drive-mode {
+  color: var(--accent);
+}
+
+.rm-drive-btns {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--sp-2);
+}
+
+.rm-drive-btn {
+  min-height: 48px;
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-label);
+}
+
+.rm-drive-tiltnote {
+  margin: 0;
+  max-width: 32ch;
+  color: var(--warn);
+  font-size: var(--fs-label);
+  line-height: var(--lh-body);
+}
+
+/* while the room is unreachable the controls stay visible but inert (remote.css .rm-panel rule) */
+
+/* ---------------------------------------------------------------- sheets */
+.rm-drive-sheet {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-3);
+  background: color-mix(in srgb, var(--bg-0) 72%, transparent);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+}
+
+.rm-drive-sheet-card {
+  width: min(440px, 100%);
+  text-align: center;
+}
+
+.rm-drive-sheet-title {
+  margin: 0;
+  font-size: var(--fs-title);
+  font-weight: 600;
+}
+
+.rm-drive-sheet-btns {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--sp-2);
+}
+
+/* the recovery sheets stay usable while the socket is closed */
+body:not([data-status='live']) .rm-drive[data-sheet='status'] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+body:not([data-status='live']) .rm-drive[data-sheet='status'] > :not(.rm-drive-sheet) {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------- portrait (still drivable) */
+@media (orientation: portrait) {
+  .rm-drive,
+  .rm-drive[data-steering='tilt'] {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto minmax(0, 1fr) minmax(0, 1.2fr);
+    grid-template-areas:
+      'centre centre'
+      'steer steer'
+      'brake gas';
+  }
+  .rm-drive[data-steering='tilt'] {
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas:
+      'centre centre'
+      'brake gas';
+  }
+}
+
+/* short landscape phones (667×375): tighter header and gaps */
+@media (orientation: landscape) and (max-height: 400px) {
+  .rm-drive {
+    gap: var(--sp-2);
+  }
+  .rm-drive-centre {
+    gap: var(--sp-1);
+  }
+  .rm-drive-wheel {
+    width: 36px;
+    height: 36px;
+  }
+}
