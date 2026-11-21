@@ -92,8 +92,8 @@ describe('model normaliser (recorded Workers AI responses)', () => {
 describe('number grounding', () => {
   it('parses signs, decimals and thousands separators', () => {
     expect(numbersInText('rolls −1.26 deg at 6,100 N and +2')).toEqual([
-      { value: -1.26, signed: true, decimals: 2 },
-      { value: 6100, signed: false, decimals: 0 },
+      { value: -1.26, signed: true, decimals: 2, unit: 'deg' },
+      { value: 6100, signed: false, decimals: 0, unit: 'n' },
       { value: 2, signed: true, decimals: 0 },
     ]);
   });
