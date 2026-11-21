@@ -9,7 +9,8 @@
  *  - lockup (per wheel): slip ratio < -0.8 (R omega < 0.2 v), u > 3 m/s, brake > 0.3, for 0.1 s.
  *  - wheelspin (per wheel): slip ratio > 0.25 and slip speed > 2 m/s with throttle > 0.3 at u > 3 m/s, for 0.2 s.
  *  - aid: rising edge of an assist's active flag (ABS, traction, stability).
- *  - moments outside the frozen DriveEvent union (11-02, `moments` output): strike (per wheel: compression rate
+ *  - moments (11-02, the `moments` output; DriveEvent kinds since 11-05, which added them to the contract union and has
+ *    the plant forward them through `driveEvents`): strike (per wheel: compression rate
  *    >= 0.6 m/s at u > 3 m/s with the wheel >= 20 mm above its recent travel (lag, tau 0.2 s), never on cobbles (they
  *    are a texture, not a hit); `kerb` when the patch is on a kerb) and hard stop (from >= 8 m/s to < 0.5 m/s with a
  *    mean deceleration >= 0.6 g). Wheel lift and bump-stop hits are the M1 SimEvents ('liftoff', 'bump-stop').
@@ -31,8 +32,9 @@ export const outOfBoundsEvent = (simTime: number): DriveEvent => ({ kind: 'out-o
 export const faultEvent = (simTime: number, count: number): DriveEvent => ({ kind: 'fault', count, simTime });
 
 /**
- * Moments the coach explains that the frozen DriveEvent union has no kind for (a contract change would be needed to
- * forward them on the bus): a wheel striking a kerb or bump, a hard stop (`from` = speed when braking began, m/s).
+ * Moments: a wheel striking a kerb or bump, a hard stop (`from` = speed when braking began, m/s). 11-02 kept them apart
+ * because the DriveEvent union then had no kind for them; 11-05 added `strike` / `hard-stop` to the contract, so these
+ * are structurally DriveEvents and the plant queues them with the other events (they reach the bus via drainEvents).
  */
 export type DriveMoment =
   | { readonly kind: 'strike'; readonly corner: number; readonly kerb: boolean; readonly simTime: number }
@@ -144,7 +146,7 @@ export function frameDetectorInput(frame: TelemetryFrame, input: DetectorInput):
 
 export interface DriveDetectors {
   reset(): void;
-  /** `moments` (optional) receives the kinds outside the DriveEvent union. `view` is read for u only. */
+  /** `moments` (optional) receives the strike / hard-stop moments (DriveEvent kinds since 11-05). `view` is read for u only. */
   step(dt: number, view: Pick<PlantView, 'u'>, frameLike: DetectorInput, out: DriveEvent[], moments?: DriveMoment[]): void;
 }
 

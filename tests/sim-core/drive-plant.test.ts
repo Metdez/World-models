@@ -84,7 +84,7 @@ describe('Manual plant v0', () => {
       f = sim.sample(1);
     }
     const dist = Math.hypot(f.drive.x - x0, f.drive.y - y0) * (100 / 3.6 / v0) ** 2;
-    console.log(`[plant] 0-100 km/h ${accel.toFixed(2)} s (TCS on); 100-0 km/h ${dist.toFixed(1)} m in ${tb.toFixed(2)} s (no ABS in v0: wheels lock), lateral drift ${f.drive.lineOffset.toFixed(2)} m`);
+    console.log(`[plant] 0-100 km/h ${accel.toFixed(2)} s (TCS on); 100-0 km/h ${dist.toFixed(1)} m in ${tb.toFixed(2)} s (default assists: ABS on since 09-04), lateral drift ${f.drive.lineOffset.toFixed(2)} m`);
     expect(accel).toBeGreaterThan(3.5);
     expect(accel).toBeLessThan(7);
     expect(dist).toBeGreaterThan(30);
