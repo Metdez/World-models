@@ -315,6 +315,7 @@ describe('recorded real model answer (lift-off, steering circle)', () => {
     const res = await answer(req('Why did I spin?', S.liftoff), { run: async () => raw } as unknown as Ai);
     expect(res.outcome).toBe('model');
     expect(res.body.source).toBe('model');
+    expect(res.body.actions).toEqual([]); // its slow-motion call is not offered while driving and is dropped
     expect(ungroundedNumbers(res.body.text, S.liftoff)).toEqual([]);
   });
 });
