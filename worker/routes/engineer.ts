@@ -3,6 +3,7 @@ import { buildEngineerTools, ENGINEER_MAX_ACTIONS, type EngineerAction, type Eng
 import { API } from '../../src/contracts/net';
 import { CAR_CORNERS, MOTO_CORNERS } from '../../src/contracts/units';
 import { gtCoupe } from '../../src/sim-core/content/gt-coupe';
+import { provingGround } from '../../src/sim-core/content/proving-ground';
 import { provingLoop } from '../../src/sim-core/content/proving-loop';
 import { ruleAnswer } from '../engineer/fallback';
 import { cleanText, runEngineerModel } from '../engineer/model';
@@ -28,18 +29,23 @@ export type EngineerOutcome = 'model' | 'no-model' | 'model-error' | 'empty' | '
 export async function answer(req: EngineerRequest, ai: Ai | undefined): Promise<{ body: EngineerResponse; outcome: EngineerOutcome; detail?: string }> {
   const t = req.telemetry;
   const section = provingLoop.segments.find((s) => s.id === t.section);
+  const driving = t.drive !== undefined;
+  // While driving, `section` may name a proving-ground station (12-03) instead of a loop section.
+  const station = driving ? provingGround.stations.find((s) => s.id === t.section) : undefined;
   const fallback = (actions: EngineerAction[] = []): EngineerResponse => ({ text: ruleAnswer(req.question, section?.phenomenon, t), actions, source: 'fallback' });
   if (!ai) return { body: fallback(), outcome: 'no-model' };
   const ids = idsFor(t.vehicle_class);
+  // A seek (jump_to_section) is an Auto action; while driving it is not offered (the client skips it anyway).
+  const tools = buildEngineerTools(ids).filter((tool) => !driving || tool.function.name !== 'jump_to_section');
   let run;
   try {
-    run = await runEngineerModel(ai, buildMessages(req, section), buildEngineerTools(ids));
+    run = await runEngineerModel(ai, buildMessages(req, section, station), tools);
   } catch (e) {
     return { body: fallback(), outcome: 'model-error', detail: e instanceof Error ? e.message : String(e) };
   }
   const actions: EngineerAction[] = [];
   for (const call of run.reply.toolCalls) {
-    const a = parseAction(call.name, call.args, ids);
+    const a = driving && call.name === 'jump_to_section' ? null : parseAction(call.name, call.args, ids);
     if (a && actions.length < ENGINEER_MAX_ACTIONS && !actions.some((b) => JSON.stringify(b) === JSON.stringify(a))) actions.push(a);
   }
   const text = cleanText(run.reply.text);

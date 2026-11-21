@@ -10,6 +10,26 @@ const id = z.string().regex(/^[a-z0-9-]{1,40}$/);
 // Labels end up in the prompt: words and light punctuation only.
 const label = (max: number) => z.string().max(max).regex(/^[\p{L}\p{N} ,.()'/-]*$/u);
 
+// Drive labels (detected event, surface) carry no digits: numbers reach the prompt only as payload numbers.
+const words = (max: number) => z.string().min(1).max(max).regex(/^[\p{L} ,.;()'/-]*$/u);
+
+/** Manual Drive block (contract EngineerDrive, ARCH-M2 §12.4): bounded, no free text beyond plain labels. */
+export const engineerDriveSchema = z.strictObject({
+  mode: z.enum(['manual', 'returning', 'replay']),
+  detected: words(160),
+  steer_deg: num(-90, 90),
+  throttle_pct: num(0, 100),
+  brake_pct: num(0, 100),
+  sideslip_deg: num(-180, 180),
+  yaw_rate_dps: num(-720, 720),
+  gear: z.number().int().min(-1).max(12),
+  surface: words(60),
+  aids_active: z
+    .array(z.enum(['abs', 'traction', 'stability']))
+    .max(3)
+    .refine((a) => new Set(a).size === a.length, 'duplicate aid'),
+});
+
 const corner = z.strictObject({
   camber_deg: num(-30, 30),
   toe_deg: num(-30, 30),
@@ -36,6 +56,7 @@ export const engineerRequestSchema = z.strictObject({
     derived: z
       .record(z.string().regex(/^[a-z0-9_]{1,48}$/), num(-1e6, 1e6))
       .refine((r) => Object.keys(r).length <= 16, 'too many derived values'),
+    drive: engineerDriveSchema.optional(),
   }),
   history: z
     .array(z.strictObject({ role: z.enum(['user', 'assistant']), content: z.string().max(NET_LIMITS.engineerHistoryChars) }))

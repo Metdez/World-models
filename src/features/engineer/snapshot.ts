@@ -2,11 +2,13 @@
  * Pure helpers for the Race Engineer panel: a preallocated telemetry ring (filled at 10 Hz without allocation),
  * the plain-language event label, the request payload (display units, rounded) and section-dependent chips.
  */
-import type { EngineerTelemetry } from '../../contracts/engineer';
+import type { DriveMode } from '../../contracts/drive';
+import type { EngineerDrive, EngineerTelemetry } from '../../contracts/engineer';
 import type { AxleKinematicsSummary, VehicleClass } from '../../contracts/suspension';
 import type { TelemetryFrame } from '../../contracts/telemetry';
 import type { Phenomenon } from '../../contracts/track';
 import { G, RAD_TO_DEG } from '../../contracts/units';
+import { SURFACES, type StationDefinition, type SurfaceKind, type WorldDefinition } from '../../contracts/world';
 
 export interface SnapCorner {
   camber: number;
@@ -15,6 +17,7 @@ export interface SnapCorner {
   travelRate: number;
   load: number;
   gripUse: number;
+  surface: SurfaceKind;
 }
 
 export interface Snap {
@@ -27,10 +30,77 @@ export interface Snap {
   pitch: number;
   rcFront: number;
   rcRear: number;
+  // ---- Manual Drive (12-03): TRUE values of the frame's DriveFrame
+  mode: DriveMode;
+  steer: number;
+  throttle: number;
+  brake: number;
+  beta: number;
+  yawRate: number;
+  gear: number;
+  abs: boolean;
+  traction: boolean;
+  stability: boolean;
+  zone: string;
+  x: number;
+  y: number;
   readonly corners: SnapCorner[];
 }
 
-const corner = (): SnapCorner => ({ camber: 0, toe: 0, travel: 0, travelRate: 0, load: 0, gripUse: 0 });
+const corner = (): SnapCorner => ({ camber: 0, toe: 0, travel: 0, travelRate: 0, load: 0, gripUse: 0, surface: 'asphalt' });
+
+/** An empty snapshot (preallocated slots; `copySnap` targets). */
+export function createSnap(cornerIds: readonly string[]): Snap {
+  return {
+    time: 0, sectionIndex: 0, speed: 0, ax: 0, ay: 0, roll: 0, pitch: 0, rcFront: Number.NaN, rcRear: Number.NaN,
+    mode: 'auto', steer: 0, throttle: 0, brake: 0, beta: 0, yawRate: 0, gear: 0, abs: false, traction: false, stability: false, zone: 'loop', x: 0, y: 0,
+    corners: cornerIds.map(corner),
+  };
+}
+
+/** Copies TRUE fields of a frame into `s` (no allocation). */
+export function fillSnap(s: Snap, t: TelemetryFrame, time: number): void {
+  s.time = time;
+  s.sectionIndex = t.sectionIndex;
+  s.speed = t.speed;
+  s.ax = t.ax;
+  s.ay = t.ay;
+  s.roll = t.roll;
+  s.pitch = t.pitch;
+  s.rcFront = t.axles[0]?.rollCentreHeight ?? Number.NaN;
+  s.rcRear = t.axles[1]?.rollCentreHeight ?? Number.NaN;
+  const d = t.drive;
+  s.mode = d.mode;
+  s.steer = t.steer;
+  s.throttle = d.throttle;
+  s.brake = d.brake;
+  s.beta = d.beta;
+  s.yawRate = t.yawRate;
+  s.gear = d.gear;
+  s.abs = d.absActive;
+  s.traction = d.tractionActive;
+  s.stability = d.stabilityActive;
+  s.zone = d.zone;
+  s.x = d.x;
+  s.y = d.y;
+  for (let i = 0; i < s.corners.length; i++) {
+    const c = t.corners[i];
+    const o = s.corners[i]!;
+    if (!c) continue;
+    o.camber = c.camber;
+    o.toe = c.toe;
+    o.travel = c.travel;
+    o.travelRate = c.travelRate;
+    o.load = c.load;
+    o.gripUse = c.gripUse;
+    o.surface = c.surface;
+  }
+}
+
+/** A copy of a snapshot (allocates: only on a detected drive event, never per frame). */
+export function copySnap(src: Snap): Snap {
+  return { ...src, corners: src.corners.map((c) => ({ ...c })) };
+}
 
 /** Fixed-size ring of telemetry snapshots. `push` copies TRUE fields only and never allocates. */
 export class SnapshotRing {
@@ -42,34 +112,11 @@ export class SnapshotRing {
     size: number,
     readonly cornerIds: readonly string[],
   ) {
-    this.slots = Array.from({ length: size }, () => ({
-      time: 0, sectionIndex: 0, speed: 0, ax: 0, ay: 0, roll: 0, pitch: 0, rcFront: Number.NaN, rcRear: Number.NaN,
-      corners: cornerIds.map(corner),
-    }));
+    this.slots = Array.from({ length: size }, () => createSnap(cornerIds));
   }
 
   push(t: TelemetryFrame, time: number): void {
-    const s = this.slots[this.next]!;
-    s.time = time;
-    s.sectionIndex = t.sectionIndex;
-    s.speed = t.speed;
-    s.ax = t.ax;
-    s.ay = t.ay;
-    s.roll = t.roll;
-    s.pitch = t.pitch;
-    s.rcFront = t.axles[0]?.rollCentreHeight ?? Number.NaN;
-    s.rcRear = t.axles[1]?.rollCentreHeight ?? Number.NaN;
-    for (let i = 0; i < s.corners.length; i++) {
-      const c = t.corners[i];
-      const o = s.corners[i]!;
-      if (!c) continue;
-      o.camber = c.camber;
-      o.toe = c.toe;
-      o.travel = c.travel;
-      o.travelRate = c.travelRate;
-      o.load = c.load;
-      o.gripUse = c.gripUse;
-    }
+    fillSnap(this.slots[this.next]!, t, time);
     this.next = (this.next + 1) % this.slots.length;
     this.count = Math.min(this.count + 1, this.slots.length);
   }
@@ -89,6 +136,24 @@ export class SnapshotRing {
       if (score > bestScore) [best, bestScore] = [s, score];
     }
     return best ?? this.latest();
+  }
+
+  /** Driver inputs over [from, to]: most throttle and brake (0..1), and the steer of the snapshot nearest `from`. */
+  inputs(from: number, to: number): { throttle: number; brake: number; steer: number } | undefined {
+    let throttle = 0;
+    let brake = 0;
+    let steer = 0;
+    let first = Infinity;
+    let n = 0;
+    for (let i = 0; i < this.count; i++) {
+      const s = this.slots[i]!;
+      if (s.time < from || s.time > to) continue;
+      n++;
+      throttle = Math.max(throttle, s.throttle);
+      brake = Math.max(brake, s.brake);
+      if (s.time < first) [first, steer] = [s.time, s.steer];
+    }
+    return n === 0 ? undefined : { throttle, brake, steer };
   }
 }
 
@@ -148,8 +213,64 @@ export interface PayloadContext {
   readonly summaries: { readonly front: AxleKinematicsSummary; readonly rear: AxleKinematicsSummary } | undefined;
 }
 
+/** Manual Drive context of a request (ARCH-M2 §12.4). */
+export interface DriveContext {
+  /** Plain label of the detected event (rules.ts driveLabel), 'none' without one. */
+  readonly detected: string;
+  /** Driver inputs over the half second before the event (0..1, steer rad); absent without an event. */
+  readonly before?: { readonly throttle: number; readonly brake: number; readonly steer: number };
+  /** Seconds from the event to the question. */
+  readonly eventAge?: number;
+  /** Assists the visitor switched off (names), told to the engineer through the situation label. */
+  readonly aidsOff: readonly string[];
+}
+
+/** Surface label(s) under the four tyres, e.g. "Dry asphalt / Wet ceramic tiles" on a split surface. */
+export function surfaceLabel(s: Snap): string {
+  const labels: string[] = [];
+  for (const c of s.corners) {
+    const l = SURFACES[c.surface]?.label;
+    if (l && !labels.includes(l)) labels.push(l);
+  }
+  return labels.join(' / ').slice(0, 60) || 'Dry asphalt';
+}
+
+/** Where the car is off the loop: the nearest station of the zone, else the zone, else the open field. */
+export function placeOf(world: WorldDefinition | null | undefined, zone: string, x: number, y: number): { id: string; name: string } | undefined {
+  if (zone === 'loop') return undefined;
+  let best: StationDefinition | undefined;
+  let d = Infinity;
+  for (const st of world?.stations ?? []) {
+    if (st.zone !== zone) continue;
+    const dd = (st.spawn.x - x) ** 2 + (st.spawn.y - y) ** 2;
+    if (dd < d) [d, best] = [dd, st];
+  }
+  if (best) return { id: best.id, name: best.name };
+  const z = world?.zones.find((q) => q.id === zone);
+  return z ? { id: z.id, name: z.name } : { id: 'field', name: 'Proving ground' };
+}
+
+function driveBlock(s: Snap, d: DriveContext): EngineerDrive {
+  const aids: ('abs' | 'traction' | 'stability')[] = [];
+  if (s.abs) aids.push('abs');
+  if (s.traction) aids.push('traction');
+  if (s.stability) aids.push('stability');
+  return {
+    mode: s.mode === 'auto' ? 'manual' : s.mode,
+    detected: d.detected,
+    steer_deg: r(clamp(s.steer * RAD_TO_DEG, -90, 90), 1),
+    throttle_pct: r(clamp(s.throttle * 100, 0, 100), 0),
+    brake_pct: r(clamp(s.brake * 100, 0, 100), 0),
+    sideslip_deg: r(clamp(s.beta * RAD_TO_DEG, -180, 180), 1),
+    yaw_rate_dps: r(clamp(s.yawRate * RAD_TO_DEG, -720, 720), 0),
+    gear: Math.round(clamp(s.gear, -1, 12)),
+    surface: surfaceLabel(s),
+    aids_active: aids,
+  };
+}
+
 /** Request telemetry in display units. Every number here is a TRUE sim value (honesty rule §14). */
-export function buildTelemetry(s: Snap, cornerIds: readonly string[], ctx: PayloadContext): EngineerTelemetry {
+export function buildTelemetry(s: Snap, cornerIds: readonly string[], ctx: PayloadContext, drive?: DriveContext): EngineerTelemetry {
   const corners: Record<string, EngineerTelemetry['corners'][keyof EngineerTelemetry['corners']]> = {};
   s.corners.forEach((c, i) => {
     corners[cornerIds[i] ?? `c${i}`] = {
@@ -175,13 +296,25 @@ export function buildTelemetry(s: Snap, cornerIds: readonly string[], ctx: Paylo
     put('anti_dive_front_pct', front.antiPitch * 100, 0);
     put('anti_squat_rear_pct', rear.antiPitch * 100, 0);
   }
+  let event = eventLabel(s, cornerIds, ctx.vehicleClass);
+  const driving = drive !== undefined && s.mode !== 'auto' && ctx.vehicleClass === 'car';
+  if (driving) {
+    if (drive.before) {
+      put('throttle_before_pct', drive.before.throttle * 100, 0);
+      put('brake_before_pct', drive.before.brake * 100, 0);
+      put('steer_before_deg', drive.before.steer * RAD_TO_DEG, 1);
+    }
+    if (drive.eventAge !== undefined) put('event_age_s', drive.eventAge, 1);
+    const off = drive.aidsOff.length > 0 ? `, assists off: ${drive.aidsOff.join(', ')}` : '';
+    if (event.length + off.length <= 120) event += off;
+  }
   return {
     vehicle_class: ctx.vehicleClass,
     vehicle: ctx.vehicleId,
     suspension: ctx.suspensionId,
     section: ctx.sectionId,
     section_name: ctx.sectionName.replace(/[^\p{L}\p{N} ,.()'/-]/gu, '').slice(0, 40),
-    event: eventLabel(s, cornerIds, ctx.vehicleClass),
+    event,
     speed_kmh: r(clamp(s.speed * 3.6, 0, 500), 0),
     lat_g: r(clamp(s.ay / G, -5, 5), 2),
     long_g: r(clamp(s.ax / G, -5, 5), 2),
@@ -189,6 +322,7 @@ export function buildTelemetry(s: Snap, cornerIds: readonly string[], ctx: Paylo
     pitch_deg: r(clamp(s.pitch * RAD_TO_DEG, -45, 45), 2),
     corners: corners as EngineerTelemetry['corners'],
     derived,
+    ...(driving ? { drive: driveBlock(s, drive) } : {}),
   };
 }
 
@@ -207,3 +341,24 @@ export const CHIPS: Readonly<Record<Phenomenon, readonly [string, string, string
   'off-camber': ['Why does this bend feel different?', 'Which wheel works hardest?', 'What is a roll centre?'],
   settle: ['What is the suspension doing now?', 'What is a roll centre?', 'Which suspension is best?'],
 };
+
+/** Two or three questions after a detected drive event (rules.ts driveKey), no digits. */
+export const EVENT_CHIPS: Readonly<Record<string, readonly string[]>> = {
+  'slide-rear-lift': ['Why did I spin?', 'What is lift-off oversteer?', 'How do I avoid that?'],
+  'slide-rear': ['Why did the tail step out?', 'What is oversteer?', 'Does the suspension change this?'],
+  'slide-front': ['Why did it run wide?', 'What is understeer?', 'Does the suspension change this?'],
+  lockup: ['Why did the wheel lock?', 'What does ABS do?'],
+  wheelspin: ['Why did the wheel spin?', 'What does traction assist do?'],
+  'aid-abs': ['What did ABS do there?', 'Would it stop shorter without ABS?'],
+  'aid-traction': ['What did traction assist do?', 'Why did the rear wheels spin?'],
+  'aid-stability': ['What did stability assist do?', 'Why was the car rotating?'],
+  'strike-kerb': ['What happened at that wheel?', 'Does the suspension type matter here?'],
+  'strike-bump': ['What happened at that wheel?', 'Does the suspension type matter here?'],
+  'hard-stop': ['Why did the nose dive?', 'Does the suspension change the stopping distance?'],
+  'wheel-lift': ['Why did the wheel go light?', 'Does that cost grip?'],
+  'bump-stop': ['What is a bump stop?', 'Why did the wheel run out of travel?'],
+  swap: ['What changed when I switched?', 'Will I feel a difference?', 'Which suspension is best?'],
+};
+
+/** Chips while driving with no recent event. */
+export const DRIVE_CHIPS: readonly string[] = ['What changed when I switched?', 'What is understeer?', 'What does stability assist do?'];

@@ -6,17 +6,19 @@
  * says what the model does not capture. Research estimates ([E]) are never stated as data.
  */
 
-export const COMMON_CAR = `The car is a self-driving GT coupe with representative parameters, not the data of any real car. It laps a test loop on a fixed path at the same speed whatever the suspension.
-All three suspension types share the same springs, dampers, anti-roll bars, tyres and ride frequencies, so differences come only from the linkage geometry, plus a little extra damper friction for the strut.
-Signs: negative camber means the top of the wheel leans toward the car; camber is measured to the road. Bump means the wheel is pushed up and the spring compressed. In a right-hand corner the body leans to the left and the left wheels are the outside, loaded wheels; in a left-hand corner it is the opposite.
-Grip use is a simplified tyre-model estimate of how much of the available grip a tyre uses (around one means at the limit), not a measurement.
-Roll-centre heights are live kinematic values. Camber gain is the camber change relative to the body per centimetre of bump at design height. Wheel lean per degree of body roll is one when the wheel leans fully with the body and zero when it stays upright to the road. Anti-dive and anti-squat are side-view anti-pitch percentages.
-Physics: in a corner, load moves to the outside tyres. The roll centre splits that load transfer: the part carried through the links does not roll the body, the part carried by springs and bars does. A higher roll centre gives slightly less roll but more jacking and more sideways movement of the roll centre. Body roll grows with lateral acceleration, so the car leans most in the hardest steady corner, the carousel; roll-centre height changes the roll only a little, and in this simulation the strut, with the highest roll centre, rolls slightly the least and the multi-link slightly the most.
-The outside wheel's camber to the road is roughly its static camber, plus the camber the linkage adds in bump, plus the body roll. A linkage that adds negative camber in bump counters the roll and keeps the tyre flatter.
-Steering also changes camber: with caster, the outside front wheel gains negative camber as it steers, so at the front the steering geometry matters as much as the linkage.
-In this simulation the three types differ visibly in roll-centre height and in outside-rear camber in long corners. Differences in outside-front camber are small, and differences in body roll, brake pitch, bump steer and grip use are tiny. The screen can amplify motion (it says so when it does); numbers are always true scale.
-Not modelled: bushing compliance and flexing parts (all links are rigid), tyre temperature, wear and pressure, aerodynamic downforce, the extra vertical load from the banking in the carousel, and rear anti-lift under braking.
-No suspension type is best overall; each trades cost, packaging and wheel control.`;
+const AUTO_INTRO = `The car is a self-driving GT coupe with representative parameters, not the data of any real car. It laps a test loop on a fixed path at the same speed whatever the suspension.`;
+const SHARED = `All three suspension types share the same springs, dampers, anti-roll bars, tyres and ride frequencies, so differences come only from the linkage geometry, plus a little extra damper friction for the strut.`;
+const SIGNS = `Signs: negative camber means the top of the wheel leans toward the car; camber is measured to the road. Bump means the wheel is pushed up and the spring compressed. In a right-hand corner the body leans to the left and the left wheels are the outside, loaded wheels; in a left-hand corner it is the opposite.`;
+const GRIP_USE = `Grip use is a simplified tyre-model estimate of how much of the available grip a tyre uses (around one means at the limit), not a measurement.`;
+const DEFINITIONS = `Roll-centre heights are live kinematic values. Camber gain is the camber change relative to the body per centimetre of bump at design height. Wheel lean per degree of body roll is one when the wheel leans fully with the body and zero when it stays upright to the road. Anti-dive and anti-squat are side-view anti-pitch percentages.`;
+const ROLL_PHYSICS = `Physics: in a corner, load moves to the outside tyres. The roll centre splits that load transfer: the part carried through the links does not roll the body, the part carried by springs and bars does. A higher roll centre gives slightly less roll but more jacking and more sideways movement of the roll centre. Body roll grows with lateral acceleration, so the car leans most in the hardest steady corner, the carousel; roll-centre height changes the roll only a little, and in this simulation the strut, with the highest roll centre, rolls slightly the least and the multi-link slightly the most.`;
+const CAMBER_SUM = `The outside wheel's camber to the road is roughly its static camber, plus the camber the linkage adds in bump, plus the body roll. A linkage that adds negative camber in bump counters the roll and keeps the tyre flatter.`;
+const STEER_CAMBER = `Steering also changes camber: with caster, the outside front wheel gains negative camber as it steers, so at the front the steering geometry matters as much as the linkage.`;
+const AUTO_VISIBILITY = `In this simulation the three types differ visibly in roll-centre height and in outside-rear camber in long corners. Differences in outside-front camber are small, and differences in body roll, brake pitch, bump steer and grip use are tiny. The screen can amplify motion (it says so when it does); numbers are always true scale.`;
+const AUTO_NOT_MODELLED = `Not modelled: bushing compliance and flexing parts (all links are rigid), tyre temperature, wear and pressure, aerodynamic downforce, the extra vertical load from the banking in the carousel, and rear anti-lift under braking.`;
+const NO_BEST = `No suspension type is best overall; each trades cost, packaging and wheel control.`;
+
+export const COMMON_CAR = [AUTO_INTRO, SHARED, SIGNS, GRIP_USE, DEFINITIONS, ROLL_PHYSICS, CAMBER_SUM, STEER_CAMBER, AUTO_VISIBILITY, AUTO_NOT_MODELLED, NO_BEST].join('\n');
 
 export const COMMON_MOTORCYCLE = `The motorcycle is a self-driving cafe racer with representative parameters, not the data of any real bike. It leans into corners; roll_deg is its lean angle. Corners: f front, r rear.
 Typical tendencies: a telescopic fork compresses under braking, so the front dives and the steering geometry tightens; a Telelever front separates braking forces from the spring, so it dives much less; a linkage rear suspension usually stiffens progressively deeper into its travel; a twin-shock rear is simpler and lighter in parts.
@@ -44,7 +46,44 @@ Its main real-world advantage is control of toe and camber under cornering and b
 Strengths: typically the most freedom to tune camber, toe and anti-dive or anti-squat independently, and good isolation. Costs: the most parts, cost and tuning effort.`,
 };
 
-export function factsFor(vehicleClass: string, suspension: string): string {
+// ---------------------------------------------------------------- Manual Drive (12-03)
+// While the visitor drives, the plant (09-01..09-04) adds tyre slip, compliance, powertrain and assists to the same
+// geometry. Every comparative claim below is pinned by tests/worker/engineer-drive-facts.test.ts to sim-core runs
+// (09-04 honesty report fixtures). Digit-free like the Auto cards.
+
+const DRIVE_INTRO = `The visitor is driving the GT coupe themselves through a representative vehicle model (not the data of any real car): tyres that slip, a rear-wheel-drive engine and automatic gearbox, brakes and simplified assists. Driving events are found by detectors in the simulator; the engineer only explains what they detected.`;
+const DRIVE_SHARED = `All three suspension types share the same springs, dampers, anti-roll bars, tyres, bushing table, engine and brakes, so differences come only from the linkage geometry and the compliance that geometry gives the shared bushings.`;
+const DRIVE_PHYSICS = `Tyre grip grows with the load on the tyre but less than in proportion: twice the load gives less than twice the grip, so moving load from one tyre to another costs the pair a little grip. A tyre also has to share its grip between braking or driving and cornering.
+Braking moves load onto the front tyres and off the rear; accelerating does the opposite; cornering moves load onto the outside tyres. The anti-roll bars split the cornering share between the front and the rear.
+Understeer: the front tyres reach their limit first and the car runs wide, so more steering does not help (the detector calls it a front slide). Oversteer: the rear tyres reach their limit first and the tail steps out (a rear slide); past a large sideslip the car spins.
+Lifting off the throttle mid-corner moves load forward: the front tyres gain grip and the rear lose some, so the car turns in a little more; near the limit the lighter rear can slide and the car rotates (lift-off oversteer). Well below the limit a lift changes the line only a little.
+A wheel that is braked harder than its tyre can take stops turning and locks; a sliding tyre cannot steer. The anti-lock assist eases the brake on a wheel that is about to lock, so it keeps turning and the car can still steer; in this model it also stops a little shorter than with locked wheels.
+Too much throttle spins the driven rear wheels. The traction assist trims the engine to hold them near their best slip; without the assists, full throttle in a corner can swing the tail out. The stability assist brakes a single wheel when the car rotates more or less than the steering asks.
+Braking with the wheels of one side on a slippery surface turns the car toward the side with more grip, because the grippier side brakes harder; without steering against it, the assists alone cannot hold the car straight.
+Compliance: while you drive, tyre forces bend the rubber bushings a little, which changes toe and camber. Under cornering load the outside rear wheel toes in and the inside rear wheel toes out, so the rear wheels steer slightly into the turn, which steadies the car toward understeer; braking in a corner adds a little more. The multi-link rear does this most, about three times as much as the strut or the double wishbone: that is the multi-link's compliance steer in this model. In Auto the links are rigid.
+Kerb and bump strikes compress one spring quickly; a wheel that goes light has almost no grip; a bump-stop hit means the wheel used up its travel.
+Launch and stopping: how quickly the car reaches motorway speed and how far it needs to stop are outputs of this representative model with its generic tyres, not predictions for any real car; the launch is limited by rear-tyre grip.
+All assists are simplified models, not any manufacturer's system. Surface grip is approximate. Beyond a large sideslip or at the grip limit the model is approximate.`;
+const DRIVE_NOT_MODELLED = `Not modelled: tyre temperature, wear and pressure, aerodynamic downforce, brake fade and frame flex.`;
+
+/** Measured on the same car with the same scripted inputs per type (09-04 honesty report, 11-04 ghost runs). */
+export const DRIVE_COMPARE = `MEASURED DIFFERENCES WHILE DRIVING (same car, same inputs): the strut and the double wishbone drive almost the same in this model: the steering needed, the response and the calmness differ by less than a driver can notice; their linkages move differently but the feel hardly changes.
+The multi-link car needs noticeably more steering for the same corner (more understeer), turns in a little quicker with a little more overshoot, and stays calmer in a quick lane change and when braking in a corner, because its rear compliance steers the rear wheels into the turn.
+The cornering grip limit, the stopping distance and the launch are almost the same for all three, because they are set by the shared tyres.
+The Compare ghost replays the visitor's own drive on another suspension with a disclosed autopilot and reports only differences larger than its own repeat error; strut against double wishbone usually comes out the same, strut against multi-link usually needs more steering.
+No type is best: the multi-link trades a heavier, more planted feel for needing more steering.`;
+
+export const DRIVE_COMMON = [DRIVE_INTRO, DRIVE_SHARED, SIGNS, GRIP_USE, DRIVE_PHYSICS, CAMBER_SUM, DRIVE_NOT_MODELLED, NO_BEST].join('\n');
+
+/** The multi-link card's Auto-only sentence (rigid links) and its driving replacement. */
+const ML_AUTO = 'This simulation uses rigid links, so that advantage is not modelled and does not show; all three types were tuned to almost no bump steer.';
+const ML_DRIVE = 'While the visitor drives, this model includes that compliance (see the compliance fact); all three types were tuned to almost no bump steer.';
+
+export function factsFor(vehicleClass: string, suspension: string, driving = false): string {
+  if (driving && vehicleClass === 'car') {
+    const card = SUSPENSION_FACTS[suspension]?.replace(ML_AUTO, ML_DRIVE);
+    return [DRIVE_COMMON, DRIVE_COMPARE, ...(card ? [card] : [])].join('\n');
+  }
   const common = vehicleClass === 'motorcycle' ? COMMON_MOTORCYCLE : COMMON_CAR;
   const card = SUSPENSION_FACTS[suspension];
   return card ? `${common}\n${card}` : common;

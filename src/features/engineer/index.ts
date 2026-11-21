@@ -5,13 +5,14 @@
  * through the store and bus. Offline / busy / error -> the local rule-based answer, labelled as such.
  */
 import type { FeatureContext, FeatureModule, FrameInfo } from '../../contracts/app';
+import type { DriveAids, DriveEvent } from '../../contracts/drive';
 import type { EngineerAction, EngineerResponse, EngineerTurn } from '../../contracts/engineer';
 import { API, NET_LIMITS } from '../../contracts/net';
 import type { CornerId } from '../../contracts/units';
 import { h, mount } from '../../ui/dom';
 import './engineer.css';
-import { ruleAnswer } from './rules';
-import { buildTelemetry, CHIPS, SnapshotRing, type Snap } from './snapshot';
+import { driveKey, driveLabel, ruleAnswer, type DriveMoment } from './rules';
+import { buildTelemetry, CHIPS, copySnap, DRIVE_CHIPS, EVENT_CHIPS, placeOf, SnapshotRing, type DriveContext, type Snap } from './snapshot';
 
 const SAMPLE_S = 0.1;
 const RING = 20; // 2 s at 10 Hz
@@ -19,6 +20,27 @@ const WHY_WINDOW_S = 1;
 const REQUEST_TIMEOUT_MS = 12_000;
 const HIGHLIGHT_MS = 4000;
 const WHY = 'Why did it do that?';
+/** A detected drive event counts for questions this long after it (ARCH-M2 §12.4)... */
+const EVENT_WINDOW_S = 5;
+/** ...or this long once the visitor engaged with it (opened the panel, focused the input, its chips were shown). */
+const ENGAGED_WINDOW_S = 30;
+/** Driver inputs looked at before an event, s. */
+const BEFORE_S = 0.5;
+/** Event priorities (as the coach's): the most telling event in the window is explained first. */
+const PRIORITY: Readonly<Record<string, number>> = {
+  'slide-rear-lift': 5, 'slide-rear': 4, 'slide-front': 4, lockup: 4, wheelspin: 3, 'hard-stop': 3, 'strike-kerb': 3,
+  'strike-bump': 2, 'wheel-lift': 2, 'bump-stop': 2, 'aid-abs': 2, 'aid-traction': 2, 'aid-stability': 2, swap: 1,
+};
+
+interface Detected {
+  readonly label: string;
+  readonly key: string;
+  readonly priority: number;
+  /** performance.now() / 1000 at detection. */
+  readonly time: number;
+  readonly snap: Snap;
+  readonly before: { throttle: number; brake: number; steer: number } | undefined;
+}
 
 let ctx: FeatureContext | undefined;
 let ring: SnapshotRing | undefined;
@@ -27,6 +49,29 @@ let shownSection = -1;
 let chipRow: HTMLElement | undefined;
 let pending: AbortController | undefined;
 const history: EngineerTurn[] = [];
+/** Recent detected drive events (newest last, at most 4) and the one the visitor engaged with. */
+let recent: Detected[] = [];
+let engaged: { event: Detected; at: number } | undefined;
+let chipEvent: Detected | undefined;
+let chipsDriving = false;
+
+const now = () => performance.now() / 1000;
+
+/** The event a question is about: the most telling one of the last EVENT_WINDOW_S, else the engaged one. */
+function currentEvent(t = now()): { primary: Detected; also: Detected | undefined } | undefined {
+  const fresh = recent.filter((e) => t - e.time <= EVENT_WINDOW_S);
+  if (fresh.length === 0) return engaged && t - engaged.at <= ENGAGED_WINDOW_S ? { primary: engaged.event, also: undefined } : undefined;
+  const primary = fresh.reduce((a, b) => (b.priority >= a.priority ? b : a));
+  const also = [...fresh].reverse().find((e) => e !== primary && e.label !== primary.label);
+  return { primary, also };
+}
+
+function engage(): void {
+  const ev = currentEvent();
+  if (ev) engaged = { event: ev.primary, at: now() };
+}
+
+const AID_NAMES: Readonly<Record<keyof DriveAids, string>> = { abs: 'anti-lock', traction: 'traction', stability: 'stability', steering: 'steering help' };
 
 function clientId(): string {
   const key = 'sl-client-id';
@@ -48,18 +93,39 @@ function sectionOf(c: FeatureContext, index: number) {
   return c.sim.current.track.sections[index];
 }
 
-function payload(c: FeatureContext, snap: Snap) {
+function payload(c: FeatureContext, snap: Snap, drive?: DriveContext) {
   const sim = c.sim.current;
   const section = sectionOf(c, snap.sectionIndex);
+  const place = drive ? placeOf(sim.world?.def, snap.zone, snap.x, snap.y) : undefined;
   const k = sim.kinematics();
-  return buildTelemetry(snap, ring!.cornerIds, {
-    vehicleClass: sim.vehicle.class,
-    vehicleId: sim.vehicle.id,
-    suspensionId: sim.suspension.id,
-    sectionId: section?.id ?? 'unknown',
-    sectionName: section?.def.name ?? 'Track',
-    summaries: { front: k.front.summary, rear: k.rear.summary },
-  });
+  return buildTelemetry(
+    snap,
+    ring!.cornerIds,
+    {
+      vehicleClass: sim.vehicle.class,
+      vehicleId: sim.vehicle.id,
+      suspensionId: sim.suspension.id,
+      sectionId: place?.id ?? section?.id ?? 'unknown',
+      sectionName: place?.name ?? section?.def.name ?? 'Track',
+      summaries: { front: k.front.summary, rear: k.rear.summary },
+    },
+    drive,
+  );
+}
+
+/** While driving: the snapshot and drive context for a question (the detected event's moment when there is one). */
+function driveRequest(c: FeatureContext, latest: Snap | undefined): { snap: Snap; drive: DriveContext } | undefined {
+  if (c.store.get().driveMode === 'auto' || !latest) return undefined;
+  const aids = c.store.get().driveAids;
+  const aidsOff = (Object.keys(AID_NAMES) as (keyof DriveAids)[]).filter((k) => !aids[k]).map((k) => AID_NAMES[k]);
+  const ev = currentEvent();
+  if (!ev) return { snap: latest, drive: { detected: 'none', aidsOff } };
+  const { primary, also } = ev;
+  const detected = also && primary.label.length + also.label.length < 150 ? `${primary.label}; also ${also.label}` : primary.label;
+  return {
+    snap: primary.snap,
+    drive: { detected, aidsOff, eventAge: Math.max(0, now() - primary.time), ...(primary.before ? { before: primary.before } : {}) },
+  };
 }
 
 /** Whitelisted dispatcher: only store keys and contract events; every argument re-checked against live content. */
@@ -84,6 +150,7 @@ function execute(c: FeatureContext, a: EngineerAction): void {
       if (a.args.corner === 'all' || okCorner(a.args.corner)) c.bus.emit('highlight', { role: a.args.component, corner: a.args.corner, durationMs: HIGHLIGHT_MS });
       break;
     case 'jump_to_section': {
+      if (c.store.get().driveMode !== 'auto') break; // a seek is an Auto action: never while driving or replaying
       const s = c.sim.current.track.sections.find((x) => x.id === a.args.section);
       if (s) c.bus.emit('sim:seek-to', { lapTime: c.sim.current.lapTimeAt(s.s0) });
       break;
@@ -128,9 +195,11 @@ const engineer: FeatureModule = {
       badge.textContent = label ?? '';
     };
 
-    async function ask(question: string, snap: Snap | undefined): Promise<void> {
+    async function ask(question: string, latest: Snap | undefined): Promise<void> {
+      const driving = driveRequest(c, latest);
+      const snap = driving?.snap ?? latest;
       if (!snap) return;
-      const telemetry = payload(c, snap);
+      const telemetry = payload(c, snap, driving?.drive);
       const phenomenon = sectionOf(c, snap.sectionIndex)?.def.phenomenon;
       const local = (label: string) => show(ruleAnswer(question, phenomenon, telemetry), label);
       pending?.abort();
@@ -163,20 +232,73 @@ const engineer: FeatureModule = {
 
     const askNow = (q: string) => void ask(q, ring?.latest());
     why.addEventListener('click', () => {
-      const now = performance.now() / 1000;
-      void ask(WHY, ring?.peak(now - WHY_WINDOW_S));
+      engage();
+      // driving: the detected event's own snapshot (driveRequest); Auto: the most eventful moment of the last second
+      void ask(WHY, ring?.peak(now() - WHY_WINDOW_S));
     });
     chipRow.addEventListener('click', (e) => {
       const chip = (e.target as HTMLElement).closest('button');
+      if (chipEvent && now() - chipEvent.time <= ENGAGED_WINDOW_S) engaged = { event: chipEvent, at: now() };
       if (chip?.textContent) askNow(chip.textContent);
     });
+    input.addEventListener('focus', engage);
+
+    /** A detected drive moment while driving: remembered with its snapshot and the inputs just before it. */
+    const detect = (m: DriveMoment) => {
+      if (c.store.get().driveMode === 'auto' || !ring) return;
+      const label = driveLabel(m);
+      const key = driveKey(label) ?? '';
+      const t = now();
+      const snap = ring.latest();
+      if (!snap) return;
+      const frameSnap = copySnap(snap);
+      const live = c.sim.frame;
+      if (live.corners.length === frameSnap.corners.length) {
+        // the moment itself, not the last 10 Hz sample
+        const tmp = new SnapshotRing(1, ring.cornerIds);
+        tmp.push(live, t);
+        Object.assign(frameSnap, copySnap(tmp.latest()!));
+      }
+      const ev: Detected = { label, key, priority: PRIORITY[key] ?? 1, time: t, snap: frameSnap, before: ring.inputs(t - BEFORE_S - 0.15, t - 0.05) };
+      recent = [...recent.slice(-3), ev];
+      chipEvent = ev;
+      chipsDriving = false; // re-render chips
+      root.classList.toggle('is-fresh', !c.store.get().engineerOpen);
+    };
+    c.on('drive:event', (e: DriveEvent) => {
+      switch (e.kind) {
+        case 'slide':
+        case 'lockup':
+        case 'wheelspin':
+        case 'aid':
+        case 'strike':
+        case 'hard-stop':
+          detect(e);
+          return;
+        case 'mode':
+          if (e.mode === 'manual' && e.previous === 'auto') [recent, engaged, chipEvent] = [[], undefined, undefined];
+          chipsDriving = false;
+          return;
+        default:
+          return;
+      }
+    });
+    c.on('sim:event', (e) => {
+      if (e.kind === 'liftoff') detect({ kind: 'wheel-lift', corner: e.corner });
+      else if (e.kind === 'bump-stop') detect({ kind: 'bump-stop', corner: e.corner });
+    });
+    c.on('sim:suspension', ({ suspensionId, previous }) => detect({ kind: 'swap', previous, next: suspensionId }));
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       const q = input.value.trim();
       if (q) askNow(q);
       input.value = '';
     });
-    toggle.addEventListener('click', () => c.store.setKey('engineerOpen', !c.store.get().engineerOpen));
+    toggle.addEventListener('click', () => {
+      if (!c.store.get().engineerOpen) engage();
+      root.classList.remove('is-fresh');
+      c.store.setKey('engineerOpen', !c.store.get().engineerOpen);
+    });
     root.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         c.store.setKey('engineerOpen', false);
@@ -196,6 +318,10 @@ const engineer: FeatureModule = {
       chipRow = undefined;
       shownSection = -1;
       history.length = 0;
+      recent = [];
+      engaged = undefined;
+      chipEvent = undefined;
+      chipsDriving = false;
     });
   },
 
@@ -205,10 +331,25 @@ const engineer: FeatureModule = {
       lastSample = frame.time;
       ring.push(frame.t, frame.time);
     }
-    if (chipRow && frame.t.sectionIndex !== shownSection) {
+    if (!chipRow) return;
+    const chip = (q: string) => h('button', { class: 'sl-engineer-chip', type: 'button' }, q);
+    if (frame.t.drive.mode !== 'auto' && frame.t.vehicleClass === 'car') {
+      // driving: 2-3 questions about the last detected event while it is fresh, else general driving questions
+      if (chipEvent && frame.time - chipEvent.time > ENGAGED_WINDOW_S) {
+        chipEvent = undefined;
+        chipsDriving = false;
+        chipRow.parentElement?.parentElement?.classList.remove('is-fresh');
+      }
+      if (!chipsDriving) {
+        chipsDriving = true;
+        shownSection = -1;
+        chipRow.replaceChildren(...(chipEvent ? (EVENT_CHIPS[chipEvent.key] ?? DRIVE_CHIPS) : DRIVE_CHIPS).map(chip));
+      }
+    } else if (frame.t.sectionIndex !== shownSection || chipsDriving) {
+      chipsDriving = false;
       shownSection = frame.t.sectionIndex;
       const phenomenon = sectionOf(ctx, shownSection)?.def.phenomenon;
-      chipRow.replaceChildren(...(phenomenon ? CHIPS[phenomenon] : []).map((q) => h('button', { class: 'sl-engineer-chip', type: 'button' }, q)));
+      chipRow.replaceChildren(...(phenomenon ? CHIPS[phenomenon] : []).map(chip));
     }
   },
 };
