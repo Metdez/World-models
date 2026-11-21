@@ -26,6 +26,7 @@ import { wrap, wrapHalf } from './math/interp';
 import { buildSpeedProfile, type SpeedProfile } from './path/speed-profile';
 import { buildTrack } from './track/build';
 import { VEHICLE_MODELS, type VehicleModel } from './vehicle-models';
+import type { VehiclePlant } from './drive/plant';
 
 /** Built-in content: used when the catalog lacks an id (no content features registered, e.g. kernel tests). */
 const BUILT_IN = {
@@ -118,6 +119,10 @@ function writeAutoDrive(d: DriveFrame, path: PathState): void {
   d.headingError = 0;
   d.approximate = false;
 }
+
+const plants = new WeakMap<Simulation, () => VehiclePlant | undefined>();
+/** The plant of a simulation's current vehicle (tests and tooling: arbitrary start states); not part of the contract. */
+export const plantOf = (sim: Simulation): VehiclePlant | undefined => plants.get(sim)?.();
 
 export function createSimulation(options: SimulationOptions): Simulation {
   const resolve = resolver(options.catalog);
@@ -236,6 +241,18 @@ export function createSimulation(options: SimulationOptions): Simulation {
     profile: () => profile,
     simTime: () => simTime,
     seekRails: (t) => preroll(t),
+    latchRails(t) {
+      // §7.10 C: the lap clock continues from the lap time of the car's projected s; the body goes back to the Auto
+      // model there with its ride state (plant.releaseToPath refits the Auto reference plane). The next step is an
+      // Auto step from this path, interpolating from the last plant step (no blend across a cut: there is none).
+      lapTime = wrap(t, profile.lapDuration);
+      profile.stateAt(lapTime, path);
+      if (path.sectionIndex !== sectionIndex) {
+        sectionIndex = path.sectionIndex;
+        events.push(sectionEvents[sectionIndex]!);
+      }
+      model.plant!.releaseToPath(path);
+    },
     lapTime: () => lapTime,
   });
 
@@ -343,6 +360,7 @@ export function createSimulation(options: SimulationOptions): Simulation {
     },
   };
 
+  plants.set(sim, () => model.plant);
   load(options.vehicleId, options.suspensionId);
   preroll(options.lapTime ?? 0);
   simTime = prevSimTime = 0;

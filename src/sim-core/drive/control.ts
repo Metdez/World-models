@@ -1,9 +1,12 @@
 /**
- * DriveControl (ARCHITECTURE-M2 §7.10 A/D/E, §7.2 step 0): who drives the car. Mode requests and resets apply at the
+ * DriveControl (ARCHITECTURE-M2 §7.10 A-E, §7.2 step 0): who drives the car. Mode requests and resets apply at the
  * NEXT fixed step (beforeStep) and are reported as DriveEvents; intents are latched every CONTROL_TICKS steps,
- * quantised, and fed to the HumanDriver, whose command drives the plant. 08-02 scope: auto <-> manual and reset.
- * shortcut: a non-immediate 'auto' request releases at once onto the rails at profile.timeAtS(projected s) (a cut)
- * until 10-01's returning autopilot lands; replay play/recording arrive with 11-03.
+ * quantised, and fed to the HumanDriver, whose command drives the plant.
+ * Returning (10-01): 'auto' from manual hands the SAME plant to the PathDriver on the loop's driving line (no cut);
+ * when it has converged the simulation latches onto the rails at profile.timeAtS(s) (`converged` + mode, no cut). A
+ * return that has not converged within RETURN_TIMEOUT s (RETURN_TIMEOUT_OFF when it started off the loop corridor),
+ * and an `immediate` request, release at once onto the rails at the projected lap time (a cut). A 'manual' request
+ * while returning takes the wheel back (bumpless, no cut). Replay play/recording arrive with 11-03.
  */
 import { CONTROL_TICKS, DEFAULT_AIDS, neutralIntent, type DecodedReplay, type DriveAids, type DriveControl, type DriveEvent, type DriveFrame, type DriveIntent, type DriveMode } from '../../contracts/drive';
 import type { PathState, SimEvent } from '../../contracts/sim';
@@ -15,6 +18,8 @@ import type { SpeedProfile } from '../path/speed-profile';
 import type { VehicleModel } from '../vehicle-models';
 import { modeEvent, resetEvent } from './events';
 import { createHumanDriver } from './human-driver';
+import { createPathDriver, type PathDriver } from './path-driver';
+import { loopLine } from './reference';
 import { createDriveCommand, createQuantIntent, quantiseIntent } from './types';
 
 export interface DriveHost extends DriveControl {
@@ -25,6 +30,8 @@ export interface DriveHost extends DriveControl {
   /** Release now (seek / setVehicle / immediate): mode auto, cut event. */
   releaseNow(): void;
   readonly detached: boolean;
+  /** The loop autopilot while returning (state, errors; read-only diagnostics), else null. */
+  readonly autopilot: PathDriver | null;
   /** A seek re-attached the lap clock to the rails (clears `detached`). */
   attach(): void;
   /** Control-owned DriveFrame fields (mode, available, source, aids, idle, detached, steerDemand, faults in auto). */
@@ -38,18 +45,26 @@ export interface DriveControlDeps {
   readonly world: GroundWorld;
   readonly profile: () => SpeedProfile;
   readonly simTime: () => number;
-  /** shortcut (until 10-01): put the car back on the rails at this lap time (an M1 pre-roll seek). */
+  /** Put the car back on the rails at this lap time (an M1 pre-roll seek: a cut). */
   readonly seekRails: (lapTime: number) => void;
+  /** Latch (§7.10 C): lap clock = lapTime, `plant.releaseToPath(stateAt(lapTime))`; the next step is an Auto step. */
+  readonly latchRails: (lapTime: number) => void;
   /** Current lap time (the detached clock while driving). */
   readonly lapTime: () => number;
 }
 
 /** The kernel's ride inputs stay as they are at the engage (the car model's input already holds them). */
 const KEEP_INPUTS = { ax: NaN, ay: NaN } as const;
+/** Returning gives up (immediate release, a cut) after this long on the loop corridor / when it started off it, s. */
+export const RETURN_TIMEOUT = 20;
+export const RETURN_TIMEOUT_OFF = 60;
+/** The loop autopilot's speed margin while it recovers (§7.9; it fades to the exact profile speed when tracking). */
+const LOOP_SPEED_SCALE = 0.97;
 
 export function createDriveControl(deps: DriveControlDeps): DriveHost {
   let mode: DriveMode = 'auto';
   let pending: 'auto' | 'manual' | null = null;
+  let pendingImmediate = false;
   let pendingReset = false;
   let resetSpawn: string | null = null;
   let detached = false;
@@ -61,6 +76,10 @@ export function createDriveControl(deps: DriveControlDeps): DriveHost {
   const events: DriveEvent[] = [];
   const driver = createHumanDriver(deps.vehicle() as CarDefinition);
   driver.setAids(aids);
+  // The loop autopilot, built per (vehicle, profile) at the first return (not per step).
+  let autopilot: PathDriver | null = null;
+  let autopilotKey: SpeedProfile | null = null;
+  const returning = new Float64Array(2); // [time returning, timeout]
   const fr: Frenet = { s: 0, l: 0, heading: 0, curvature: 0, converged: true };
   const ts: TrackSample = { s: 0, x: 0, y: 0, z: 0, heading: 0, curvature: 0, bank: 0, grade: 0 };
   const xyz: XYZ = { x: 0, y: 0, z: 0 };
@@ -89,6 +108,25 @@ export function createDriveControl(deps: DriveControlDeps): DriveHost {
     events.push(resetEvent(deps.simTime(), station ? spawn : null));
   }
 
+  /** §7.10 D: release at once onto the rails at the lap time of the projected s (else the clock's), a cut. */
+  function release(): void {
+    const p = plant();
+    const s = p ? p.loopS : NaN;
+    const lap = s === s ? deps.profile().timeAtS(s) : deps.lapTime();
+    setMode('auto', true);
+    deps.seekRails(lap);
+  }
+
+  function loopAutopilot(): PathDriver {
+    const profile = deps.profile();
+    if (autopilot === null || autopilotKey !== profile) {
+      const line = loopLine(deps.track, profile, deps.world);
+      autopilot = createPathDriver(deps.vehicle() as CarDefinition, line, { speedScale: LOOP_SPEED_SCALE, exactSpeed: false });
+      autopilotKey = profile;
+    }
+    return autopilot;
+  }
+
   const host: DriveHost = {
     get available() {
       return plant() !== undefined;
@@ -98,6 +136,9 @@ export function createDriveControl(deps: DriveControlDeps): DriveHost {
     },
     get detached() {
       return detached;
+    },
+    get autopilot() {
+      return mode === 'returning' ? autopilot : null;
     },
     setIntent(next) {
       intent.steer = next.steer;
@@ -109,8 +150,7 @@ export function createDriveControl(deps: DriveControlDeps): DriveHost {
     },
     request(next, immediate = false) {
       pending = next;
-      // An immediate release is a cut; until 10-01 a non-immediate one is too (see the header).
-      void immediate;
+      pendingImmediate = immediate;
     },
     setAids(next) {
       aids = next;
@@ -134,7 +174,9 @@ export function createDriveControl(deps: DriveControlDeps): DriveHost {
     beforeStep(path) {
       if (pending !== null) {
         const want = pending;
+        const immediate = pendingImmediate;
         pending = null;
+        pendingImmediate = false;
         const p = plant();
         if (want === 'manual' && mode === 'auto' && p) {
           p.engageFromPath(path, KEEP_INPUTS);
@@ -142,25 +184,46 @@ export function createDriveControl(deps: DriveControlDeps): DriveHost {
           tick[0] = 0;
           detached = true;
           setMode('manual', false);
-        } else if (want === 'auto' && mode !== 'auto') {
-          const s = p ? p.loopS : NaN;
-          const lap = s === s ? deps.profile().timeAtS(s) : deps.lapTime();
-          setMode('auto', true);
-          deps.seekRails(lap);
-        }
+        } else if (want === 'manual' && mode === 'returning' && p) {
+          // take the wheel back from the autopilot: bumpless from its command, no cut
+          driver.engage(p.view, p.command);
+          tick[0] = 0;
+          setMode('manual', false);
+        } else if (want === 'auto' && mode === 'manual' && !immediate && p) {
+          const ap = loopAutopilot();
+          ap.engage(p.view, p.command);
+          returning[0] = 0;
+          returning[1] = p.loopS === p.loopS ? RETURN_TIMEOUT : RETURN_TIMEOUT_OFF;
+          setMode('returning', false);
+        } else if (want === 'auto' && mode !== 'auto' && (immediate || !p)) release();
       }
       if (pendingReset) {
         pendingReset = false;
         if (mode === 'manual' && plant()) place(resetSpawn);
+      }
+      if (mode === 'returning') {
+        const p = plant()!;
+        const s = p.loopS;
+        if (autopilot!.converged && s === s) {
+          // §7.10 C: latch onto the rails at the lap time of the projected s; the next step is an Auto step
+          deps.latchRails(deps.profile().timeAtS(s));
+          events.push({ kind: 'converged', simTime: deps.simTime() });
+          setMode('auto', false);
+        } else if (returning[0]! >= returning[1]!) release();
       }
       return mode !== 'auto';
     },
 
     stepPlant(dt, simEvents) {
       const p = plant()!;
-      if (tick[0]! % CONTROL_TICKS === 0) driver.latch(quantiseIntent(intent, q));
       (p.view as { simTime: number }).simTime = deps.simTime();
-      driver.step(dt, p.view, cmd);
+      if (mode === 'returning') {
+        autopilot!.step(dt, p.view, cmd);
+        returning[0] = returning[0]! + dt;
+      } else {
+        if (tick[0]! % CONTROL_TICKS === 0) driver.latch(quantiseIntent(intent, q));
+        driver.step(dt, p.view, cmd);
+      }
       p.step(dt, cmd, aids, simEvents, events);
       tick[0] = tick[0]! + 1;
     },
@@ -185,6 +248,10 @@ export function createDriveControl(deps: DriveControlDeps): DriveHost {
         d.idle = 0;
         d.steerDemand = 0;
         d.faults = p ? p.faults : 0;
+      } else if (mode === 'returning') {
+        d.source = 'autopilot';
+        d.idle = 0;
+        d.steerDemand = p ? p.command.steer / p.view.maxSteer : 0;
       } else {
         d.source = driver.source;
         d.idle = driver.idle;

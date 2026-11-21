@@ -548,6 +548,7 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
 
   // ---- Manual Drive plant (ARCH-M2 §7.3 (5)): built on first use for cars with handling data.
   let plant: VehiclePlant | undefined;
+  const rebaseRoad = new Float64Array(4);
   const core: CarCore | null = vehicle.handling
     ? {
         vehicle,
@@ -572,6 +573,23 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
           input.antiPitch.front = input.ax < 0 ? tables[0].antiPitch : 0;
           input.antiPitch.rear = input.ax >= 0 ? tables[1].antiPitch : 0;
           rcInputs();
+        },
+        rebase(path: PathState): void {
+          // Auto road inputs = raw(path) - refZ - refSlope cx: fit refZ/refSlope to the plant's inputs on the axle means
+          // (the rigid offset leaves the small-angle ride model unchanged; the left/right residual is the plant's
+          // cross-slope plane vs the path bank, millimetres at a latch).
+          rebaseRoad.set(input.road);
+          refZ = 0;
+          refSlope = 0;
+          roadInputs(path);
+          const xF = (cx[0]! + cx[1]!) / 2;
+          const xR = (cx[2]! + cx[3]!) / 2;
+          const dF = (input.road[0]! - rebaseRoad[0]! + input.road[1]! - rebaseRoad[1]!) / 2;
+          const dR = (input.road[2]! - rebaseRoad[2]! + input.road[3]! - rebaseRoad[3]!) / 2;
+          refSlope = (dF - dR) / (xF - xR);
+          refZ = dF - refSlope * xF;
+          for (let i = 0; i < 4; i++) input.road[i] = input.road[i]! - refZ - refSlope * cx[i]!;
+          roadPrev.set(input.road);
         },
         beginStep: () => prev.set(cur),
         holdRecord: () => prev.set(cur),

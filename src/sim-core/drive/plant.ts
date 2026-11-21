@@ -74,6 +74,11 @@ export interface CarCore {
   staticDeflectionMean(): number;
   /** input.antiPitch from the sign of input.ax, input.rcHeight from the current travel (car-model bodyInputs/rcInputs). */
   linkInputs(): void;
+  /**
+   * Latch back to Auto at `path` (§7.10 C): refit the Auto reference plane (refZ, refSlope) so the Auto road inputs at
+   * `path` match the current (plant) road inputs per axle; roadPrev = those Auto inputs. Ride state untouched.
+   */
+  rebase(path: PathState): void;
   /** Ride record: prev = cur (start of a step) / after a cut (no interpolation across it). */
   beginStep(): void;
   holdRecord(): void;
@@ -103,7 +108,7 @@ export interface VehiclePlant {
   step(dt: number, cmd: Readonly<DriveCommand>, aids: DriveAids, simEvents: SimEvent[], driveEvents: DriveEvent[]): void;
   /** Interpolated TRUE + POSE write incl. frame.drive plant fields (mode/source/aids/idle/detached: the control). */
   sample(alpha: number, amplification: number, out: TelemetryFrame): void;
-  /** Hand the body back to the Auto model at `path` (10-01). */
+  /** Hand the body back to the Auto model at `path` (§7.10 C): ride kept, Auto reference plane refitted. */
   releaseToPath(path: PathState): void;
   /** At rest at (x, y, heading) on the ground: velocities 0, deflections 0, ride at static equilibrium there. */
   place(x: number, y: number, heading: number): void;
@@ -188,6 +193,8 @@ const MAX_OMEGA = 400;
 const MAX_SPEED = 120;
 const MAX_YAW_RATE = 6;
 const MAX_DEFLECTION = 0.5;
+/** |roll|, |pitch| beyond which the ride state counts as a fault (the ride model is small-angle), rad. */
+const MAX_BODY_ANGLE = 0.5;
 const SLEEP_V = 0.05;
 const SLEEP_R = 0.02;
 const SLEEP_SLOPE = 0.005;
@@ -617,7 +624,9 @@ export function createPlant(core: CarCore, options: PlantOptions = {}): VehicleP
     const r = core.ride().state;
     sum += r.heave + r.roll + r.pitch + r.heaveRate + r.rollRate + r.pitchRate;
     for (let i = 0; i < 4; i++) sum += r.travel[i]! + r.load[i]!;
-    return sum - sum === 0;
+    // 10-01: a body rolled/pitched beyond the small-angle ride model (a tripped slide down an embankment) diverges while
+    // staying finite for seconds: treat it as a fault too.
+    return sum - sum === 0 && Math.abs(r.roll) < MAX_BODY_ANGLE && Math.abs(r.pitch) < MAX_BODY_ANGLE;
   }
 
   function recover(driveEvents: DriveEvent[]): void {
@@ -1137,9 +1146,10 @@ export function createPlant(core: CarCore, options: PlantOptions = {}): VehicleP
       d.faults = scal[2]!;
     },
 
-    releaseToPath() {
-      // shortcut: the latch back onto the rails is 10-01's; until then a release is an M1 seek (pre-roll).
-      throw new Error('plant.releaseToPath arrives with plan 10-01');
+    releaseToPath(path) {
+      // §7.10 C (10-01): the Auto model takes the body back with the SAME ride state; its reference plane is refitted
+      // so its road inputs at `path` continue this step's, and its interpolation record keeps this step as `prev`.
+      core.rebase(path);
     },
 
     snapshot,
