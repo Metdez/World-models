@@ -209,8 +209,8 @@ describe('POST /api/engineer', () => {
     expect(body.actions).toEqual([{ tool: 'switch_suspension', args: { id: 'double-wishbone' } }]);
   });
 
-  it('falls back when both models fail, when the reply is empty, and without an AI binding', async () => {
-    for (const e of [env({ AI: fakeAi(new Error('quota exceeded')) }), env({ AI: fakeAi(openAi('  ')) }), env()]) {
+  it('falls back when both models fail (e.g. a deprecated model: HTTP 410), when the reply is empty, and without an AI binding', async () => {
+    for (const e of [env({ AI: fakeAi(new Error('AiError: 5028: model deprecated (410)')) }), env({ AI: fakeAi(new Error('quota exceeded')) }), env({ AI: fakeAi(openAi('  ')) }), env()]) {
       const body = (await (await post(request('Why?'), e)).json()) as EngineerResponse;
       expect(body).toMatchObject({ source: 'fallback', actions: [] });
       expect(body.text.length).toBeGreaterThan(40);
