@@ -245,8 +245,8 @@ describe('boot and test hooks (§6.1, §6.5)', () => {
 });
 
 describe('runDriveScript (§6.6)', () => {
-  it("returns 'no-drive' on the M1 simulation (no plant yet)", () => {
-    expect(runDriveScript(createSimulation(OPTIONS), 1, 1)).toBe('no-drive');
+  it("hashes the real plant (08-02) and returns 'no-drive' without one", () => {
+    expect(runDriveScript(createSimulation(OPTIONS), 1, 1)).toMatch(/^[0-9a-f]{8}$/);
     expect(runDriveScript(withFakeDrive(fakeSim(OPTIONS), false), 1, 1)).toBe('no-drive');
   });
 

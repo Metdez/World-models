@@ -28,7 +28,7 @@ import { RIDE_STATE_LENGTH, type RideInput, type RideModel } from '../ride/ride7
 import { LOOP_CORRIDOR, OUT_OF_BOUNDS } from '../world/ground';
 import { faultEvent, outOfBoundsEvent, zoneEvent } from './events';
 import { createPowertrain, createPowertrainIo, POWERTRAIN_STATE_LENGTH } from './powertrain';
-import { createTyreIo, evaluateTyre, limitDeflection, tyreCoefficients, type TyreIo } from './tyre';
+import { createTyreIo, evaluateTyre, limitDeflection, stiffnessAt, tyreCoefficients, type TyreIo } from './tyre';
 import type { DriveCommand, PlantView } from './types';
 
 /** Surface kinds by index (car-model stores the index per wheel). */
@@ -211,6 +211,7 @@ export function createPlant(core: CarCore): VehiclePlant {
   const plane = new Float64Array(3); // z0, g, c
   const hit: GroundHit = { h: 0, base: 0, surface: 'asphalt', zone: 'loop', s: 0, l: 0 };
   const fr: Frenet = { s: 0, l: 0, heading: 0, curvature: 0, converged: true };
+  const fr2: Frenet = { s: 0, l: 0, heading: 0, curvature: 0, converged: true };
   const ts: TrackSample = { s: 0, x: 0, y: 0, z: 0, heading: 0, curvature: 0, bank: 0, grade: 0 };
   const cmdOut: DriveCommand = { steer: 0, throttle: 0, brake: 0, handbrake: 0, direction: 1 };
   const ring = Array.from({ length: RING }, () => new Float64Array(PLANT_SNAPSHOT_LENGTH));
@@ -271,21 +272,43 @@ export function createPlant(core: CarCore): VehiclePlant {
     const sn = st[S]!;
     const cx = core.cx;
     const cy = core.cy;
+    // During the handoff fade the wheels' road coordinates blend from the Auto model's Frenet offsets of the CG point
+    // (car-model roadInputs) to their exact projections, so the first plant steps read the road exactly where Auto did.
+    const fade = st[FADE]! / HANDOFF_FADE_S;
+    let cd = 0;
+    let sd = 0;
+    if (fade > 0) {
+      world.project(st[X]!, st[Y]!, st[CG_S]!, fr);
+      const ch = dcos(fr.heading);
+      const sh = dsin(fr.heading);
+      cd = c * ch + sn * sh; // cos(yaw - road heading)
+      sd = sn * ch - c * sh;
+    }
     for (let i = 0; i < 4; i++) {
       const wx = st[X]! + c * cx[i]! - sn * cy[i]!;
       const wy = st[Y]! + sn * cx[i]! + c * cy[i]!;
       world.sample(wx, wy, st[HINT + i]!, hit);
       tyre.surface[i] = SURFACE_KINDS.indexOf(hit.surface);
       base[i] = hit.base;
-      const sw = hit.s;
+      let sw = hit.s;
       if (sw === sw) {
         st[HINT + i] = sw;
-        const l = hit.l;
+        let l = hit.l;
+        if (fade > 0 && Math.abs(fr.l) <= LOOP_CORRIDOR) {
+          let dS = fr.s + cx[i]! * cd - cy[i]! * sd - sw;
+          const half = track.length / 2;
+          dS = dS > half ? dS - track.length : dS < -half ? dS + track.length : dS;
+          sw += fade * dS;
+          l += fade * (fr.l + cx[i]! * sd + cy[i]! * cd - l);
+        }
         // The M1 tyre envelope (mean road height at +-ENVELOPE along the road) where no terrain blend applies.
-        h[i] = Math.abs(l) <= LOOP_CORRIDOR - 0.5 ? (track.roadHeight(sw - ENVELOPE, l) + hit.h + track.roadHeight(sw + ENVELOPE, l)) / 3 : hit.h;
+        h[i] = Math.abs(l) <= LOOP_CORRIDOR - 0.5 ? (track.roadHeight(sw - ENVELOPE, l) + track.roadHeight(sw, l) + track.roadHeight(sw + ENVELOPE, l)) / 3 : hit.h;
         track.sample(sw, ts);
         vc[i] = ts.z - swellA * dsin(swellK * sw);
       } else {
+        // off the corridor: keep the wheel's projection hint current (warm starts stay O(1) on the terrain)
+        world.project(wx, wy, st[HINT + i]!, fr2);
+        st[HINT + i] = fr2.s;
         h[i] = hit.h;
         vc[i] = 0;
       }
@@ -480,6 +503,70 @@ export function createPlant(core: CarCore): VehiclePlant {
     driveEvents.push(faultEvent(view.simTime, scal[2]!));
   }
 
+  const stiff = new Float64Array(3);
+  /**
+   * Engage seed (research m2/09 §5): instead of v = 0, Ackermann steer and zero deflections (§7.10 A), the linear
+   * steady state of THIS plant for the Auto state: axle lateral forces m*ay split by moment balance give the axle slip
+   * angles, hence the sideslip v and the actuator steer; patch deflections and wheel spins at their steady state for
+   * the Auto's per-wheel demands. With zero deflections the tyres would carry no force for the first ~30 ms (a 6 %
+   * load step in the carousel).
+   */
+  function seedSteadyState(): void {
+    const cx = core.cx;
+    const cy = core.cy;
+    const ride = core.ride().state;
+    const u = st[U]!;
+    const r = st[R]!;
+    const m = mass();
+    const xF = (cx[0]! + cx[1]!) / 2;
+    const xR = (cx[2]! + cx[3]!) / 2;
+    const fyF = (m * core.input.ay * -xR) / (xF - xR);
+    const fyR = (m * core.input.ay * xF) / (xF - xR);
+    let caF = 0;
+    let caR = 0;
+    let dF = 0;
+    let dR = 0;
+    for (let i = 0; i < 4; i++) {
+      stiffnessAt(axle(i).tyre, i < 2 ? coeff[0] : coeff[1], ride.load[i]!, stiff);
+      if (i < 2) {
+        caF += stiff[0]!;
+        dF += stiff[2]!;
+      } else {
+        caR += stiff[0]!;
+        dR += stiff[2]!;
+      }
+    }
+    if (!(caF > 0 && caR > 0)) return;
+    // tan(alpha) = -Fy / C_alpha, kept inside the linear range (90 % of the saturation slip)
+    const tanR = clamp(-fyR / caR, (-0.9 * dR) / caR, (0.9 * dR) / caR);
+    const tanF = clamp(-fyF / caF, (-0.9 * dF) / caF, (0.9 * dF) / caF);
+    const v = u * tanR - r * xR;
+    st[V] = v;
+    // The actuator stays at the Auto (Ackermann) steer: a jump to the steady-state steer would show. The front patch
+    // deflections below carry the steady-state force instead and relax onto the kinematics within sigma / u.
+    const tanFk = (v + r * xF) / u - st[DELTA]!;
+    corners();
+    // longitudinal demand split as car-model derive does (braking by brakeShare, driving on the driven axle)
+    const fx = m * core.input.ax;
+    for (let i = 0; i < 4; i++) {
+      const vx = u - r * cy[i]!;
+      const vy = v + r * cx[i]!;
+      const wx = vx * cosD[i]! + vy * sinD[i]!;
+      const wy = -vx * sinD[i]! + vy * cosD[i]!;
+      const c = i < 2 ? coeff[0] : coeff[1];
+      const load = ride.load[i]!;
+      stiffnessAt(axle(i).tyre, c, load, stiff);
+      const axleLoad = load + ride.load[i ^ 1]!;
+      const share = axleLoad > 0 ? load / axleLoad : 0;
+      const fxAxle = fx < 0 ? fx * axle(i).brakeShare : axle(i).driven ? fx : 0;
+      const kap = stiff[1]! > 0 ? clamp((fxAxle * share) / stiff[1]!, (-0.9 * stiff[2]!) / stiff[1]!, (0.9 * stiff[2]!) / stiff[1]!) : 0;
+      // rear: kinematic steady state; front: the steady-state force (tanF) for the actual steer's kinematic slip tanFk
+      st[UY + i] = c.sigmaY * (i < 2 ? wy / Math.abs(wx) - tanFk + tanF : wy / Math.abs(wx));
+      st[UX + i] = c.sigmaX * kap;
+      st[OMEGA + i] = (wx * (1 + kap)) / radius[i]!;
+    }
+  }
+
   const plant: VehiclePlant = {
     view,
     get loopS() {
@@ -524,6 +611,7 @@ export function createPlant(core: CarCore): VehiclePlant {
         st[UY + i] = 0;
         st[HINT + i] = path.s;
       }
+      if (path.v > 1) seedSteadyState();
       st[CG_S] = path.s;
       st[OUT_T] = 0;
       st[OUT_D] = 0;
@@ -532,10 +620,10 @@ export function createPlant(core: CarCore): VehiclePlant {
       if (autoInputs.ay === autoInputs.ay) core.input.ay = autoInputs.ay;
       // Fade offsets: plant road inputs - the Auto inputs of the last step (core.input.road still holds them).
       for (let i = 0; i < 4; i++) st[OFF + i] = core.input.road[i]!;
+      st[FADE] = HANDOFF_FADE_S;
       corners();
       ground();
       for (let i = 0; i < 4; i++) st[OFF + i] = core.input.road[i]! - st[OFF + i]!;
-      st[FADE] = HANDOFF_FADE_S;
       applyOffsets(0);
       powertrain.reset(st[U]!, 1);
       cmdOut.steer = st[DELTA]!;
@@ -616,13 +704,7 @@ export function createPlant(core: CarCore): VehiclePlant {
       st[DELTA] = st[DELTA]! + clamp(((cmd.steer - st[DELTA]!) * dt) / lag, -lim, lim);
       // 3. corner kinematics from the current ride state
       corners();
-      // 4. ground, base plane, road inputs (fade offsets after an engage)
-      ground();
-      applyOffsets(dt);
-      for (let i = 0; i < 4; i++) {
-        input.roadRate[i] = (input.road[i]! - core.roadPrev[i]!) / dt;
-        core.roadPrev[i] = input.road[i]!;
-      }
+      // 4. (moved after the chassis update, see there): this step's tyres and gravity use the ground of the last one.
 
       // 5-6. loads (previous ride step) and wheel-frame velocities
       const u0 = st[U]!;
@@ -759,6 +841,16 @@ export function createPlant(core: CarCore): VehiclePlant {
         st[OMEGA + i] = clamp(st[OMEGA + i]!, -MAX_OMEGA, MAX_OMEGA);
         st[UX + i] = clamp(st[UX + i]!, -MAX_DEFLECTION, MAX_DEFLECTION);
         st[UY + i] = clamp(st[UY + i]!, -MAX_DEFLECTION, MAX_DEFLECTION);
+      }
+
+      // 4. ground, base plane and road inputs at the NEW pose (fade offsets after an engage). Deviation from the §7.2
+      // order: like the M1 Auto step (road inputs at the path state at the END of the step), so the ride sees the road
+      // under the wheels where they now are and the engage step reads the same road as the Auto step would.
+      ground();
+      applyOffsets(dt);
+      for (let i = 0; i < 4; i++) {
+        input.roadRate[i] = (input.road[i]! - core.roadPrev[i]!) / dt;
+        core.roadPrev[i] = input.road[i]!;
       }
 
       // 10. ride coupling: low-passed specific forces the tyres supply

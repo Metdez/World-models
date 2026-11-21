@@ -13,13 +13,13 @@ import { datan2, dcos, dsin } from '../math/det';
 
 /** Node spacing of the fallback search, m. */
 const NODE_STEP = 2;
-/** Fallback window around a finite hint, m. */
+/** Fallback search span around a finite hint, m. */
 const WINDOW = 60;
 /** Newton: max iterations, convergence step (m), step clamp (m). */
 const MAX_IT = 8;
 const TOL = 1e-5;
 const MAX_STEP = 10;
-/** A converged point farther than this from the centreline re-checks with the strided search, m. */
+/** A cold (strided) search whose Newton result lies farther than this re-checks against the whole loop, m. */
 const FAR = 25;
 
 export type LoopProjector = (x: number, y: number, hint: number, out: Frenet) => Frenet;
@@ -96,9 +96,11 @@ export function createProjectorCore(track: BuiltTrack): ProjectorCore {
     it[0] = 0;
     let ok = false;
     const warm = hint === hint;
-    if (warm) ok = newton(x, y, wrap(hint, L)) && Math.abs(res[1]!) <= FAR;
+    // A warm start that converges near its hint is the nearest point whatever the distance (the loop's branches are
+    // far apart in s); FAR only guards the cold searches below.
+    if (warm) ok = newton(x, y, wrap(hint, L));
     if (ok && warm) {
-      // A converged jump of more than the window means Newton slid onto another branch: re-check.
+      // A converged jump of more than the span means Newton slid onto another branch: re-check (span).
       let ds = Math.abs(res[0]! - wrap(hint, L));
       if (ds > L / 2) ds = L - ds;
       if (ds > WINDOW) ok = false;

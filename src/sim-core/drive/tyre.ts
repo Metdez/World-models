@@ -170,3 +170,18 @@ export function limitDeflection(params: TyreParams, c: TyreCoefficients, io: Tyr
     io.uy *= k;
   }
 }
+
+/** Cornering and slip stiffness (N/rad, N/unit slip) and peak force (N) at a load: for steady-state seeding. */
+export function stiffnessAt(params: TyreParams, c: TyreCoefficients, load: number, out: Float64Array): Float64Array {
+  if (!(load > 0)) {
+    out[0] = 0;
+    out[1] = 0;
+    out[2] = 0;
+    return out;
+  }
+  const shape = gShape(load / (c.loadShape * params.nominalLoad)) / c.g0;
+  out[0] = c.c0Alpha * shape;
+  out[1] = c.c0Kappa * shape;
+  out[2] = peakMu(load, 0, params) * load;
+  return out;
+}
