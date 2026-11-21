@@ -244,7 +244,7 @@ const telemetryPanel: FeatureModule = {
     );
     const liveLegend = h('span', { class: 'sl-telemetry-panel-legend is-live' });
     const ghostName = h('span');
-    const ghostNote = h('span', { hidden: true }, ' · Auto only');
+    const ghostNote = h('span');
     const ghostLegend = h('span', { class: 'sl-telemetry-panel-legend is-ghost', hidden: true }, ghostName, ghostNote);
     const root = h(
       'section',
@@ -341,7 +341,7 @@ const telemetryPanel: FeatureModule = {
     const driving = t.drive.mode !== 'auto';
     if (driving !== s.driving) {
       s.driving = driving;
-      s.ghostNote.hidden = !driving;
+      s.ghostNote.textContent = driving ? ' · Auto only' : '';
     }
     s.trail.push(gUnits(t.ay), gUnits(t.ax));
     if (s.root.hidden) return; // keep recording (the ghost needs the lap), skip the drawing
