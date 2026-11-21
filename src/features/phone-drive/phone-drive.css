@@ -165,6 +165,16 @@
   gap: var(--sp-2);
 }
 
+/* an open audience poll takes the lower right column: the card folds to its header + status line, which fits the band
+   between the trace and the poll (13-01: at 1280x720 the full card overlapped both) */
+#overlay:has(> .sl-poll:not([hidden])) .sl-phone-drive .sl-phone-drive-body,
+#overlay:has(> .sl-poll:not([hidden])) .sl-phone-drive .sl-phone-drive-fold {
+  display: none;
+}
+#overlay:has(> .sl-poll:not([hidden])) .sl-phone-drive {
+  gap: var(--sp-2);
+}
+
 /* the failsafe note: top centre, above the scene, calm */
 .sl-phone-drive-toast {
   position: absolute;
