@@ -79,7 +79,11 @@ export const POWERTRAIN_STATE_LENGTH = 7;
 
 const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
 
-export function createPowertrain(p: CarPowertrain, radius: number, wheelInertia: number): Powertrain & { readonly state: Float64Array } {
+/** Default driven-tyre peak slip ratio for the traction cut when the caller passes none (GT coupe rear: about 0.16). */
+const DEFAULT_PEAK_SLIP = 0.16;
+
+/** `peakSlip`: the driven tyre's peak slip ratio (aids.ts peakSlipRatio); the traction cut targets the curve with it. */
+export function createPowertrain(p: CarPowertrain, radius: number, wheelInertia: number, peakSlip = DEFAULT_PEAK_SLIP): Powertrain & { readonly state: Float64Array } {
   const n = p.gears.length;
   const st = new Float64Array(POWERTRAIN_STATE_LENGTH);
   const ratio = (g: number): number => (g < 0 ? p.reverse * p.finalDrive : p.gears[g - 1]! * p.finalDrive);
@@ -158,7 +162,7 @@ export function createPowertrain(p: CarPowertrain, radius: number, wheelInertia:
       st[RPM] = rpm;
 
       // Traction scale (aids.traction), first-order TCS_TAU; off -> relaxes to 1.
-      const target = aids.traction ? tractionTarget(io.slipSpeed, io.speed) : 1;
+      const target = aids.traction ? tractionTarget(io.slipSpeed, io.speed, peakSlip) : 1;
       st[TCS] = st[TCS]! + (target - st[TCS]!) * Math.min(1, dt / TCS_TAU);
       const tcs = st[TCS]!;
 

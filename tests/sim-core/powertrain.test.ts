@@ -240,6 +240,18 @@ describe('engine and driveline', () => {
     expect(on.io.tractionActive).toBe(true);
     expect(off.io.tractionActive).toBe(false);
     expect((on.io.torqueL + on.io.torqueR) / (off.io.torqueL + off.io.torqueR)).toBeCloseTo(0.15, 3);
+    // the cut targets the tyre passed in: a smaller peak slip cuts harder at the same slip speed
+    const soft = createPowertrain(P, R, IW, 0.05);
+    const hard = createPowertrain(P, R, IW, 0.3);
+    const so = createPowertrainIo();
+    const ho = createPowertrainIo();
+    soft.reset(20, 1);
+    hard.reset(20, 1);
+    for (const [pt, io] of [[soft, so], [hard, ho]] as const) {
+      Object.assign(io, { speed: 20, throttle: 1, omegaL: 20 / R, omegaR: 20 / R, slipSpeed: 2.5 });
+      for (let k = 0; k < 120; k++) pt.step(SIM_DT, io, DEFAULT_AIDS);
+    }
+    expect(so.torqueL).toBeLessThan(ho.torqueL);
     for (let k = 0; k < 240; k++) on.step(3, 1, { slipSpeed: 0, aids: DEFAULT_AIDS });
     expect(on.io.tractionActive).toBe(false);
     expect((on.io.torqueL + on.io.torqueR) / (off.io.torqueL + off.io.torqueR)).toBeCloseTo(1, 4);

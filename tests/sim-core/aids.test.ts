@@ -4,7 +4,8 @@ import { DEFAULT_AIDS, type DriveAids } from '../../src/contracts/drive';
 import { G, SIM_DT } from '../../src/contracts/units';
 import { gtCoupe } from '../../src/sim-core/content/gt-coupe';
 import { gtCoupeBrakes } from '../../src/sim-core/content/gt-coupe-powertrain';
-import { assistedSteer, countersteerHelp, createAids, createAidsIo, steeringLimit, tractionTarget } from '../../src/sim-core/drive/aids';
+import { assistedSteer, countersteerHelp, createAids, createAidsIo, peakSlipRatio, steeringLimit, tractionTarget } from '../../src/sim-core/drive/aids';
+import { slipCurve } from '../../src/sim-core/drive/tyre';
 import { brakeTorques } from '../../src/sim-core/drive/powertrain';
 import type { PlantView } from '../../src/sim-core/drive/types';
 
@@ -29,7 +30,7 @@ const make = () => createAids(gtCoupe, gtCoupe.front.track, gtCoupe.rear.track);
 
 /**
  * One braked corner: quarter-car mass, a wheel with spin and the plant's longitudinal deflection lag (kappa = ux /
- * sigma), a saturating tyre (unit-slope Magic-Formula-shaped curve, falls past its peak near kappa 0.14). The wheel
+ * sigma), a saturating tyre (the 09-01 unit-slope curve with the content's shape/curvature, falls past its peak). The wheel
  * is sub-stepped (stiff); the aids run at SIM_DT on the previous step's slip ratio, as in the plant.
  */
 function stop(axle: 'front' | 'rear', aids: DriveAids) {
@@ -43,11 +44,7 @@ function stop(axle: 'front' | 'rear', aids: DriveAids) {
   const sigma = h.relaxationLongitudinal;
   const Rw = spec.tyre.radius;
   const I = h.wheelInertia;
-  const C = 1.35;
-  const fx = (kappa: number) => {
-    const s = (ck * Math.abs(kappa)) / D;
-    return Math.sign(kappa) * D * Math.sin(C * Math.atan(s / C));
-  };
+  const fx = (kappa: number) => Math.sign(kappa) * D * slipCurve((ck * Math.abs(kappa)) / D, h.shape, h.curvature);
   const a = make();
   const io = createAidsIo();
   const full = new Float64Array(4);
@@ -78,7 +75,7 @@ function stop(axle: 'front' | 'rear', aids: DriveAids) {
     }
     if (v > 3) kMin = Math.min(kMin, ux / sigma);
   }
-  return { kMin, dist, absSeen, peak: (C * Math.tan(Math.PI / (2 * C)) * D) / ck };
+  return { kMin, dist, absSeen, peak: peakSlipRatio(spec.tyre, h) };
 }
 
 describe('ABS', () => {
@@ -86,7 +83,7 @@ describe('ABS', () => {
     const on = stop(axle, { ...OFF, abs: true });
     const off = stop(axle, OFF);
     console.log(
-      `[aids] ABS ${axle}: min kappa ${on.kMin.toFixed(3)} (tyre peak ${on.peak.toFixed(3)}), 25->1 m/s ${on.dist.toFixed(1)} m; ` +
+      `[aids] ABS ${axle}: min kappa ${on.kMin.toFixed(3)} (target ${(-0.65 * on.peak).toFixed(3)}, tyre peak ${on.peak.toFixed(3)}), 25->1 m/s ${on.dist.toFixed(1)} m; ` +
         `off: min kappa ${off.kMin.toFixed(3)}, ${off.dist.toFixed(1)} m`,
     );
     expect(on.absSeen).toBe(true);
@@ -123,19 +120,25 @@ describe('ABS', () => {
 });
 
 describe('traction curve', () => {
-  it('scale 1 below the threshold, linear to the 0.15 floor, threshold grows with speed', () => {
+  it('scale 1 below the threshold, linear to the 0.15 floor, threshold tracks the tyre peak slip', () => {
+    const kp = peakSlipRatio(gtCoupe.rear.tyre, gtCoupe.handling!.tyres.rear);
+    expect(kp).toBeGreaterThan(0.12);
+    expect(kp).toBeLessThan(0.2);
     for (const u of [0, 10, 30]) {
-      const on = 0.5 + 0.05 * u;
-      const range = 1 + 0.05 * u;
-      expect(tractionTarget(0, u)).toBe(1);
-      expect(tractionTarget(on, u)).toBe(1);
-      expect(tractionTarget(on + range / 2, u)).toBeCloseTo(0.5, 12);
-      expect(tractionTarget(on + range, u)).toBe(0.15);
-      expect(tractionTarget(50, u)).toBe(0.15);
-      expect(tractionTarget(on + range / 2, -u)).toBeCloseTo(0.5, 12);
-      for (let s = 0; s < 5; s += 0.05) expect(tractionTarget(s + 0.05, u)).toBeLessThanOrEqual(tractionTarget(s, u));
+      const on = 0.3 + 0.5 * kp * u;
+      const range = 0.6 + 0.5 * kp * u;
+      expect(tractionTarget(0, u, kp)).toBe(1);
+      expect(tractionTarget(on, u, kp)).toBe(1);
+      expect(tractionTarget(on + range / 2, u, kp)).toBeCloseTo(0.5, 12);
+      expect(tractionTarget(on + range * 0.85, u, kp)).toBeCloseTo(0.15, 12);
+      expect(tractionTarget(50, u, kp)).toBe(0.15);
+      expect(tractionTarget(on + range / 2, -u, kp)).toBeCloseTo(0.5, 12);
+      for (let s = 0; s < 5; s += 0.05) expect(tractionTarget(s + 0.05, u, kp)).toBeLessThanOrEqual(tractionTarget(s, u, kp));
     }
-    console.log(`[aids] TCS cut starts at slip ratio ${(1.5 / 20).toFixed(3)} at 20 m/s, floor at ${((1.5 + 2) / 20).toFixed(3)}`);
+    // a softer tyre (smaller peak slip) cuts earlier
+    expect(tractionTarget(3, 20, kp / 2)).toBeLessThan(tractionTarget(3, 20, kp));
+    const at = (u: number) => `${((0.3 + 0.5 * kp * u) / u).toFixed(3)}..${((0.81 + 0.925 * kp * u) / u).toFixed(3)}`;
+    console.log(`[aids] rear peak slip ratio ${kp.toFixed(3)}; TCS cut over slip ratio ${at(10)} at 10 m/s, ${at(30)} at 30 m/s`);
   });
 });
 

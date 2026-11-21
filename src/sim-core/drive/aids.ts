@@ -13,10 +13,22 @@
  *   and countersteer help (GEVP's countersteer assist / ArcadeCarPhysics' speed-limited steering, MIT, ideas only).
  */
 import type { DriveAids } from '../../contracts/drive';
-import type { CarDefinition } from '../../contracts/vehicle';
+import type { CarDefinition, TyreHandling, TyreParams } from '../../contracts/vehicle';
 import { datan } from '../math/det';
 import { smoothstep } from '../math/interp';
+import { peakMu } from '../ride/tyre';
+import { tyreCoefficients } from './tyre';
 import type { PlantView } from './types';
+
+/**
+ * Slip ratio at the tyre curve's longitudinal peak at nominal load (pure longitudinal slip, flat road):
+ * kappa_peak = peakSlip * mu(N0) / slipStiffness (the tyre's normalised slip s = C_kappa kappa / D). About 0.16 for
+ * the GT coupe. ABS and the traction cut target fractions of it, so they track the curve (no hard-coded slip).
+ */
+export function peakSlipRatio(params: TyreParams, handling: TyreHandling): number {
+  const c = tyreCoefficients(params, handling);
+  return (c.peakSlip * peakMu(params.nominalLoad, 0, params)) / handling.slipStiffness;
+}
 
 export interface AidsIo {
   /** In/out per wheel (FL, FR, RL, RR), N m (>= 0): ABS scales it, stability adds to one wheel. */
@@ -56,7 +68,7 @@ export const createAidsIo = (): AidsIo => ({
 
 // ---- ABS (§7.8, pressure law tuned in 09-02: §7.8's on/off rule at -0.12 cycled so deeply that a fake wheel with the
 // 09-01 tyre curve stopped LONGER than with locked wheels — 36.6 vs 32.1 m from 25 m/s — and overshot to -0.22)
-const ABS_SLIP = -0.1; // target slip ratio (09-01 tyre peak about 0.14-0.17)
+const ABS_TARGET = 0.65; // target slip = -ABS_TARGET x the axle's peak slip ratio (about -0.10 for the GT coupe)
 const ABS_GAIN = 200; // pressure factor per s per unit slip error
 const ABS_LEAD = 0.03; // s: acts on the slip predicted this far ahead (wheel deceleration), as real ABS does
 const ABS_RELEASE = 0.02; // s from full pressure to none (fastest)
@@ -85,6 +97,10 @@ export const AIDS_STATE_LENGTH = 9;
 
 export function createAids(vehicle: CarDefinition, frontTrack: number, rearTrack: number): Aids & { readonly state: Float64Array } {
   const st = new Float64Array(AIDS_STATE_LENGTH);
+  const h = vehicle.handling;
+  const target = (axle: 'front' | 'rear'): number => -ABS_TARGET * (h ? peakSlipRatio(vehicle[axle].tyre, h.tyres[axle]) : 0.15);
+  const absFront = target('front');
+  const absRear = target('rear');
   const iz = vehicle.inertia.yaw;
   // T = gain * Iz * excess yaw-rate error * R / (t/2): the brake torque whose tyre force gives that yaw moment.
   const kFront = (ESC_GAIN * iz * vehicle.front.tyre.radius) / (frontTrack / 2);
@@ -131,7 +147,7 @@ export function createAids(vehicle: CarDefinition, frontTrack: number, rearTrack
         st[KPREV + i] = k;
         if (!aids.abs || (i >= 2 && io.handbrake > 0.05)) p = 1;
         else {
-          let rate = bt[i]! > ABS_MIN_TORQUE && au > ABS_SPEED ? ABS_GAIN * (kp - ABS_SLIP) : 1 / ABS_APPLY;
+          let rate = bt[i]! > ABS_MIN_TORQUE && au > ABS_SPEED ? ABS_GAIN * (kp - (i < 2 ? absFront : absRear)) : 1 / ABS_APPLY;
           rate = rate < -1 / ABS_RELEASE ? -1 / ABS_RELEASE : rate > 1 / ABS_APPLY ? 1 / ABS_APPLY : rate;
           p += rate * dt;
           p = p < ABS_FLOOR ? ABS_FLOOR : p > 1 ? 1 : p;
@@ -146,21 +162,23 @@ export function createAids(vehicle: CarDefinition, frontTrack: number, rearTrack
 }
 
 // ---- Traction (§7.7; the scale is low-passed and applied by powertrain.ts)
-/** Slip speed (m/s) where the torque cut starts, and the range over which it reaches the floor, both + per m/s of |u|. */
-const TCS_ON = 0.5;
-const TCS_RANGE = 1.0;
-const TCS_PER_SPEED = 0.05;
+/** Slip speed (m/s) where the cut starts and the range to the floor: a low-speed floor plus a fraction of the slip
+ * speed at the tyre's peak (kappa_peak x |u|). */
+const TCS_ON = 0.3;
+const TCS_ON_PEAK = 0.5;
+const TCS_RANGE = 0.6;
+const TCS_RANGE_PEAK = 0.5;
 const TCS_FLOOR = 0.15;
 
 /**
- * Target engine-torque scale for the driven wheels' max slip speed R*omega - vx (m/s) at road speed u.
- * Threshold and range grow with speed (0.5 + 0.05|u|, 1.0 + 0.05|u| m/s, i.e. a slip ratio of about 0.05-0.1 at
- * speed, below the 09-01 tyre's peak near 0.14) instead of §7.7's fixed 1.5 / 2.5 m/s, which lets the rear tyres
- * run far past their peak (and lose their side force) below about 15 m/s.
+ * Target engine-torque scale for the driven wheels' max slip speed R*omega - vx (m/s) at road speed u, for a driven
+ * tyre whose peak slip ratio is kappaPeak. The cut starts at 0.3 m/s + 0.5 kappaPeak |u| and reaches the 0.15 floor
+ * at 0.81 m/s + 0.925 kappaPeak |u|, so a full-throttle launch is held near the tyre's peak; §7.7's fixed 1.5 / 2.5 m/s
+ * would let the rear tyres run far past their peak (and lose their side force) below about 10 m/s.
  */
-export function tractionTarget(slipSpeed: number, u: number): number {
-  const au = Math.abs(u);
-  const s = 1 - (slipSpeed - (TCS_ON + TCS_PER_SPEED * au)) / (TCS_RANGE + TCS_PER_SPEED * au);
+export function tractionTarget(slipSpeed: number, u: number, kappaPeak: number): number {
+  const au = Math.abs(u) * kappaPeak;
+  const s = 1 - (slipSpeed - (TCS_ON + TCS_ON_PEAK * au)) / (TCS_RANGE + TCS_RANGE_PEAK * au);
   return s < TCS_FLOOR ? TCS_FLOOR : s > 1 ? 1 : s;
 }
 
