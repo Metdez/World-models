@@ -2,8 +2,8 @@
 
 Strict reading: MET only when a check that ran (unit test, e2e spec, production probe, measured report) shows it.
 "Hardware" lists what no check here can show: those items need a person with the device (see STATE.md known gaps,
-docs/EVENT-RUNBOOK.md §7). e2e results are from the full suite on a private build of 13-01's final HEAD (see the
-SUMMARY's verification section).
+docs/EVENT-RUNBOOK.md §7). e2e results are from the full suite on a private build of 13-01's HEAD plus reruns on the final build, and the
+drive/replay/engineer/delivery/determinism specs against production (see the SUMMARY's verification section).
 
 **Totals: 47 requirements: 37 MET · 8 PARTIAL · 0 NOT MET · 2 STRETCH-SKIPPED.**
 
@@ -27,7 +27,7 @@ SUMMARY's verification section).
 | MD-16 | PARTIAL | `handling-*.test.ts`: T1 ≤ 0.5 %, skidpad 0.956 g, ABS 100–0 37.5 m, K 0.74–1.20 °/g rising ×4.3–7.2, step steer 0.15–0.18 s / ≤ 11 %, mirror 7e-15, 240/480 Hz 0.35 % | **0–100 km/h 4.99 s, outside 3.6–4.8 s** (friction-limited; test asserts < 5.3 s and prints the band) |
 | MD-17 | PARTIAL | `handling-suspension.test.ts` report (09-04 SUMMARY), identical-tables control asserted; no universal winner | "ISO 3888-2 pass speed": an open-loop lane-change proxy; the annex T10 (10-04) measures the PathDriver, not the suspension. Ride RMS from the loop pavé, not the ride street |
 | MD-18 | MET | `plant-safety.test.ts` (ring buffer, restore, 200k fuzz finite); 13-01 fix: "Reset to road" after 3 restores in 2 s (`noteFault`, `drive.test.ts`) | The UI path cannot be forced from e2e (the app sanitises non-finite intents) |
-| MD-19 | MET | `tests/arch/det-math.test.ts` (all of sim-core); `09-03-determinism.spec.ts` Node = Chromium hash; goldens unchanged | Firefox/WebKit not installed: unverified |
+| MD-19 | MET | `tests/arch/det-math.test.ts` (all of sim-core); `09-03-determinism.spec.ts` Node = Chromium `24f9a9b3` (private build and production); goldens unchanged. The spec had been red since 10-03 unnoticed: its Node side had no world while the page grounds on the proving ground; fixed in 13-01 (Chromium with `-proving-ground` = Node without a world = `e98c2d44`, so the engines always agreed) | Firefox/WebKit not installed: unverified |
 | MD-20 | PARTIAL | step median 17–20 µs (`plant-no-alloc`, `returning-no-alloc`); heap tripwires green; draw calls 235 for the full high-tier frame at the M1 point (`03-01-track.spec.ts`, 13-01 run), 206 at the ride street (11-05) | Not allocation-free: ~11–14 KB/step short-lived boxing in V8 (13-01 heap profile; reduced from ~22 KB); ≤ 250 calls "with every M2 visual on" never measured at once (ghost +5 and rings/marks +3 on top of 235 would be 243, unmeasured) |
 | MD-21 | MET | `drive.test.ts`, `drive-input.test.ts` (dead zone 0.12, exponent 1.6, hysteresis, blur clear); `10-04` mocked pad + CDP touch | Hardware: real gamepad, real touch |
 | MD-22 | MET | `human-driver.test.ts` (ramps); `handling-keyboard.test.ts` incl. 13-01's literal check (hold ← at 100 km/h, aids on: no spin for any type; peak sideslip ~16°) | — |
