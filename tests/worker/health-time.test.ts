@@ -31,5 +31,6 @@ describe('GET /api/time', () => {
   it('only answers GET', async () => {
     const res = await app.request('/api/time', { method: 'POST' }, env);
     expect(res.status).toBe(404);
+    expect(res.headers.get('cache-control')).toBe('no-store'); // every /api answer, errors included
   });
 });

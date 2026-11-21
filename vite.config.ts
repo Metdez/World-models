@@ -9,7 +9,12 @@ export default defineConfig({
     client: {
       build: {
         chunkSizeWarningLimit: 1500,
-        rollupOptions: { input: { main: 'index.html', remote: 'remote.html' } },
+        rollupOptions: {
+          input: { main: 'index.html', remote: 'remote.html' },
+          // three.js + its post/camera libraries change far less often than app code: their own chunk stays cached
+          // across deploys and downloads in parallel with main. Only the main page imports it (remote stays three-free).
+          output: { codeSplitting: { groups: [{ name: 'three', test: /node_modules[\\/](three|postprocessing|camera-controls)[\\/]/ }] } },
+        },
       },
     },
     // Worker environment is named after wrangler "name" with '-' -> '_'.

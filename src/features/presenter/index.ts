@@ -10,7 +10,6 @@ import { ROOM } from '../../contracts/services';
 import { h, mount } from '../../ui/dom';
 import { ctlStep, cueAction, remoteLinks } from './apply';
 import './presenter.css';
-import { qrSvg } from './qr';
 
 type Mode = 'host' | 'audience';
 
@@ -109,7 +108,9 @@ function init(ctx: FeatureContext): void {
     const target = m === 'host' ? links.host! : links.audience;
     if (target !== rendered) {
       rendered = target;
-      qr.replaceChildren(qrSvg(target, m === 'host' ? 'QR code: presenter remote' : `QR code: join room ${c}`));
+      const label = m === 'host' ? 'QR code: presenter remote' : `QR code: join room ${c}`;
+      // The QR encoder is only needed on a big screen: its own chunk, fetched on first render.
+      void import('./qr').then(({ qrSvg }) => rendered === target && qr.replaceChildren(qrSvg(target, label)));
     }
   }
   function setMode(next: Mode): void {

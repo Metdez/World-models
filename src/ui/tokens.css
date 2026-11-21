@@ -3,13 +3,13 @@
   /* colour */
   --bg-0: #07080a;
   --bg-1: #0d0f12;
-  --glass: rgba(16, 18, 22, 0.62);
+  --glass: rgba(14, 16, 20, 0.8); /* >= 4.5:1 for --text-2 over the brightest sky (07-03, measured) */
   --glass-filter: blur(14px) saturate(1.2);
   --hair: rgba(255, 255, 255, 0.1);
   --hair-strong: rgba(255, 255, 255, 0.22);
   --text-1: #edeef0;
-  --text-2: #a3a8b0;
-  --text-3: #6b7079;
+  --text-2: #b1b6be;
+  --text-3: #8d939c;
   --accent: #7cf0d4;
   --accent-dim: rgba(124, 240, 212, 0.25);
   --warn: #ffb454;

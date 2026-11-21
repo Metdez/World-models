@@ -11,6 +11,11 @@ export { Room } from './room';
 
 const app = new Hono<{ Bindings: Env }>();
 app.use('/api/*', secureHeaders());
+// Every API answer is per request (errors and 404s included): never cached by a browser or an edge.
+app.use('/api/*', async (c, next) => {
+  await next();
+  if (!c.res.headers.has('Cache-Control')) c.res.headers.set('Cache-Control', 'no-store');
+});
 app.route('/', health);
 app.route('/', time);
 app.route('/', rooms);

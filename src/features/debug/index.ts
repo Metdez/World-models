@@ -1,9 +1,8 @@
-import Stats from 'stats-gl';
 import type { FeatureModule } from '../../contracts/app';
 import { RENDER } from '../../contracts/services';
 import './debug.css';
 
-let stats: Stats | undefined;
+let stats: import('stats-gl').default | undefined;
 
 /** `?debug=1`: stats-gl panel (07-01 adds the feature list). */
 export default {
@@ -14,6 +13,8 @@ export default {
   async init(ctx) {
     const { renderer } = ctx.services.get(RENDER);
     const originalRender = renderer.render;
+    // Debug only (?debug=1): stats-gl stays out of the main bundle.
+    const { default: Stats } = await import('stats-gl');
     const panel = new Stats({ trackGPU: false });
     stats = panel;
     // stats-gl wraps renderer.render to time it; put the original back on dispose.

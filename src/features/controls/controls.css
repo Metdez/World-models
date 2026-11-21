@@ -562,3 +562,29 @@ button.sl-controls-help-row:hover {
     transition: none;
   }
 }
+
+/* The amplification chip leaves the top row before the top-right groups (with the sound toggle) can reach it
+   (07-03, measured: the row is full below ~1290 HUD px), and drops under the view control once that moves up. */
+@media (max-width: 1320px), (min-width: 1600px) and (max-width: 1680px) and (min-height: 860px) {
+  .sl-controls-amp {
+    top: calc(var(--margin) + var(--sl-hud-top-h) + var(--sl-hud-gap));
+  }
+}
+@media (max-width: 1200px) {
+  .sl-controls-amp {
+    top: calc(var(--margin) + 52px + var(--sl-hud-view-h) + var(--sl-hud-gap));
+  }
+}
+
+/* Tablets (1024×768): short suspension labels keep the control between the two columns (07-03, measured). */
+@media (min-width: 721px) and (max-width: 1100px) {
+  .sl-controls-susp .sl-controls-segment {
+    padding: 0 var(--sp-3);
+  }
+  .sl-controls-susp .sl-controls-segment-label {
+    display: none;
+  }
+  .sl-controls-susp .sl-controls-segment-short {
+    display: inline;
+  }
+}
