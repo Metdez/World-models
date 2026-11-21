@@ -6,61 +6,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import { gtCoupe } from '../../src/sim-core/content/gt-coupe';
-import { SUSPENSION_IDS, type SuspensionId } from '../fixtures/08-02-drive';
-import { degPerG, kAt, ramp, rig, speedHold } from '../fixtures/09-04-handling';
-
-export interface StepResult {
-  readonly tYaw: number;
-  readonly tAy: number;
-  readonly overshoot: number;
-  readonly rSteady: number;
-  readonly aySteady: number;
-  readonly delta: number;
-  readonly K: number; // deg/g from the steady state of this run
-}
-
-/** Step of the actuator target to `delta` at t = 0.5 s from straight running at u; 6 s total. */
-export function stepSteer(id: SuspensionId, u: number, delta: number, dt?: number): StepResult {
-  const r = rig({ suspension: id, aids: { abs: false, traction: false, stability: false, steering: false }, ...(dt ? { dt } : {}) });
-  r.launch(u, 0);
-  const hold = speedHold(u);
-  const t: number[] = [];
-  const st: number[] = [];
-  const yaw: number[] = [];
-  const ay: number[] = [];
-  const n = Math.round(6 / r.dt);
-  for (let k = 0; k < n; k++) {
-    const time = k * r.dt;
-    r.cmd.steer = time >= 0.5 ? delta : 0;
-    hold(r);
-    const f = r.step();
-    t.push(time + r.dt);
-    st.push(r.plant.view.steer);
-    yaw.push(f.yawRate);
-    ay.push(f.ay);
-  }
-  const tail = (a: number[]): number => a.slice(-Math.round(1 / r.dt)).reduce((x, y) => x + y, 0) / Math.round(1 / r.dt);
-  const rSs = tail(yaw);
-  const aSs = tail(ay);
-  const cross = (a: number[], level: number): number => t[a.findIndex((x, i) => t[i]! > 0.5 && x >= level)]!;
-  const t50 = cross(st, 0.5 * delta);
-  const L = gtCoupe.wheelbase;
-  return {
-    tYaw: cross(yaw, 0.9 * rSs) - t50,
-    tAy: cross(ay, 0.9 * aSs) - t50,
-    overshoot: Math.max(...yaw) / rSs - 1,
-    rSteady: rSs,
-    aySteady: aSs,
-    delta,
-    K: degPerG((delta - (L * rSs) / u) / aSs),
-  };
-}
-
-/** Actuator steer giving ~4 m/s^2 steady at u (two probes, linear interpolation). */
-export function steerFor(id: SuspensionId, u: number, ay: number): number {
-  const a = stepSteer(id, u, 0.01);
-  return (0.01 * ay) / a.aySteady;
-}
+import { SUSPENSION_IDS } from '../fixtures/08-02-drive';
+import { kAt, ramp, stepSteer, steerFor } from '../fixtures/09-04-handling';
 
 describe('step steer (T6, T8)', () => {
   it.each(SUSPENSION_IDS)('%s: ISO 7401 step at 100 km/h to 4 m/s^2', (id) => {
