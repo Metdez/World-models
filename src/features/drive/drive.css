@@ -1,0 +1,324 @@
+/*
+ * Drive pill, hint and idle cue (ARCHITECTURE-M2 §10.2). Bottom centre, directly above the suspension control (04-05
+ * layout, --sl-hud-* from controls.css): suspension control → (reserved action row: .sl-drive-action, other features)
+ * → pill → hint. While mounted it adds its rows to --sl-hud-drive-h, which controls.css folds into --sl-hud-susp-h, so
+ * the insight caption above keeps clear. Tokens only.
+ */
+:root:has(#overlay > .sl-drive:not(.is-hidden)) {
+  --sl-hud-drive-h: calc(var(--sl-drive-pill-h) + var(--sl-hud-gap));
+}
+:root:has(#overlay > .sl-drive:not(.is-hidden).has-hint) {
+  --sl-hud-drive-h: calc(var(--sl-drive-pill-h) + var(--sl-drive-hint-h) + 2 * var(--sl-hud-gap));
+}
+:root {
+  --sl-drive-pill-h: 44px;
+  --sl-drive-hint-h: 34px;
+  --sl-drive-action-h: 0px;
+}
+:root:has(#overlay > .sl-drive-action:not([hidden])) {
+  --sl-drive-action-h: calc(40px + var(--sl-hud-gap));
+}
+
+.sl-drive {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--margin) + var(--sl-hud-susp-base-h, 96px));
+  transform: translateX(-50%);
+  zoom: var(--sl-hud-zoom, 1);
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: calc(var(--sl-hud-gap, 8px) + var(--sl-drive-action-h));
+  pointer-events: none;
+}
+#overlay > .sl-drive {
+  pointer-events: none;
+}
+
+/* the action row other features fill (Moment replay, Compare, Share): between the pill and the hint */
+#overlay > .sl-drive-action {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--margin) + var(--sl-hud-susp-base-h, 96px) + var(--sl-drive-pill-h) + var(--sl-hud-gap, 8px));
+  transform: translateX(-50%);
+  zoom: var(--sl-hud-zoom, 1);
+}
+
+/* ---------------------------------------------------------------- pill */
+
+.sl-drive-pill {
+  display: flex;
+  align-items: center;
+  height: var(--sl-drive-pill-h);
+  padding: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--hair);
+  box-shadow: var(--shadow-panel);
+  pointer-events: auto;
+  transition:
+    opacity var(--dur-hud) var(--ease),
+    visibility 0s linear 0s,
+    border-color var(--dur-thumb) var(--ease);
+}
+.sl-drive-pill[data-mode='manual'] {
+  border-color: var(--accent-dim);
+}
+
+.sl-drive-toggle {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  height: 36px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.sl-drive-thumb {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 50%;
+  border-radius: var(--radius-pill);
+  background: var(--hair);
+  box-shadow: inset 0 0 0 1px var(--accent-dim);
+  transition: transform var(--dur-thumb) var(--ease);
+}
+.sl-drive-pill[data-mode='manual'] .sl-drive-thumb {
+  transform: translateX(100%);
+}
+
+.sl-drive-seg {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-4);
+  font-size: var(--fs-label);
+  font-weight: 500;
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--text-2);
+  transition: color var(--dur-fast) var(--ease);
+}
+.sl-drive-toggle:hover .sl-drive-seg,
+.sl-drive-pill[data-mode='auto'] .sl-drive-seg[data-mode='auto'],
+.sl-drive-pill[data-mode='manual'] .sl-drive-seg[data-mode='manual'] {
+  color: var(--text-1);
+}
+.sl-drive-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  box-shadow: inset 0 0 0 1px var(--text-2);
+  transition:
+    background var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+.sl-drive-pill[data-mode='auto'] .sl-drive-seg[data-mode='auto'] .sl-drive-dot,
+.sl-drive-pill[data-mode='manual'] .sl-drive-seg[data-mode='manual'] .sl-drive-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+/* the key that switches sits on the segment it switches to */
+.sl-drive-kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 var(--sp-1);
+  font: 400 10px / 1 var(--font-mono);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-2);
+  border: 1px solid var(--hair-strong);
+  border-radius: 5px;
+}
+.sl-drive-pill[data-mode='auto'] .sl-drive-seg[data-mode='auto'] .sl-drive-kbd,
+.sl-drive-pill[data-mode='manual'] .sl-drive-seg[data-mode='manual'] .sl-drive-kbd {
+  display: none;
+}
+
+/* speed and gear while driving */
+.sl-drive-readout {
+  display: none;
+  align-items: baseline;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-2) 0 var(--sp-4);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.sl-drive-pill[data-mode='manual'] .sl-drive-readout {
+  display: inline-flex;
+}
+.sl-drive-speed {
+  min-width: 3ch;
+  text-align: right;
+  font-size: 15px;
+  color: var(--text-1);
+}
+.sl-drive-unit {
+  font-size: 10px;
+  color: var(--text-2);
+}
+.sl-drive-gear {
+  display: inline-grid;
+  place-items: center;
+  align-self: center;
+  width: 26px;
+  height: 26px;
+  margin-left: var(--sp-2);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--hair-strong);
+  font-size: 13px;
+  color: var(--text-1);
+}
+
+/* the motorcycle (no plant): Auto only, said plainly */
+.sl-drive-note {
+  display: none;
+  padding: 0 var(--sp-4) 0 var(--sp-2);
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.sl-drive-pill.is-unavailable .sl-drive-note {
+  display: inline;
+}
+.sl-drive-pill.is-unavailable .sl-drive-toggle {
+  grid-template-columns: 1fr;
+  cursor: default;
+}
+.sl-drive-pill.is-unavailable .sl-drive-seg[data-mode='manual'] {
+  display: none;
+}
+.sl-drive-pill.is-unavailable .sl-drive-thumb {
+  width: 100%;
+}
+.sl-drive-note.is-pulse {
+  animation: sl-drive-pulse 900ms var(--ease);
+}
+@keyframes sl-drive-pulse {
+  30% {
+    color: var(--text-1);
+  }
+}
+
+/* ---------------------------------------------------------------- hint and idle cue */
+
+.sl-drive-hint {
+  display: flex;
+  align-items: center;
+  height: var(--sl-drive-hint-h);
+  padding: 0 var(--sp-4);
+  border-radius: var(--radius-pill);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--hair);
+  font-size: 13px;
+  color: var(--text-2);
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(4px);
+  transition:
+    opacity var(--dur-hud) var(--ease),
+    transform var(--dur-hud) var(--ease),
+    visibility 0s linear var(--dur-hud);
+}
+.sl-drive-hint.is-shown {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition:
+    opacity var(--dur-caption-in) var(--ease),
+    transform var(--dur-caption-in) var(--ease),
+    visibility 0s linear 0s;
+}
+.sl-drive-hint-row {
+  display: none;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.sl-drive-hint[data-kind='prompt'] [data-kind='prompt'],
+.sl-drive-hint[data-kind='controls'] [data-kind='controls'],
+.sl-drive-hint[data-kind='cue'] [data-kind='cue'] {
+  display: inline-flex;
+}
+.sl-drive-hint-row .sl-drive-kbd {
+  color: var(--text-1);
+}
+.sl-drive-hint-row[data-kind='controls'] {
+  gap: var(--sp-5);
+}
+.sl-drive-hint-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.sl-drive-hint-group > :last-child,
+.sl-drive-hint-or {
+  margin-left: var(--sp-1);
+}
+.sl-drive-hint[data-kind='cue'] {
+  border-color: var(--accent-dim);
+  color: var(--text-1);
+}
+.sl-drive-cue-count {
+  min-width: 1ch;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+.sl-drive-hint[data-kind='cue'] .sl-drive-hint-or {
+  color: var(--text-2);
+}
+
+/* ---------------------------------------------------------------- HUD hidden / attract */
+
+.sl-drive.is-hidden .sl-drive-pill,
+.sl-drive.is-hidden .sl-drive-hint:not([data-kind='cue']),
+.sl-drive.is-attract .sl-drive-hint {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity var(--dur-hud) var(--ease),
+    visibility 0s linear var(--dur-hud);
+}
+
+@media (pointer: coarse) {
+  :root {
+    --sl-drive-pill-h: 52px;
+  }
+  .sl-drive-toggle {
+    height: 44px;
+  }
+  .sl-drive-kbd,
+  .sl-drive-hint[data-kind='prompt'],
+  .sl-drive-hint[data-kind='controls'] {
+    display: none;
+  }
+}
+@media (max-width: 720px) {
+  .sl-drive-hint-row[data-kind='controls'] {
+    gap: var(--sp-3);
+  }
+  .sl-drive-hint-or {
+    display: none;
+  }
+}
