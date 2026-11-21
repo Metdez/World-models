@@ -99,8 +99,7 @@ describe('clumsy keyboard driver (aids on: controllable; aids off: reported)', (
     const out: string[] = [];
     for (const aids of [DEFAULT_AIDS, OFF]) {
       const sim = makeSim('test-skidpad', 'macpherson', 0);
-      sim.drive!.setAids(aids);
-      manualAtRest(sim);
+      manualAtRest(sim); // the approach with the aids on (the test driver is not the subject), then the aids under test
       upTo(sim, 21.5, 1 / 60);
       for (let k = 0; k < steps(3); k++) {
         const f = sim.sample(1);
@@ -108,6 +107,7 @@ describe('clumsy keyboard driver (aids on: controllable; aids off: reported)', (
         sim.step(SIM_DT);
       }
       const ay0 = sim.sample(1).ay;
+      sim.drive!.setAids(aids);
       let steer = 0;
       const w = watch(sim, 4, (t, f) => {
         if (t === 0) steer = keepLine(f, 1 / 60);
