@@ -71,4 +71,13 @@ $ PLAYWRIGHT_BASE_URL=http://localhost:4373 (private build) playwright test 06-0
   06-01 ×2 ✓, 06-04 ×2 ✓ (QR now lazy), 07-02 remote ✓; 07-02 CSP test timed out booting under load average 21,
   re-run alone ✓ (3.0m) after raising its boot budget to 150 s
 ```
-Production e2e and `npm run check`: see the final report.
+$ PLAYWRIGHT_BASE_URL=https://suspension-lab.zh-a16.workers.dev playwright test tests/e2e/07-02-delivery.spec.ts
+  ✓ enforced CSP: zero violations in follow, close-up, explore, x-ray, motorcycle and the engineer (3.3m)
+  ✓ remote pages: CSP clean; the host key never travels in a WebSocket URL; screen sees the host connect (37.6s)
+    (test 2 opens /remote.html?room=CODE#k=KEY: the fragment survives the 307 to /remote — host role reached)
+$ npm run check   (load average ~21 from parallel executors' e2e)
+  typecheck OK; ✔ no dependency violations found (207 modules, 641 dependencies cruised)
+  vitest: Tests 3 failed | 655 passed | 11 skipped (669) — the 3 are 5 s default timeouts in sim-core/kernel/
+  teaching-overlays perf tests (not 07-02 files); same three with --testTimeout 60000: Tests 31 passed (31).
+  All worker/arch/live-lab/presenter/motorcycle tests green.
+```
