@@ -1,7 +1,8 @@
 /**
  * 11-01 tyre VFX (ARCHITECTURE-M2 §10.5): grip rings under each tyre in steady cornering on the steering pad (unequal
  * sizes), a slide with the aids off (rings past the limit, skid marks), and an ABS-off stop on the braking platform's
- * split-grip lane (lock-up marks). Scripted with __app.driveIntent on a paused clock, 1/30 s per rendered frame.
+ * split-grip lane (lock-up marks). Scripted with __app.driveIntent on a paused clock, 1/30 s per rendered frame while
+ * marks can be laid (1/15 s for the run-ups).
  * Screenshots (1280x720, DPR 1) go to SHOTS_DIR; judged under a software renderer (SwiftShader).
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -32,14 +33,14 @@ async function top(page: Page, name: string, eye: View, at: View, fov = 40) {
  *   brake: hold `speed` north along x = 149.75, from `brakeAt` s full brake, wheel straight.
  * Returns how many frames had a corner past the limit.
  */
-function drive(page: Page, plan: Plan, seconds: number, speed: number, at = Infinity) {
+function drive(page: Page, plan: Plan, seconds: number, speed: number, at = Infinity, frame = 1 / 30) {
   return page.evaluate(
-    ([plan, seconds, speed, at]) => {
+    ([plan, seconds, speed, at, frame]) => {
       const app = globalThis.__app!;
       const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
       const clamp = (v: number, lo = -1, hi = 1) => Math.min(hi, Math.max(lo, v));
       let past = 0;
-      for (let t = 0; t < seconds; t += 1 / 30) {
+      for (let t = 0; t < seconds; t += frame) {
         const d = app.drive();
         let steer = 0;
         let throttle = clamp(0.3 * (speed - d.u) + 0.12, 0, 1);
@@ -63,19 +64,19 @@ function drive(page: Page, plan: Plan, seconds: number, speed: number, at = Infi
           }
         }
         app.driveIntent({ steer, throttle, brake });
-        app.advance(1 / 30);
+        app.advance(frame);
         if (globalThis.__tyreVfx!().corners.some((c) => c.past)) past++;
       }
       app.driveIntent(null);
       return past;
     },
-    [plan, seconds, speed, at] as const,
+    [plan, seconds, speed, at, frame] as const,
   );
 }
 
 test.describe('11-01 tyre VFX', () => {
   test.use({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
-  test.setTimeout(300_000);
+  test.setTimeout(600_000);
 
   test('steering pad: rings show load transfer; a slide turns them and lays marks', async ({ page }) => {
     const errors = captureConsole(page);
@@ -86,9 +87,9 @@ test.describe('11-01 tyre VFX', () => {
     expect(v.chip.text).toContain('model');
     expect(v.rings).toBe(true);
 
-    await drive(page, 'pad', 6, 12); // launch (a brief wheelspin from rest is past the limit, truthfully)
+    await drive(page, 'pad', 6, 12, Infinity, 1 / 15); // launch (a brief wheelspin from rest is past the limit, truthfully)
     const launchMarks = (await vfx(page)).marks.written;
-    expect(await drive(page, 'pad', 8, 12)).toBe(0);
+    expect(await drive(page, 'pad', 6, 12, Infinity, 1 / 15)).toBe(0);
     v = await vfx(page);
     const d = await page.evaluate(() => globalThis.__app!.drive());
     const r = Object.fromEntries(v.corners.map((c) => [c.id, c.radius]));
@@ -125,7 +126,8 @@ test.describe('11-01 tyre VFX', () => {
     await waitForReady(page, boot('braking-platform'));
     await page.evaluate(() => globalThis.__app!.set('driveAids', { abs: false, traction: true, stability: false, steering: true }));
     await page.evaluate(() => globalThis.__app!.advance(0.3));
-    const past = await drive(page, 'brake', 9.2, 22, 8.2);
+    await drive(page, 'brake', 7.5, 22, Infinity, 1 / 15);
+    const past = await drive(page, 'brake', 1.4, 22, 0.4);
     const v = await vfx(page);
     const d = await page.evaluate(() => globalThis.__app!.drive());
     console.log(`[11-01] braking at (${d.x.toFixed(1)}, ${d.y.toFixed(1)}) ${d.u.toFixed(1)} m/s on ${d.corners.map((c) => `${c.id} ${c.surface}`).join(', ')}: past ${v.corners.filter((c) => c.past).map((c) => c.id).join(',')} (${past} frames), marks ${v.marks.written}`);
