@@ -259,7 +259,8 @@ export default {
               class: 'sl-ghost-lab-target',
               'data-target': id,
               title: id === CONTROL ? COPY.controlTitle : label(id),
-              'aria-checked': 'false',
+              'aria-checked': String(id === target),
+              tabindex: id === target ? '0' : '-1',
             },
             id === CONTROL ? COPY.control : shortLabel(id),
           ),
@@ -280,6 +281,7 @@ export default {
         const own = el.dataset.target === course.suspensionId;
         el.hidden = own;
         el.setAttribute('aria-checked', String(el.dataset.target === target));
+        el.tabIndex = el.dataset.target === target ? 0 : -1; // one tab stop per radiogroup (roving tabindex)
       }
       aLabel.textContent = `${a} (${control ? COPY.you : COPY.yours})`;
       bLabel.textContent = `${control ? a : label(target)} (${COPY.ghost})`;
@@ -362,6 +364,18 @@ export default {
     closeBtn.addEventListener('click', () => {
       if (playing) bus.emit('drive:request', { mode: 'manual' });
       clear('closed');
+    });
+    // radiogroup keys: arrows move the selection with focus among the visible targets
+    targets.addEventListener('keydown', (e) => {
+      const dir = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
+      if (!dir) return;
+      e.preventDefault();
+      e.stopPropagation(); // arrows here are not driving input
+      const list = [...targets.children].filter((b): b is HTMLElement => b instanceof HTMLElement && !b.hidden);
+      const i = list.findIndex((b) => b.dataset.target === target);
+      const next = list[(i + dir + list.length) % list.length];
+      next?.click();
+      next?.focus();
     });
     targets.addEventListener('click', (e) => {
       const el = (e.target as HTMLElement).closest<HTMLElement>('[data-target]');

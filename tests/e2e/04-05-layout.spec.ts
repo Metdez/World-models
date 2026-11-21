@@ -38,6 +38,8 @@ const HUD = [
   '.sl-drive-hint',
   '.sl-drive-actions',
   '.sl-drive-aids-panel',
+  // phone driver card (12-04, ?screen=1 only)
+  '.sl-phone-drive',
 ];
 
 /** Deliberate stacking inside one feature: the Assists popover opens over the drive hint / action row above the pill. */
@@ -243,7 +245,7 @@ test('big screen with a live room: tag, presence line, join card, telemetry, pol
   await expect(screen.locator('.sl-poll')).toBeVisible({ timeout: 20_000 });
   await set(screen, 'overlay', 'engineer');
 
-  const all = ['.sl-controls-tag', '.sl-live-lab', '.sl-presenter', '.sl-poll', '.sl-telemetry-panel', '.sl-engineer', '.sl-teaching-overlays-trace', '.sl-debug-stats'];
+  const all = ['.sl-controls-tag', '.sl-live-lab', '.sl-presenter', '.sl-poll', '.sl-telemetry-panel', '.sl-engineer', '.sl-teaching-overlays-trace', '.sl-debug-stats', '.sl-phone-drive'];
   for (const size of SIZES) {
     await screen.setViewportSize(size);
     const tag = `${size.width}x${size.height}`;
