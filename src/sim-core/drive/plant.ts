@@ -527,13 +527,14 @@ export function createPlant(core: CarCore): VehiclePlant {
       st[CG_S] = path.s;
       st[OUT_T] = 0;
       st[OUT_D] = 0;
-      core.input.ax = autoInputs.ax;
-      core.input.ay = autoInputs.ay;
+      // NaN = keep the inputs the car model last fed to the ride (they ARE the Auto inputs).
+      if (autoInputs.ax === autoInputs.ax) core.input.ax = autoInputs.ax;
+      if (autoInputs.ay === autoInputs.ay) core.input.ay = autoInputs.ay;
       // Fade offsets: plant road inputs - the Auto inputs of the last step (core.input.road still holds them).
-      for (let i = 0; i < 4; i++) h[i] = core.input.road[i]!;
+      for (let i = 0; i < 4; i++) st[OFF + i] = core.input.road[i]!;
       corners();
       ground();
-      for (let i = 0; i < 4; i++) st[OFF + i] = core.input.road[i]! - h[i]!;
+      for (let i = 0; i < 4; i++) st[OFF + i] = core.input.road[i]! - st[OFF + i]!;
       st[FADE] = HANDOFF_FADE_S;
       applyOffsets(0);
       powertrain.reset(st[U]!, 1);
@@ -729,14 +730,15 @@ export function createPlant(core: CarCore): VehiclePlant {
       let u = u0 + dt * ((sumFx - drag - rr) / m - G * g * norm + v0 * r0);
       let v = v0 + dt * (sumFy / m - G * cc * norm - u0 * r0);
       let r = r0 + (dt * sumMz) / yawInertia();
-      // 14. sleep (before the position update: no creep while held)
+      // 14. sleep (before the position update: no creep while held). v0 addition to §7.2: rolling resistance also
+      // holds the car where the slope's pull is below it (the smooth-sign regularisation would otherwise creep).
       const slope = Math.sqrt(g * g + cc * cc);
       if (
         Math.abs(u) < SLEEP_V &&
         Math.abs(v) < SLEEP_V &&
         Math.abs(r) < SLEEP_R &&
         cmd.throttle < 0.02 &&
-        (cmd.brake > 0.05 || cmd.handbrake > 0.05 || slope < SLEEP_SLOPE)
+        (cmd.brake > 0.05 || cmd.handbrake > 0.05 || slope < SLEEP_SLOPE || G * slope * m < 0.9 * rolling)
       ) {
         u = 0;
         v = 0;

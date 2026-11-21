@@ -8,8 +8,9 @@
 import { CONTROL_TICKS, DEFAULT_AIDS, neutralIntent, type DecodedReplay, type DriveAids, type DriveControl, type DriveEvent, type DriveFrame, type DriveIntent, type DriveMode } from '../../contracts/drive';
 import type { PathState, SimEvent } from '../../contracts/sim';
 import type { BuiltTrack, TrackSample } from '../../contracts/track';
+import type { XYZ } from '../../contracts/units';
 import type { CarDefinition, VehicleDefinition } from '../../contracts/vehicle';
-import type { Frenet, GroundWorld, XYZLike } from './control-types';
+import type { Frenet, GroundWorld } from '../../contracts/world';
 import type { SpeedProfile } from '../path/speed-profile';
 import type { VehicleModel } from '../vehicle-models';
 import { modeEvent, resetEvent } from './events';
@@ -62,7 +63,7 @@ export function createDriveControl(deps: DriveControlDeps): DriveHost {
   driver.setAids(aids);
   const fr: Frenet = { s: 0, l: 0, heading: 0, curvature: 0, converged: true };
   const ts: TrackSample = { s: 0, x: 0, y: 0, z: 0, heading: 0, curvature: 0, bank: 0, grade: 0 };
-  const xyz: XYZLike = { x: 0, y: 0, z: 0 };
+  const xyz: XYZ = { x: 0, y: 0, z: 0 };
 
   const plant = () => deps.model().plant;
   function setMode(next: DriveMode, cut: boolean): void {

@@ -140,8 +140,11 @@ export function createPowertrain(p: CarPowertrain, radius: number, wheelInertia:
       const rpm = Math.max(p.idleRpm, rpmWheel);
       st[RPM] = rpm;
 
-      // Traction scale (aids.traction): slip speed above 1.5 m/s cuts throttle, first-order 0.06 s.
-      const target = aids.traction ? Math.min(1, Math.max(0.15, 1 - (io.slipSpeed - 1.5) / 2.5)) : 1;
+      // Traction scale (aids.traction), first-order 0.06 s. v0: the threshold and range scale with speed (slip ratio
+      // about 0.03-0.05) because the v0 tyre saturates at a slip ratio near 0.05; §7.7's fixed 1.5 / 2.5 m/s (09-02)
+      // suits the 09-01 curve whose peak sits at a larger slip.
+      const au = Math.abs(io.speed);
+      const target = aids.traction ? Math.min(1, Math.max(0.15, 1 - (io.slipSpeed - (0.3 + 0.03 * au)) / (0.5 + 0.02 * au))) : 1;
       st[TCS] = st[TCS]! + (target - st[TCS]!) * Math.min(1, dt / TCS_TAU);
       const tcs = st[TCS]!;
 
@@ -150,7 +153,12 @@ export function createPowertrain(p: CarPowertrain, radius: number, wheelInertia:
       if (io.throttle >= 0.05) {
         const launch = g === 1 || g < 0 ? p.idleRpm + (STALL_RPM - p.idleRpm) * io.throttle : 0;
         te = torqueAt(Math.max(rpm, launch)) * throttle * tcs * clutch;
-      } else if (rpmWheel > p.idleRpm + 200) te = -(p.frictionTorque[0] + p.frictionTorque[1] * rpmWheel) * clutch;
+      } else {
+        // Engine braking above idle + 200 rpm, faded in over 100-300 rpm above idle (v0: a step at idle + 200 would
+        // release the tyres' stored deflection as a small forward jolt).
+        const fade = Math.min(1, Math.max(0, (rpmWheel - p.idleRpm - 100) / 200));
+        if (fade > 0) te = -(p.frictionTorque[0] + p.frictionTorque[1] * rpmWheel) * clutch * fade;
+      }
       if (rpm >= p.redlineRpm) te = Math.min(te, 0);
       if (g < 0 && -io.speed >= p.reverseSpeedCap) te = Math.min(te, 0);
 

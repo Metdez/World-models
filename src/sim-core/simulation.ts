@@ -11,7 +11,12 @@ import { createTelemetryFrame, type TelemetryFrame } from '../contracts/telemetr
 import type { BuiltTrack, TrackDefinition } from '../contracts/track';
 import { SIM_DT } from '../contracts/units';
 import type { VehicleDefinition } from '../contracts/vehicle';
+import type { GroundWorld, WorldDefinition } from '../contracts/world';
+import type { DriveFrame } from '../contracts/drive';
 import { prepareCarSuspension } from './car/car-model';
+import { createDriveControl } from './drive/control';
+import { dwrapPi } from './math/det';
+import { buildGroundWorld } from './world/ground';
 import { gtCoupe } from './content/gt-coupe';
 import { provingLoop } from './content/proving-loop';
 import { doubleWishbone } from './content/susp-double-wishbone';
@@ -48,6 +53,21 @@ function trackFor(def: TrackDefinition): BuiltTrack {
   if (!t) tracks.set(def, (t = buildTrack(def)));
   return t;
 }
+const loopWorlds = new WeakMap<BuiltTrack, GroundWorld>();
+const zonedWorlds = new WeakMap<WorldDefinition, WeakMap<BuiltTrack, GroundWorld>>();
+/** The GroundWorld of (track, world definition), built once per pair (ARCH-M2 §7.3). */
+function worldFor(track: BuiltTrack, def: WorldDefinition | undefined): GroundWorld {
+  if (!def) {
+    let w = loopWorlds.get(track);
+    if (!w) loopWorlds.set(track, (w = buildGroundWorld(track, null)));
+    return w;
+  }
+  let byTrack = zonedWorlds.get(def);
+  if (!byTrack) zonedWorlds.set(def, (byTrack = new WeakMap()));
+  let w = byTrack.get(track);
+  if (!w) byTrack.set(track, (w = buildGroundWorld(track, def)));
+  return w;
+}
 function profileFor(track: BuiltTrack, v: VehicleDefinition): SpeedProfile {
   let byVehicle = profiles.get(track);
   if (!byVehicle) profiles.set(track, (byVehicle = new WeakMap()));
@@ -77,9 +97,32 @@ function classOf(def: VehicleDefinition | SuspensionDefinition): string {
   return 'class' in def ? def.class : def.vehicleClass;
 }
 
+/** frame.drive in auto (ARCH-M2 §7.3 (4)): the path as the car's state; demands and powertrain fields neutral. */
+function writeAutoDrive(d: DriveFrame, path: PathState): void {
+  d.x = path.x;
+  d.y = path.y;
+  d.yaw = dwrapPi(path.heading);
+  d.u = path.v;
+  d.v = 0;
+  d.beta = 0;
+  d.throttle = 0;
+  d.brake = 0;
+  d.handbrake = 0;
+  d.gear = 0;
+  d.engineRpm = 0;
+  d.absActive = false;
+  d.tractionActive = false;
+  d.stabilityActive = false;
+  d.zone = 'loop';
+  d.lineOffset = 0;
+  d.headingError = 0;
+  d.approximate = false;
+}
+
 export function createSimulation(options: SimulationOptions): Simulation {
   const resolve = resolver(options.catalog);
   const track = trackFor(resolve.track(options.trackId));
+  const world = worldFor(track, options.catalog.world?.(track.def.id));
   const sectionEvents = track.sections.map((s) => ({ kind: 'section', index: s.index, id: s.id }) as const);
   const events: SimEvent[] = [];
   const path = newPath();
@@ -99,7 +142,8 @@ export function createSimulation(options: SimulationOptions): Simulation {
   /** After a seek the current step IS the requested time: sample() shows it (alpha 1) until the next step. */
   let held = false;
 
-  function step(dt: number): void {
+  /** The M1 step: time, lap/section clock and the rails (stateAt) model step. */
+  function autoStep(dt: number): void {
     held = false;
     prevLapTime = lapTime;
     prevSimTime = simTime;
@@ -119,6 +163,29 @@ export function createSimulation(options: SimulationOptions): Simulation {
     model.step(dt, path, events);
   }
 
+  function step(dt: number): void {
+    if (!drive.beforeStep(path)) {
+      autoStep(dt);
+      return;
+    }
+    // Plant step: time advances the same way; the lap clock is detached (lap time of the projected s on the loop
+    // corridor, else held); no lap events outside auto.
+    held = false;
+    prevLapTime = lapTime;
+    prevSimTime = simTime;
+    simTime += dt;
+    drive.stepPlant(dt, events);
+    const s = model.plant!.loopS;
+    if (s === s) {
+      lapTime = profile.timeAtS(s);
+      const k = track.sectionIndexAt(s);
+      if (k !== sectionIndex) {
+        sectionIndex = k;
+        events.push(sectionEvents[k]!);
+      }
+    }
+  }
+
   /** Equilibrium at t - SEEK_SETTLE_S, then fixed steps to t. Events of the pre-roll are dropped. */
   function preroll(t: number): void {
     const d = profile.lapDuration;
@@ -129,7 +196,7 @@ export function createSimulation(options: SimulationOptions): Simulation {
     sectionIndex = path.sectionIndex;
     model.reset(path);
     const n = Math.round(SEEK_SETTLE_S / SIM_DT);
-    for (let k = 0; k < n; k++) step(SIM_DT);
+    for (let k = 0; k < n; k++) autoStep(SIM_DT);
     events.length = queued;
     lap = keepLap;
     lapTime = wrap(t, d);
@@ -153,7 +220,7 @@ export function createSimulation(options: SimulationOptions): Simulation {
     const s = resolve.suspension(suspensionId ?? v.defaultSuspension);
     if (classOf(s) !== v.class) throw new Error(`Suspension "${s.id}" is for a ${classOf(s)}, vehicle "${v.id}" is a ${v.class}`);
     prepare(v);
-    const m = VEHICLE_MODELS[v.class](v, s, track);
+    const m = VEHICLE_MODELS[v.class](v, s, track, world);
     vehicle = v;
     suspension = s;
     model = m;
@@ -161,8 +228,21 @@ export function createSimulation(options: SimulationOptions): Simulation {
     frame = createTelemetryFrame(v.class, m.corners);
   }
 
+  const drive = createDriveControl({
+    model: () => model,
+    vehicle: () => vehicle,
+    track,
+    world,
+    profile: () => profile,
+    simTime: () => simTime,
+    seekRails: (t) => preroll(t),
+    lapTime: () => lapTime,
+  });
+
   const sim: Simulation = {
     track,
+    drive,
+    world,
     get vehicle() {
       return vehicle;
     },
@@ -183,6 +263,21 @@ export function createSimulation(options: SimulationOptions): Simulation {
 
     sample(alphaIn, amplification = 1) {
       const alpha = held ? 1 : alphaIn;
+      if (drive.mode !== 'auto') {
+        const f = frame;
+        f.vehicleId = vehicle.id;
+        f.suspensionId = suspension.id;
+        f.simTime = prevSimTime + (simTime - prevSimTime) * alpha;
+        f.lapTime = lapTime;
+        f.lap = lap;
+        const s = model.plant!.loopS;
+        if (s === s) f.s = s;
+        f.sectionIndex = sectionIndex;
+        f.sectionId = track.sections[sectionIndex]!.id;
+        model.plant!.sample(alpha, amplification, f);
+        drive.writeFrame(f.drive);
+        return f;
+      }
       const d = profile.lapDuration;
       const lt = held ? lapTime : wrap(prevLapTime + wrapHalf(lapTime - prevLapTime, d) * alpha, d);
       profile.stateAt(lt, pathSample);
@@ -201,12 +296,20 @@ export function createSimulation(options: SimulationOptions): Simulation {
       f.ay = pathSample.ay;
       f.yawRate = pathSample.v * pathSample.curvature;
       model.sample(alpha, amplification, pathSample, f);
+      writeAutoDrive(f.drive, pathSample);
+      drive.writeFrame(f.drive);
       return f;
     },
 
     setSuspension(id) {
       const s = resolve.suspension(id);
       if (classOf(s) !== vehicle.class) throw new Error(`Suspension "${s.id}" is for a ${classOf(s)}, not a ${vehicle.class}`);
+      if (drive.mode !== 'auto') {
+        // Driving: only tables and extras change; pose, velocities and the ride state continue (no pre-roll).
+        model.setSuspension(s, true);
+        suspension = s;
+        return;
+      }
       model.setSuspension(s);
       suspension = s;
       // No time passes: re-derive the ride state for the new geometry at the same lap time (the model's previous
@@ -217,12 +320,15 @@ export function createSimulation(options: SimulationOptions): Simulation {
     },
 
     setVehicle(id, suspensionId) {
+      drive.releaseNow();
       const fraction = lapTime / profile.lapDuration;
       load(id, suspensionId);
       preroll(fraction * profile.lapDuration);
     },
 
     seek(t) {
+      drive.releaseNow();
+      drive.attach();
       preroll(t);
     },
 
