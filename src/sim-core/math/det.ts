@@ -175,6 +175,31 @@ export function dcos(x: number): number {
   return n === 0 ? kernelCos(Y[0]!, Y[1]!) : n === 1 ? -kernelSin(Y[0]!, Y[1]!) : n === 2 ? -kernelCos(Y[0]!, Y[1]!) : kernelSin(Y[0]!, Y[1]!);
 }
 
+/**
+ * sin(x) and cos(x) into SINCOS[0], SINCOS[1]: bit-identical to dsin(x) / dcos(x) (same reduction, same kernels), but
+ * returns nothing. A double returned from a call V8 does not inline is boxed (a heap allocation per call); hot paths
+ * that need both values (track pose integration, projection) use this to stay allocation-free.
+ */
+export const SINCOS = new Float64Array(2);
+export function dsincos(x: number): void {
+  const ix = highWord(x) & 0x7fffffff;
+  if (ix <= 0x3fe921fb) {
+    SINCOS[0] = ix < 0x3e500000 ? x : kernelSin(x, 0);
+    SINCOS[1] = ix < 0x3e46a09e ? 1 : kernelCos(x, 0);
+    return;
+  }
+  if (ix >= 0x7ff00000) {
+    SINCOS[0] = NaN;
+    SINCOS[1] = NaN;
+    return;
+  }
+  const n = rempio2(x, ix) & 3;
+  const sn = kernelSin(Y[0]!, Y[1]!);
+  const cs = kernelCos(Y[0]!, Y[1]!);
+  SINCOS[0] = n === 0 ? sn : n === 1 ? cs : n === 2 ? -sn : -cs;
+  SINCOS[1] = n === 0 ? cs : n === 1 ? -sn : n === 2 ? -cs : sn;
+}
+
 export function dtan(x: number): number {
   const ix = highWord(x) & 0x7fffffff;
   if (ix <= 0x3fe921fb) return ix < 0x3e400000 ? x : kernelTan(x, 0, 1);

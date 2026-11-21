@@ -4,7 +4,7 @@
  * Simpson's rule per node step, which is accurate to ~1e-10 m per step at <= 0.25 m spacing.
  */
 import type { TrackDefinition, TrackPrimitive, TrackSegmentDefinition } from '../../contracts/track';
-import { dcos, dsin } from '../math/det';
+import { dcos, dsin, dsincos, SINCOS } from '../math/det';
 
 /** Maximum node spacing along the centreline, m. */
 export const NODE_DS = 0.25;
@@ -41,8 +41,16 @@ export function primitiveTurn(p: TrackPrimitive): number {
 export function advancePose(x: number, y: number, psi: number, k: number, dk: number, u: number, out: { x: number; y: number; psi: number }): void {
   const pm = psi + 0.5 * k * u + 0.125 * dk * u * u;
   const p1 = psi + k * u + 0.5 * dk * u * u;
-  out.x = x + (u / 6) * (dcos(psi) + 4 * dcos(pm) + dcos(p1));
-  out.y = y + (u / 6) * (dsin(psi) + 4 * dsin(pm) + dsin(p1));
+  // dsincos = dsin/dcos bit for bit, without a boxed return per call (this runs in every track sample)
+  dsincos(psi);
+  const s0 = SINCOS[0]!;
+  const c0 = SINCOS[1]!;
+  dsincos(pm);
+  const sm = SINCOS[0]!;
+  const cm = SINCOS[1]!;
+  dsincos(p1);
+  out.x = x + (u / 6) * (c0 + 4 * cm + SINCOS[1]!);
+  out.y = y + (u / 6) * (s0 + 4 * sm + SINCOS[0]!);
   out.psi = p1;
 }
 

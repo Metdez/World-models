@@ -14,6 +14,16 @@ import { advancePose, integratePlan, primitiveLength, solveClosure } from './clo
 import { createSurface } from './surface';
 import { dcos, dsin } from '../math/det';
 
+/** Plan-view pose of a built track at s (x, y, heading wrapped, curvature; the other fields are left alone). */
+export type PlanPose = (s: number, out: TrackSample) => void;
+const PLAN_POSE = new WeakMap<BuiltTrack, PlanPose>();
+/**
+ * The plan-only part of `track.sample` (bit-identical x, y, heading, curvature) for hot loops that need nothing else
+ * (the projection's Newton iterations): it skips the elevation, bank and grade evaluations. Undefined for a track not
+ * made by buildTrack.
+ */
+export const planPoseOf = (track: BuiltTrack): PlanPose | undefined => PLAN_POSE.get(track);
+
 export function buildTrack(def: TrackDefinition): BuiltTrack {
   const segments = solveClosure(def);
   const resolved: TrackDefinition = { ...def, segments };
@@ -76,5 +86,17 @@ export function buildTrack(def: TrackDefinition): BuiltTrack {
       return out;
     },
   };
+  PLAN_POSE.set(track, (sIn, out) => {
+    const s = wrap(sIn, length);
+    const i = findInterval(plan.s, s);
+    const u = s - plan.s[i]!;
+    const k = plan.k[i]!;
+    const dk = plan.dk[i]!;
+    advancePose(plan.x[i]!, plan.y[i]!, plan.psi[i]!, k, dk, u, pose);
+    out.x = pose.x;
+    out.y = pose.y;
+    out.heading = wrapAngle(pose.psi);
+    out.curvature = k + dk * u;
+  });
   return track;
 }

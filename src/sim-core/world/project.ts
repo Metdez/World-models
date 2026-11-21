@@ -11,7 +11,8 @@
 import type { BuiltTrack, TrackSample } from '../../contracts/track';
 import type { Frenet } from '../../contracts/world';
 import { wrap } from '../math/interp';
-import { datan2, dcos, dsin } from '../math/det';
+import { datan2, dcos, dsin, dsincos, SINCOS } from '../math/det';
+import { planPoseOf } from '../track/build';
 
 /** Node spacing of the candidate search, m. */
 const NODE_STEP = 2;
@@ -56,6 +57,7 @@ export function createProjectorCore(track: BuiltTrack): ProjectorCore {
     nx[i] = ts.x;
     ny[i] = ts.y;
   }
+  const plan = planPoseOf(track);
   const it = new Int32Array(1);
   /** [s, l] of the last Newton run. */
   const res = new Float64Array(2);
@@ -64,12 +66,17 @@ export function createProjectorCore(track: BuiltTrack): ProjectorCore {
   function newton(px: number, py: number, s0: number): boolean {
     let s = s0;
     for (let k = 0; k < MAX_IT; k++) {
-      track.sample(s, ts);
+      // the iterations need the plan pose only (same bits as track.sample); ts.s = NaN marks ts as not a full sample
+      if (plan) {
+        plan(s, ts);
+        ts.s = NaN;
+      } else track.sample(s, ts);
       it[0] = it[0]! + 1;
       const dx = px - ts.x;
       const dy = py - ts.y;
-      const c = dcos(ts.heading);
-      const sn = dsin(ts.heading);
+      dsincos(ts.heading);
+      const c = SINCOS[1]!;
+      const sn = SINCOS[0]!;
       const f = dx * c + dy * sn;
       const d = -dx * sn + dy * c;
       // Exact for an arc (rotate about its centre of curvature), Newton f / (1 - kappa d) on a straight.
@@ -191,10 +198,19 @@ export function createProjectorCore(track: BuiltTrack): ProjectorCore {
     for (let j = r0; j < r1; j += 2) {
       const a = nearRuns[j]!;
       const end = a + nearRuns[j + 1]!;
-      let dPrev = dist2(x, y, a - 1);
-      let dCur = dist2(x, y, a);
+      // dist2 written out: a call V8 does not inline boxes its double arguments (an allocation per node)
+      let kk = a - 1 < 0 ? a - 1 + n : a - 1;
+      let ex = x - nx[kk]!;
+      let ey = y - ny[kk]!;
+      let dPrev = ex * ex + ey * ey;
+      ex = x - nx[a]!;
+      ey = y - ny[a]!;
+      let dCur = ex * ex + ey * ey;
       for (let i = a; i < end; i++) {
-        const dNext = dist2(x, y, i + 1);
+        kk = i + 1 >= n ? i + 1 - n : i + 1;
+        ex = x - nx[kk]!;
+        ey = y - ny[kk]!;
+        const dNext = ex * ex + ey * ey;
         if (dCur <= lim2 && dCur <= dPrev && dCur < dNext) {
           const s0 = i * step;
           if (!newton(x, y, s0)) {
