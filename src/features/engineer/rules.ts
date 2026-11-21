@@ -184,15 +184,21 @@ function parseLabel(label: string): { key: string; wheel: string; previous: stri
 export const driveKey = (label: string): string | undefined => parseLabel(label)?.key;
 
 const WHEEL_ID: Readonly<Record<string, string>> = { 'front-left': 'fl', 'front-right': 'fr', 'rear-left': 'rl', 'rear-right': 'rr' };
-const BELOW_NOTICE = (a: string, b: string): boolean => (a === 'macpherson' && b === 'double-wishbone') || (a === 'double-wishbone' && b === 'macpherson');
+/**
+ * Rear compliance steer per type while driving (09-04: the multi-link rear steers about three times as much; strut and
+ * wishbone differ below notice). Data, not branching on ids (ARCHITECTURE §2 rule 8); pinned in engineer-drive-facts.
+ */
+const REAR_COMPLIANCE: Readonly<Record<string, 'small' | 'large'>> = { macpherson: 'small', 'double-wishbone': 'small', multilink: 'large' };
 
 /** What changes between two types while driving (09-04 honesty report; pinned in engineer-drive-facts.test.ts). */
 function swapAnswer(previous: string, next: string): string {
   const p = SUSPENSION_NAMES[previous] ?? previous;
   const q = SUSPENSION_NAMES[next] ?? next;
-  if (BELOW_NOTICE(previous, next) || previous === next)
+  const from = REAR_COMPLIANCE[previous];
+  const to = REAR_COMPLIANCE[next];
+  if (from === undefined || to === undefined || from === to)
     return `A ${p} and a ${q} drive almost the same in this model: the steering needed, the response and the grip limit hardly change, even though the linkages move differently. The close-up view shows the geometry difference better than the driving does.`;
-  if (next === 'multilink')
+  if (to === 'large')
     return 'On the multi-link the car needs a little more steering for the same corner, turns in a little quicker and the rear feels more planted, because its rear bushings steer the rear wheels slightly into the turn. The grip limit and the stopping distance stay almost the same.';
   return `Coming from the multi-link, the ${q} needs a little less steering for the same corner and its rear is a little livelier, because the multi-link's extra rear compliance steer is gone. The grip limit and the stopping distance stay almost the same.`;
 }
