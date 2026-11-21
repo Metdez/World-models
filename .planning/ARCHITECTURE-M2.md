@@ -59,6 +59,7 @@ remote), Turnstile script `https://challenges.cloudflare.com/turnstile/v0/api.js
 | icurtis1/raycast-vehicle `src/main.js` | MIT (Ian Curtis) | chase decay constants pattern | `features/camera` (08-04) |
 | brunosimon/folio-2025 `Tracks.js` | MIT | skid-ribbon ring-buffer pattern | `features/tyre-vfx` (11-01) |
 | Project Chrono (`ChPac02Tire`, `ChFialaTire`) | BSD-3-Clause | MF/Fiala structure ideas; low-speed epsilon idea | `sim-core/drive/tyre.ts` (09-01) |
+
 Ideas only (never copy): VDrift, Speed Dreams (GPL), LibreCorsa (AGPL), Gaffer on Games, Slow Roads, books, MATLAB docs,
 CommonRoad (licence unverified), AirConsole. Every lift: a header comment with source URL, copyright line and SPDX id;
 the executor lists it in its SUMMARY; 13-01 consolidates `CREDITS.md` and `src/features/credits/code-credits.ts`.
@@ -101,7 +102,7 @@ src/
 │  ├─ world/ground.ts                  08-02 → 10-02    buildGroundWorld (loop + terrain; zones, field, bounds in 10-02)
 │  ├─ world/zones.ts                   10-02            rect/path footprints, zone-local features, patches, blends
 │  ├─ drive/script.ts                  08-01            seeded scripted drive + state hash (test hook, CI)
-│  ├─ drive/types.ts                   08-02            DriveCommand, PlantView, Driver, QuantIntent (§7.1)
+│  ├─ drive/types.ts                   08-02 → 09-04    DriveCommand, PlantView, Driver, QuantIntent (§7.1)
 │  ├─ drive/human-driver.ts            08-02 → 09-04    conditioning, reverse logic, steering assist
 │  ├─ drive/tyre.ts                    08-02 → 09-01    tyre force model (§7.4)
 │  ├─ drive/compliance.ts              09-01            hardpoint-derived compliance (§7.5)
@@ -118,7 +119,7 @@ src/
 │  ├─ car/car-model.ts (x)             08-02 → 09-04    Auto path unchanged; exposes the plant (§7.9)
 │  ├─ ride/ride7dof.ts (x)             08-02 → 09-04    exportState/importState; optional linkVertical (§7.9)
 │  ├─ ride/tyre.ts (x)                 09-03            det sweep only (peakMu unchanged)
-│  ├─ vehicle-models.ts (x)            08-02            VehicleModel gains `plant?`, setSuspension(keepState)
+│  ├─ vehicle-models.ts (x)            08-02 → 09-04    VehicleModel gains `plant?`, setSuspension(keepState)
 │  ├─ simulation.ts (x)                08-02 → 09-04 → 10-01 → 11-03   drive control wiring
 │  ├─ track/** kinematics/** path/** moto/** (x)        09-03 (det sweep, goldens unchanged)
 │  └─ content/
@@ -154,7 +155,7 @@ wrangler.jsonc (x)                     12-01  frozen    §W1
 worker-configuration.d.ts (x)          12-01  (`npm run typegen`)
 public/_headers (x)                    12-01  (CSP: Turnstile)
 tests/arch/contracts-verbatim.test.ts (x)   08-01 → 12-01
-tests/arch/det-math.test.ts            08-02 → 09-03
+tests/arch/det-math.test.ts            08-02 → 09-03 → 09-04
 tests/arch/no-type-tuning.test.ts      08-02
 tests/arch/world-copy.test.ts          10-02
 ```
@@ -2179,7 +2180,9 @@ A `cut` mode change also sets `host.acc = 0`.
 drive(): { mode: DriveMode; available: boolean; x: number; y: number; yaw: number; u: number; v: number; speed: number;
            steer: number; gear: number; engineRpm: number; zone: string; approximate: boolean; detached: boolean; faults: number;
            corners: { id: string; fx: number; fy: number; capacity: number; slipAngle: number; slipRatio: number; omega: number; surface: string }[] };
-driveIntent(intent: Partial<DriveIntent> | null): void;   // test-only override: merged onto neutral and passed to sim.drive.setIntent every frame until null
+driveIntent(intent: Partial<DriveIntent> | null): void;   // test-only override, merged onto neutralIntent() with digital=false; the loop
+                                                           // re-applies it via sim.drive.setIntent right before the fixed steps of every
+                                                           // frame and before advance(), so it wins over device sources; null clears
 driveHash(seed: number, seconds: number): string;          // runDriveScript on a FRESH simulation (same catalog), see §7.12
 ```
 
@@ -2212,6 +2215,7 @@ export function loopTerrainHeight(track: BuiltTrack, x: number, y: number, s: nu
 export const LOOP_CORRIDOR = 18;      // m: |l| of the drawn ribbon (width/2 + kerb + runoff of the proving loop)
 export const OUT_OF_BOUNDS = 60;      // m beyond the loop centreline / 40 m beyond the field / 30 m beyond a zone
 export function buildGroundWorld(track: BuiltTrack, def: WorldDefinition | null): GroundWorld;
+export function loopSurface(track: BuiltTrack, s: number, l: number): SurfaceKind;   // corridor band rule (§8.1), allocation-free
 
 // ---- drive/types.ts (08-02)
 export interface DriveCommand { steer: number /* rad, road-wheel target, + left */; throttle: number; brake: number; handbrake: number; direction: 1 | -1 }
@@ -2378,18 +2382,18 @@ fixed per build (`PLANT_SNAPSHOT_LENGTH`).
    `HANDOFF_FADE_S = 1.0` s (only non-zero after an engage, §7.10 A).
 5. *Loads*: Nᵢ = `ride.state.load[i]` from the previous ride step (explicit coupling, documented).
 6. *Wheel-frame velocities* v_wx, v_wy (§4) with det `dcos/dsin` of δᵢ.
-7. *Tyres + implicit spin* (v0, full tyre 09-01), per wheel:
+7. *Powertrain, brakes, aids* (v0 powertrain + brakes; 09-02 aids): from the previous step's slips and ω
+   (`PowertrainIo`, `AidsIo`); T_bᵢ = cmd.brake·maxTorque·shareₐₓₗₑ/2 (+ handbrake on the rear) × ABS factor + ESC add.
+8. *Tyres + implicit spin* (v0, full tyre 09-01), per wheel:
    a. predict deflections with the current spin: ux* = (ux + dt·(Rω − v_wx))/(1 + dt·|v_wx|/σx),
       uy* = (uy + dt·v_wy)/(1 + dt·|v_wx|/σy) (backward Euler on the relaxation lag; non-singular at v = 0);
    b. `evaluateTyre` at (ux*, uy*) → Fx₀ and `slopeX`;
-   c. dFx/dω = slopeX·dt·R/(1 + dt·|v_wx|/σx) + dampX·R; driving torque Tdᵢ from the powertrain (driven wheels);
+   c. dFx/dω = slopeX·dt·R/(1 + dt·|v_wx|/σx) + dampX·R; driving torque Tdᵢ from step 7 (driven wheels);
       ω_free = ω + dt·(Tdᵢ − R·Fx₀)/(I_effᵢ + dt·R·dFx/dω);
    d. brake: Δω_b = dt·T_bᵢ/(I_effᵢ + dt·R·dFx/dω); if |ω_free| ≤ Δω_b → ω = 0 (held/locked) else
       ω = ω_free − sign(ω_free)·Δω_b (brake never reverses spin);
    e. final deflections with the new ω (same formulas as a) and the final `evaluateTyre` → Fx, Fy, capacity, slip.
    Two tyre evaluations per wheel per step.
-8. *Powertrain, brakes, aids* (v0 powertrain + brakes; 09-02 aids): computed BEFORE 7c/7d from the previous step's slips
-   (`PowertrainIo`, `AidsIo`); T_bᵢ = cmd.brake·maxTorque·shareₐₓₗₑ/2 (+ handbrake on the rear) × ABS factor + ESC add.
 9. *Chassis* (v0, semi-implicit Euler): Fxv, Fyv per wheel (§4); F_drag = ½·ρ·CdA·u·|u| (ρ = 1.225, CdA =
    `vehicle.dragArea`); F_rr = Σ crr(surfaceᵢ)·Nᵢ · u/√(u² + 0.05²); gravity in the plane gx = −G·g/√(1+g²+c²),
    gy = −G·c/√(1+g²+c²);
@@ -2427,8 +2431,9 @@ fixed per build (`PLANT_SNAPSHOT_LENGTH`).
   `install` (pure, same expressions); (3) `install(def, keepRideState)` copies the ride state through
   export/importState when keeping; (4) Auto `derive` additionally writes the new CornerFrame fields: fx = fxAxle·share,
   fy = fyAxle·share (the demand already computed for gripUse), capacity = peakMu·load, slipAngle = slipRatio = 0,
-  omega = path.v·(1 − κ·cyᵢ)/R, surface from `GroundWorld.sample` at the contact point; frame.drive in auto: mode
-  'auto', available, x/y/yaw from the path, u = path.v, v = beta = 0, gear 0, engineRpm 0, zone from the world.
+  omega = path.v·(1 − κ·cyᵢ)/R, surface from the loop band rule (`loopSurface(track, s, l)` exported by
+  `world/ground.ts`, using each wheel's (sᵢ, lᵢ) already computed in `roadInputs`); frame.drive in auto: mode 'auto',
+  available, x/y/yaw from the path, u = path.v, v = beta = 0, gear 0, engineRpm 0, zone 'loop'.
   New record slots are appended AFTER the existing ones so existing slots and their interpolation are untouched.
   (5) `createCarModel` builds `plant` (from `drive/plant.ts`) when `vehicle.handling` exists, handing it an internal
   core (tables, ride, cx/cy, side, axleX, derive, writeCorners, xform/rpy scratch, install). (6) `releaseToPath` support:
@@ -2459,7 +2464,7 @@ if s < 1e-9: fx = Ck*kap ; fy = -Ca*tanA
 else       : fx = D*f(s)*sx/s ; fy = -D*f(s)*sy/s
 w  = 1 - smoothstep(0.5, 1.5, |vx|)                           // low-speed stick damping (m2/04 §8, m2/12 §3.2)
 cx = 2*sqrt((Ck/sigmaX) * load/G) ; cy = 2*sqrt((Ca/sigmaY) * load/G)
-fx -= w*cx*slipVx ; fy -= w*cy*vy ; dampX = w*cx
+fx += w*cx*slipVx ; fy -= w*cy*vy ; dampX = w*cx           // driving slip pushes forward; patch velocity is resisted
 if hypot(fx, fy) > D: scale both to D                         // friction circle on the result
 slopeX = (Ck/sigmaX) * max(0.05, s < 1e-6 ? 1 : f(s)/s)       // secant, falls past the peak, floored
 capacity = D ; slipAngle = tanA ; slipRatio = kap
@@ -2572,7 +2577,9 @@ Continuity thresholds (tested at 20 random lap times, `tests/sim-core/handoff.te
 speed step ≤ 0.05 m/s, yaw-rate step ≤ 0.02 rad/s, steer step ≤ rate·dt, roll and pitch steps ≤ 1 mrad, travel step ≤ 1 mm,
 load step ≤ 3 % between the last Auto step and the first plant step.
 **B. Manual → Returning** (`drive:request auto`): next step `PathDriver.engage(view, last command)`; mode returning,
-event `cut:false`; detached clock continues.
+event `cut:false`; detached clock continues. Until 10-01 lands (phases 8–9) a non-immediate auto request releases at
+once onto the rails at `profile.timeAtS(projected s)` (a cut, `shortcut:` comment) and the drive feature uses
+`immediate: true` for Enter.
 **C. Returning → Auto (latch)**: when `pathDriver.converged`: lapTime = `profile.timeAtS(s)`; path = `stateAt(lapTime)`;
 `plant.releaseToPath(path)` (ride kept; refZ/refSlope fitted; interpolation record reset); mode auto; events
 `converged` + `mode {cut:false}`; clock stays local (`detached` stays true until a live seek). If not converged within
@@ -2688,6 +2695,7 @@ zone base z = 0.5 m unless stated; priorities: apron/pad/links 2, street/platfor
 | `dynamics-pad` | rect (−80, 240), 90°, length 190, width 320 | x −240…80, y 240…430 | asphalt, A | steering circle, slalom, ISO 3888-2 |
 | `pad-link` | rect (−80, 128), 90°, length 112, width 10 | x −85…−75, y 128…240 | asphalt, A | street → pad |
 | `braking-platform` | rect (147.5, 100), 90°, length 330, width 35 | x 130…165, y 100…430 | asphalt, A | lanes below (u from y = 100, w + west) |
+
 Ride-street features (zone-local, RoadFeature): washboard {s 20, length 60, amplitude 0.025, wavelength [1.8, 1.8]};
 pave {s 100, length 60, stone 0.15, amplitude 0.012, jointDepth 0.008} + patch u 100…160, w −4…4 `pave`; humps
 (sleepers) {s 180, count 8, spacing 5, length 0.3, height 0.03}; single-wheel steps cosine-bump {s 235, length 0.6,
@@ -2711,6 +2719,7 @@ Stations (spawn x, y, heading; `suspension` flag):
 | `slalom` | (−170, 280, 0°) | roll-reversal | yes |
 | `lane-change` | (−200, 400, 0°) | lane-change | yes |
 | `braking-platform` | (149.75, 105, 90°) | split-mu | no (tyre grip demonstration) |
+
 Signs (prop `sign`) at each spawn, 6 m ahead and 6 m to the right, facing the spawn. Names, captions and experiment
 lines are the executor's (no digits, `tests/arch/world-copy.test.ts`), e.g. steering pad experiment: "Hold a steady
 speed round the circle, then swap suspension and watch the outside wheels."
@@ -2727,7 +2736,7 @@ within 1 mm; e2e screenshot of each station.
 
 | id | phase | requires | provides / does | consumes | plans |
 |---|---|---|---|---|---|
-| drive | overlay | — | service DRIVE (sources, arbiter, takeover edges); keyboard/gamepad/touch adapters; AUTO/MANUAL pill (+ speed, gear, aids, stations, rejoin, compare/replay buttons when those features are on via bus); hint; idle cue; out-of-bounds fade; R reset; gamepad rumble | store, bus, frame.drive, sim.current.drive.setIntent | 08-03, 09-05, 10-04 |
+| drive | overlay | — | service DRIVE (sources, arbiter, takeover edges); keyboard/gamepad/touch adapters; AUTO/MANUAL pill (speed, gear, aids popover and lamps, stations list, rejoin chip); reserved action row for other features' chips; hint; idle cue; out-of-bounds fade; R reset; gamepad rumble | store, bus, frame.drive, sim.current.drive.setIntent | 08-03, 09-05, 10-04 |
 | proving-ground | scene | renderer | contributes world `proving-ground`; draws zones, markings, cones, signs | RENDER, sim.current.world | 10-03 (content 10-02) |
 | tyre-vfx | scene | renderer | friction rings (1 draw), skid ribbons (≤ 4 draws) | RENDER, frame corners, store.driveMode | 11-01 |
 | coach | overlay | — | one-line coach on `drive:event`, station cards on zone events, competence fading | bus, frame, world stations | 11-02 |
@@ -2735,6 +2744,7 @@ within 1 mm; e2e screenshot of each station.
 | ghost-lab | scene | renderer | Compare (G): headless traces, ghost car, strip chart | registries.vehicleVisuals, sim-core ghost | 11-04 |
 | phone-drive | overlay | drive, live-lab | screen side of the phone driver: driver QR, intent source 'phone', failsafe, telemetry to the phone | ROOM, DRIVE | 12-04 |
 | live-ghosts [S] | scene | live-lab, renderer | other visitors' cars (10 Hz) | ROOM | 12-07 |
+
 M1 extensions: **controls** (08-03: A/S/W/D shortcuts inactive outside Auto; Live chip triggers immediate release when
 driving), **attract** (08-03: never starts unless `driveMode === 'auto'`), **camera** (08-04: manual provider, §10.3),
 **telemetry-panel** (09-05: history only in Auto), **track** (10-03: terrain from GroundWorld), **insights** (11-02:
@@ -2758,6 +2768,7 @@ other.
 | Q | — | moment replay (when offered) |
 | G | — | compare suspensions (when ≥ 5 s recorded) |
 | Space, 1/2/3, F/E/C, X, V, H, M, ? | M1 meanings in every mode (V while driving releases with a cut) | |
+
 Keys use `KeyboardEvent.code` (layout independent); `event.repeat` ignored; the held set clears on `blur`,
 `visibilitychange` and `contextmenu`; arrows/WASD/Shift `preventDefault` only while Manual; text inputs are ignored.
 A driving key while paused unpauses. Takeover needs a rising edge; after a hand-back the input must return to neutral
@@ -2811,7 +2822,7 @@ it shows the demand estimate (label "model").
 | T6 | ISO 7401 step steer, 100 km/h, 4 m/s² | T_yaw 0.10–0.25 s, T_ay 0.15–0.35 s, yaw overshoot ≤ 50 %, gain ±10 % of bicycle with measured K | `handling-transient.test.ts` (09-04) |
 | T8 | Yaw damping vs speed (step responses at 10/20/30/40 m/s) | stable; overshoot grows with speed | same |
 | T9 | ISO 3888-1 on the loop DLC with PathDriver, 80 km/h | completes inside the gates | `path-driver.test.ts` (10-01) |
-| T10 | ISO 3888-2 on the annex lane with PathDriver, 60–80 km/h steps | max pass speed reported per suspension; no spin below the limit | `proving-ground-manoeuvres.test.ts` (10-02) |
+| T10 | ISO 3888-2 on the annex lane with PathDriver, 60–80 km/h steps | max pass speed reported per suspension; no spin below the limit | `proving-ground-manoeuvres.test.ts` (10-04) |
 | T11/T12/T13 | Brake in turn, lift-off in turn, power-on in turn (R 100 m, 0.4–0.5 g) | monotone direction (tightening on brake/lift, RWD progression on power), no spin at 0.3 g decel, inside the friction circle | `handling-combined.test.ts` (09-04) |
 | T14 | 100–0 km/h, ABS on / off | 34–42 m on; off: front or rear locks, distance reported | `handling-longitudinal.test.ts` (09-04) |
 | T15 | 0–100 km/h full throttle, TCS on | 3.6–4.8 s (0–60 mph 3.4–4.6 s); no gear hunting | same |
@@ -2869,7 +2880,7 @@ the public site key lives in `src/features/replay/turnstile.ts` (12-05). Tests a
 keys (site `1x00000000000000000000AA`, secret `1x0000000000000000000000000000000AA`) through fake env / `page.route`.
 `public/_headers` CSP (12-01): add `https://challenges.cloudflare.com` to `script-src` and `frame-src` (new directive).
 
-### W1/W2 wiring
+### 12.1b Worker wiring for replays
 `d1_databases` binding `REPLAYS` (§W1) and the two route mounts (§W2). `npm run typegen` regenerates
 `worker-configuration.d.ts`; `worker/secrets.d.ts` declares the optional secrets. Migrations: `npx wrangler d1 migrations
 apply suspension-lab-replays --remote` at deploy (12-01) and `--local` for `vite preview` e2e runs.
@@ -2953,6 +2964,7 @@ remote stays three.js-free.
 | D1 / Turnstile not creatable with the token | fragment sharing only (MD-50), server save hidden (MD-51 moved to Deferred) |
 | Phone latency on venue Wi-Fi | touch slider default, failsafe, phone on cellular; measure with the `sync` probe at rehearsal |
 | SwiftShader e2e slowness | `?quality=low`, `__app.driveIntent` + `advance()` for deterministic driving in e2e |
+
 **Cut order** (first to go): 12-07 live ghosts [S] → 12-06 crowd insight [S] → 12-05 server-shared replays → 12-04 phone
 driver → 11-04 3D ghost car (keep traces) → braking-platform lanes (keep dry) → skid marks → audio extension. Never cut:
 08-*, 09-01…09-04, 10-01…10-03, 11-01 rings, 11-03 recorder/replay core.

@@ -66,3 +66,37 @@ Recent trend: —
 Last session: 2026-11-20 — roadmapper produced PROJECT.md, REQUIREMENTS.md, ROADMAP.md, STATE.md, ARCHITECTURE.md
 Stopped at: Ready to plan Phase 1 (`/gsd-plan-phase 1`)
 Resume file: None
+
+## Milestone 2 — Manual Drive (planned 2026-11-21)
+**Docs:** `.planning/REQUIREMENTS-M2.md` (47 requirements, 2 stretch) · `.planning/ARCHITECTURE-M2.md` (binding addendum:
+contract blocks C1–C11, F1, W1–W2; plant equations; annex coordinates) · `.planning/ROADMAP-M2.md` (phases 8–13,
+25 plans incl. 2 stretch) · decisions in `.planning/research/m2/SUMMARY.md`.
+**Position:** Phase 8 ready to plan once M1 phase 7 is complete and `npm run check` is green.
+**Start gate:** 08-01 first compares the SHA-256 prefixes of the frozen files listed in ROADMAP-M2 (derived from the
+tree at planning time); any difference (e.g. a late 07-02 contract edit) → R4, the architect regenerates the blocks.
+
+| Phase | Plans | Completed |
+|---|---|---|
+| 8 Walking skeleton (live) | 4 | 0 |
+| 9 Honest handling | 5 | 0 |
+| 10 Hand-back and the playground | 4 | 0 |
+| 11 Teaching layer | 4 | 0 |
+| 12 Cloudflare blend | 7 (2 [S]) | 0 |
+| 13 Event readiness | 1 | 0 |
+
+### M2 decisions (full list: ARCHITECTURE-M2 §0)
+- Auto untouched: M1 goldens must not change in any M2 plan (R4 otherwise).
+- Manual = 14-DOF plant inside the car model (planar + unchanged 7-DOF ride + 4 implicit wheel spins), same tables,
+  same peak-μ; compliance from hardpoints with one shared bushing table; no per-type handling constants.
+- Modes auto/manual/returning/replay in sim-core; kernel mirrors `store.driveMode`; features request on the bus.
+- One GroundWorld for physics and rendering; annex north of the real loop (loop bbox y ≤ 0), two spurs.
+- Deterministic kernels everywhere in sim-core (09-03 sweep); Node + Chromium hash CI.
+- No new npm dependencies; Cloudflare adds D1 (replays) + Turnstile + room `driver` role; Access skipped.
+
+### M2 open questions (ARCHITECTURE-M2 §16)
+A/S keys in Auto · brake bias 0.62 kept · widened validation bands · Turnstile widget/secret creation · Workers Paid ·
+AE SQL token for crowd insight [S] · idle hand-back timings · Firefox/WebKit determinism gap · motorcycle Manual (v1.5) ·
+hill station.
+
+### M2 known gaps to record as they land
+- Determinism CI covers Node + Chromium only (no Firefox/WebKit binaries; `playwright install` forbidden).
