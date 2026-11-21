@@ -38,11 +38,10 @@ const centreOf = async (page: Page, sel: string) => {
 const touch = (cdp: CDPSession, type: 'touchStart' | 'touchMove' | 'touchEnd', points: ReturnType<typeof pt>[]) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points });
 const pct = (xs: number[], p: number) => [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor(p * xs.length))]!;
 
-test('a phone drives the big screen through the room, fails safe, and recovers calmly', async ({ browser }) => {
-  test.setTimeout(300_000);
-  const screen = await (await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 })).newPage();
-  const screenErrors = captureConsole(screen);
-  // record every relayed `in` frame as it reaches the screen's JS (wall clock), before the app's own handler
+/** The big screen, with every relayed `in` frame logged (wall clock) as it reaches the page's JS. */
+async function openScreen(browser: Browser, size: { width: number; height: number }, extra = '') {
+  const screen = await (await browser.newContext({ viewport: size, deviceScaleFactor: 1 })).newPage();
+  const errors = captureConsole(screen);
   await screen.addInitScript(() => {
     const w = globalThis as unknown as { __inLog: { t: number; s: number; n: number }[] };
     w.__inLog = [];
@@ -60,17 +59,28 @@ test('a phone drives the big screen through the room, fails safe, and recovers c
     }
     globalThis.WebSocket = Logged;
   });
-  await screen.goto('/?screen=1&quality=low&debug=1');
+  await screen.goto(`/?screen=1&quality=low&debug=1${extra}`);
   await screen.waitForFunction(() => globalThis.__app?.ready === true, undefined, { timeout: 120_000 });
-  const drive = () => screen.evaluate(() => globalThis.__app!.drive());
-  const mode = async () => (await screen.evaluate(() => globalThis.__app!.state())).driveMode;
-
-  // The card: QR with the driver key only in the fragment
   const card = screen.locator('.sl-phone-drive');
   await expect(card).toBeVisible({ timeout: 30_000 });
+  const room = await screen.evaluate(() => JSON.parse(sessionStorage.getItem('sl-live-lab-screen-room')!) as { code: string; driverKey: string; hostKey: string });
+  return {
+    screen,
+    errors,
+    card,
+    room,
+    drive: () => screen.evaluate(() => globalThis.__app!.drive()),
+    mode: async () => (await screen.evaluate(() => globalThis.__app!.state())).driveMode,
+  };
+}
+
+test('a phone drives the big screen through the room, fails safe, and recovers calmly', async ({ browser }) => {
+  test.setTimeout(300_000);
+  const { screen, errors: screenErrors, card, room, drive, mode } = await openScreen(browser, { width: 1440, height: 900 });
+
+  // The card: QR with the driver key only in the fragment
   await expect(card).toHaveAttribute('data-state', 'waiting');
   await expect(card.locator('.sl-qr path')).toHaveAttribute('d', /^M/);
-  const room = await screen.evaluate(() => JSON.parse(sessionStorage.getItem('sl-live-lab-screen-room')!) as { code: string; driverKey: string; hostKey: string });
   expect(room.driverKey).toMatch(/^[A-Za-z0-9_-]{16,64}$/);
   expect(room.driverKey).not.toBe(room.hostKey);
   await shot(screen, 'screen-card');
@@ -111,41 +121,14 @@ test('a phone drives the big screen through the room, fails safe, and recovers c
   await expect(p1.page.locator('.rm-drive-mode')).toHaveText('You are driving', { timeout: 10_000 });
   await expect.poll(async () => Number(await p1.page.locator('.rm-drive-speed').textContent()), { timeout: 10_000 }).toBeGreaterThan(3);
 
-  // Drag right = steer right (+ = left in the sim): flicks right and back, timed end to end
+  // Drag right = steer right (+ = left in the sim)
   const s0 = pt(steer.x, steer.y, 2);
   await touch(cdp, 'touchStart', [g, s0]);
-  const net: number[] = [];
-  for (let i = 0; i < 12; i++) {
-    const right = i % 2 === 0;
-    const before = await screen.evaluate(() => (globalThis as unknown as { __inLog: unknown[] }).__inLog.length);
-    const t0 = Date.now();
-    await touch(cdp, 'touchMove', [g, { ...s0, x: right ? s0.x + steer.w * 0.4 : s0.x }]);
-    const tIn = await screen.evaluate(
-      ({ before, right }) =>
-        new Promise<number>((resolve) => {
-          const log = (globalThis as unknown as { __inLog: { t: number; s: number }[] }).__inLog;
-          const check = () => {
-            const hit = log.slice(before).find((f) => (right ? f.s < -300 : f.s === 0));
-            if (hit) resolve(hit.t);
-            else setTimeout(check, 2);
-          };
-          check();
-        }),
-      { before, right },
-    );
-    const tEvent = await p1.page.evaluate(() => (globalThis as unknown as { __inputs: { t: number }[] }).__inputs.at(-1)!.t);
-    net.push(tIn - Math.max(t0, tEvent));
-    if (right) {
-      await expect.poll(async () => (await drive()).steer, { timeout: 5_000 }).toBeLessThan(-0.05);
-      if (i === 0) {
-        await shot(p1.page, 'phone-driving');
-        await shot(screen, 'screen-driving');
-      }
-    }
-    await p1.page.waitForTimeout(150);
-  }
-  console.log(`12-04 latency phone input event -> in frame at the screen JS (ms, n=${net.length}): min ${Math.min(...net)} p50 ${pct(net, 0.5)} p90 ${pct(net, 0.9)} max ${Math.max(...net)}`);
-  expect(pct(net, 0.5)).toBeLessThan(150);
+  await touch(cdp, 'touchMove', [g, { ...s0, x: s0.x + steer.w * 0.4 }]);
+  await expect.poll(async () => (await drive()).steer, { timeout: 10_000 }).toBeLessThan(-0.05);
+  await expect(p1.page.locator('.rm-drive-steer')).toHaveClass(/is-held/);
+  await shot(p1.page, 'phone-driving');
+  await shot(screen, 'screen-driving');
   await touch(cdp, 'touchEnd', []);
 
   // Tilt (synthetic gravity vectors in a landscape hold; not a real phone): Centre, turn right + Done, then steer right
@@ -161,6 +144,8 @@ test('a phone drives the big screen through the room, fails safe, and recovers c
       }, 16);
     }, deg);
   await motion(0);
+  // this Chromium has DeviceMotionEvent.requestPermission (the iOS-style path): grant the sensors, then tap
+  await p1.page.context().grantPermissions(['accelerometer', 'gyroscope']);
   await p1.page.getByRole('button', { name: 'Tilt to steer' }).click();
   await expect(p1.page.locator('.rm-drive-sheet-title')).toHaveText('Hold it like a wheel');
   await p1.page.getByRole('button', { name: 'Centre', exact: true }).click();
@@ -200,13 +185,9 @@ test('a phone drives the big screen through the room, fails safe, and recovers c
   await expect.poll(async () => (await drive()).steer, { timeout: 5_000 }).toBeGreaterThan(0.05); // dragged left
   await expect.poll(mode).toBe('manual');
 
-  // Closing the driving phone: failsafe -> Returning within 1.5 s, with a note on the screen
-  const tClose = Date.now();
+  // Closing the driving phone: failsafe -> Returning with a note on the screen (timed in the next test)
   await p2.page.close();
-  await expect.poll(mode, { timeout: 3_000, intervals: [25] }).not.toBe('manual');
-  const tReturn = Date.now() - tClose;
-  console.log(`12-04 phone closed -> screen left manual after ${tReturn} ms (mode ${await mode()})`);
-  expect(tReturn).toBeLessThan(1500);
+  await expect.poll(mode, { timeout: 10_000 }).not.toBe('manual');
   await expect(screen.locator('.sl-phone-drive-toast')).toBeVisible();
   await expect(screen.locator('.sl-phone-drive-toast')).toContainText('Phone controller lost');
   await shot(screen, 'screen-failsafe');
@@ -229,4 +210,78 @@ test('a phone drives the big screen through the room, fails safe, and recovers c
 
   expect(screenErrors).toEqual([]);
   for (const p of [p1, bad, gone]) expect(p.errors.filter((e) => !/WebSocket|40[14]/.test(e))).toEqual([]);
+});
+
+// The same path without the render loop: under SwiftShader the rendered screen's main thread stalls for up to a second
+// (frames then reach its JS in bursts), which would time the software renderer, not the link. Room, relay, live-lab,
+// drive arbitration, conditioning and the simulation are unchanged.
+test('input latency and the 1 s failsafe, measured on a screen without the render loop', async ({ browser }) => {
+  test.setTimeout(240_000);
+  const { screen, errors, room, mode } = await openScreen(browser, { width: 960, height: 540 }, '&features=-renderer');
+  const p = await phone(browser, `/remote.html?room=${room.code}#d=${room.driverKey}`);
+  await expect(p.page.locator('.rm-header')).toHaveAttribute('data-status', 'live', { timeout: 20_000 });
+  // first sim frame (wall clock) whose conditioned steer demand crosses a threshold
+  await screen.evaluate(() => {
+    const w = globalThis as unknown as { __steerAt: (sign: number, after: number) => Promise<number> };
+    w.__steerAt = (sign, after) =>
+      new Promise((resolve) => {
+        const check = () => {
+          const s = globalThis.__app!.drive().steer;
+          if (Date.now() >= after && (sign < 0 ? s < -0.05 : s > -0.02)) resolve(Date.now());
+          else requestAnimationFrame(check);
+        };
+        check();
+      });
+  });
+  const cdp = await p.page.context().newCDPSession(p.page);
+  const gas = await centreOf(p.page, '.rm-drive-pedal[data-pedal="gas"]');
+  const steer = await centreOf(p.page, '.rm-drive-steer');
+  const g = pt(gas.x, gas.y, 1);
+  const s0 = pt(steer.x, steer.y, 2);
+  await touch(cdp, 'touchStart', [g]);
+  await expect.poll(mode, { timeout: 10_000 }).toBe('manual');
+  await p.page.waitForTimeout(1000);
+  await touch(cdp, 'touchStart', [g, s0]);
+
+  const net: number[] = [];
+  const e2e: number[] = [];
+  for (let i = 0; i < 20; i++) {
+    const right = i % 2 === 0;
+    const before = await screen.evaluate(() => (globalThis as unknown as { __inLog: unknown[] }).__inLog.length);
+    const t0 = Date.now();
+    const sim = screen.evaluate(({ sign, after }) => (globalThis as unknown as { __steerAt: (s: number, a: number) => Promise<number> }).__steerAt(sign, after), { sign: right ? -1 : 1, after: t0 });
+    await touch(cdp, 'touchMove', [g, { ...s0, x: right ? s0.x + steer.w * 0.4 : s0.x + 1 }]);
+    const tIn = await screen.evaluate(
+      ({ before, right }) =>
+        new Promise<number>((resolve) => {
+          const log = (globalThis as unknown as { __inLog: { t: number; s: number }[] }).__inLog;
+          const check = () => {
+            const hit = log.slice(before).find((f) => (right ? f.s < -300 : f.s === 0));
+            if (hit) resolve(hit.t);
+            else setTimeout(check, 1);
+          };
+          check();
+        }),
+      { before, right },
+    );
+    const tEvent = await p.page.evaluate(() => (globalThis as unknown as { __inputs: { t: number }[] }).__inputs.at(-1)!.t);
+    net.push(tIn - tEvent);
+    e2e.push((await sim) - tEvent);
+    await p.page.waitForTimeout(250 + 37 * (i % 3)); // de-phase from the 30 Hz tick
+  }
+  const fmt = (xs: number[]) => `min ${Math.min(...xs)} p50 ${pct(xs, 0.5)} p90 ${pct(xs, 0.9)} max ${Math.max(...xs)}`;
+  console.log(`12-04 latency, phone input event -> in frame at the screen's JS (ms, n=${net.length}): ${fmt(net)}`);
+  console.log(`12-04 latency, phone input event -> screen sim steer demand (ms, n=${e2e.length}): ${fmt(e2e)}`);
+  expect(pct(net, 0.5)).toBeLessThan(100);
+  expect(pct(e2e, 0.5)).toBeLessThan(150);
+
+  // Closing the phone page: Returning (not Manual) within 1.5 s
+  const tClose = Date.now();
+  await p.page.close();
+  await expect.poll(mode, { timeout: 3_000, intervals: [20] }).not.toBe('manual');
+  const tReturn = Date.now() - tClose;
+  console.log(`12-04 phone closed -> screen ${await mode()} after ${tReturn} ms`);
+  expect(tReturn).toBeLessThan(1500);
+  await expect(screen.locator('.sl-phone-drive-toast')).toBeVisible();
+  expect(errors).toEqual([]);
 });
