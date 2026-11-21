@@ -93,7 +93,7 @@ describe('M2 copy (13-01): no digits, no rankings, models labelled', () => {
     ['engineer fact cards', [COMMON_CAR, COMMON_MOTORCYCLE, DRIVE_COMMON, DRIVE_COMPARE, ...Object.values(SUSPENSION_FACTS)]],
     ['engineer labels and chips', [...MOMENTS.map(driveLabel), ...Object.values(CHIPS).flat(), ...Object.values(EVENT_CHIPS).flat(), ...DRIVE_CHIPS]],
     ['HUD: aids and lamps', [...Object.values(AID_COPY).flatMap((a) => [a.name, a.hint]), ...Object.values(LAMP_TEXT), ...Object.values(LAMP_TITLE)]],
-    ['HUD: replay', [...Object.values(REPLAY).filter((v): v is string => typeof v === 'string'), ...Object.values(SAVE_ERROR).map((e) => e.text), ...Object.values(FALLBACK), ...Object.values(LINK_ERROR), ...Object.values(REFUSAL)]],
+    ['HUD: replay', [...Object.values(REPLAY).map(String), ...Object.values(SAVE_ERROR).map((e) => e.text), ...Object.values(FALLBACK), ...Object.values(LINK_ERROR), ...Object.values(REFUSAL)]],
     ['HUD: ghost lab', [...GHOST]],
     ['inline HUD, coach, engineer and phone strings (source scan)', literals(HUD_SOURCES)],
   ];
