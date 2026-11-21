@@ -108,3 +108,16 @@ GSD as in M1: this synthesis → Opus planning (REQUIREMENTS-M2, ROADMAP-M2, ARC
 contracts) → Opus executors per plan under EXECUTOR.md (Ponytail discipline, modular feature boundaries, explicit
 file ownership, private e2e builds) → phase gates with deploys. M1 phase 7 builders finish first; M2 executors
 start only on a green tree.
+
+## Orchestrator decisions on ARCHITECTURE-M2 §16 open questions
+1. Keys: A and S keep their M1 meanings while in Auto; W / arrow keys / Enter take over. In Manual, WASD + arrows drive.
+2. Brake bias stays at the existing 0.62 so Auto is unaffected.
+3. Widened validation bands accepted; UI and docs call the car "representative", never a DB11 prediction.
+4. Server-side replay save stays disabled until a Turnstile widget exists; URL-fragment links only.
+5. Idle hand-back 12 s (30 s on the presenter screen). Motorcycle Manual Drive is v1.5, not in M2. Workers Paid and
+   an Analytics Engine SQL token are the user's call — plans must work without them.
+6. If a phase-7 plan changed a contract file after the architect generated the ARCH-M2 blocks (sha mismatch in
+   08-01), 08-01 does NOT stop: it re-bases the affected ARCH-M2 block on the current file (keeping phase 7's
+   changes, adding the M2 additions), updates ARCHITECTURE-M2.md accordingly and reports exactly what it merged.
+- M2 executors follow `.planning/EXECUTOR.md` with ARCHITECTURE-M2.md + ROADMAP-M2.md + this file as the binding
+  documents (in addition to ARCHITECTURE.md).
