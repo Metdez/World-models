@@ -7,7 +7,8 @@
  * (the SAME peak as Auto's gripUse). It peaks at f = 1 (|F| = D) near s = 3.2 for C = 1.35 and falls towards
  * sin(C pi/2) (0.85 D) when sliding: a locked or spinning wheel loses grip, and the resultant never leaves the circle.
  * Camber thrust enters as an equivalent slip: tan(alpha_eq) = uy / sigmaY - camberRatio * inclination (a wheel whose
- * top leans left pushes left). C_alpha(N), C_kappa(N) follow g(x) = 2x / (1 + x^2) (rise, flatten, fall past k*N0).
+ * top leans left pushes left); it needs rolling, so it fades in with the low-speed blend (0 below 0.5 m/s, full above
+ * 1.5 m/s) — otherwise a steered (cambered) wheel at rest would push the parked car sideways. C_alpha(N), C_kappa(N) follow g(x) = 2x / (1 + x^2) (rise, flatten, fall past k*N0).
  *
  * Inputs are contact-patch DEFLECTIONS (ux, uy, m; the relaxation-lag state kept by the plant), so slip is
  * kappa = ux / sigmaX and tan(alpha) = uy / sigmaY: non-singular at v = 0 (research m2/12 §3.2); `relax` is the
@@ -144,9 +145,13 @@ function lowSpeed(v: number): number {
   return 1 - t * t * (3 - 2 * t);
 }
 
+/** Camber thrust as equivalent slip; it needs rolling, so it fades out with the low-speed blend (none at rest). */
+const camberSlip = (c: TyreCoefficients, io: TyreIo): number => c.camberRatio * io.inclination * (1 - lowSpeed(io.vx));
+
 export function evaluateTyre(params: TyreParams, c: TyreCoefficients, io: TyreIo): void {
   const load = io.load;
-  const tanA = io.uy / c.sigmaY - c.camberRatio * io.inclination;
+  const w = lowSpeed(io.vx);
+  const tanA = io.uy / c.sigmaY - camberSlip(c, io);
   const kap = io.ux / c.sigmaX;
   io.slipAngle = tanA;
   io.slipRatio = kap;
@@ -177,7 +182,6 @@ export function evaluateTyre(params: TyreParams, c: TyreCoefficients, io: TyreIo
     fx = 0;
     fy = 0;
   }
-  const w = lowSpeed(io.vx);
   let dampX = 0;
   if (w > 0) {
     const m = load / G;
@@ -209,7 +213,7 @@ export function limitDeflection(params: TyreParams, c: TyreCoefficients, io: Tyr
   const D = peakMu(load, io.camberToRoad, params) * io.muScale * load;
   if (!(D > 0)) return;
   const shape = gShape(load / (c.loadShape * params.nominalLoad)) / c.g0;
-  const camber = c.camberRatio * io.inclination;
+  const camber = camberSlip(c, io);
   const sx = (c.c0Kappa * shape * io.ux) / (c.sigmaX * D);
   const sy = (c.c0Alpha * shape * (io.uy / c.sigmaY - camber)) / D;
   const s2 = sx * sx + sy * sy;

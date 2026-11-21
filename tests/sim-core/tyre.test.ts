@@ -45,6 +45,9 @@ describe('tyre model (Y1)', () => {
     expect(at({ kappa: -0.03 }).fx).toBeLessThan(0);
     expect(at({ incl: 2 * DEG_TO_RAD }).fy).toBeGreaterThan(0);
     expect(at({ incl: -2 * DEG_TO_RAD }).fy).toBeLessThan(0);
+    // camber thrust needs rolling: none at rest, full from 1.5 m/s
+    expect(at({ incl: 3 * DEG_TO_RAD, vx: 0 }).fy).toBe(0);
+    expect(at({ incl: 3 * DEG_TO_RAD, vx: 1.5 }).fy).toBe(at({ incl: 3 * DEG_TO_RAD, vx: 20 }).fy);
     const z = at({});
     expect(z.fx === 0 && z.fy === 0).toBe(true);
   });
