@@ -321,7 +321,7 @@ describe('terrain', () => {
     expect(p999).toBeLessThan(2 * TOLERANCE);
     expect(errs[errs.length - 1]!).toBeLessThan(0.04);
     expect(gapWorst).toBeLessThan(0.04);
-  });
+  }, 60_000); // ~5 s alone; the default 5 s timeout fails under the parallel suite
 
   it('stays below the asphalt, kerbs and apron', () => {
     const at = probe(terrains.world, 24);

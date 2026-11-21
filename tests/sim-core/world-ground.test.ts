@@ -2,13 +2,12 @@
 import { describe, expect, it } from 'vitest';
 import type { TrackSample } from '../../src/contracts/track';
 import type { Frenet, GroundHit } from '../../src/contracts/world';
-import { groundHeight } from '../../src/features/track/terrain';
 import { provingLoop } from '../../src/sim-core/content/proving-loop';
 import { createRng } from '../../src/sim-core/math/rng';
 import { buildTrack } from '../../src/sim-core/track/build';
 import { buildGroundWorld, LOOP_CORRIDOR, loopSurface } from '../../src/sim-core/world/ground';
 import { createProjectorCore } from '../../src/sim-core/world/project';
-import { loopTerrainHeight } from '../../src/sim-core/world/terrain';
+import { farField, loopTerrainHeight } from '../../src/sim-core/world/terrain';
 
 const track = buildTrack(provingLoop);
 const L = track.length;
@@ -164,16 +163,31 @@ describe('ground world', () => {
     expect(world.inBounds(t.x - Math.sin(t.heading) * 80, t.y + Math.cos(t.heading) * 80)).toBe(false);
   });
 
-  it('terrainHeight = features/track/terrain.ts groundHeight at 1 000 points (1e-9)', () => {
+  it('off the corridor sample().h is terrainHeight(x, y); far from the loop both are the far-field undulation (1e-9)', () => {
     const rng = createRng(5);
+    const out = hit();
+    const fr = frenet();
+    const core = createProjectorCore(track);
     const a = ts();
-    const b = ts();
+    let far = 0;
+    let near = 0;
     for (let k = 0; k < 1000; k++) {
-      const s = rng.uniform(0, L);
-      const l = rng.uniform(-300, 300);
-      const x = rng.uniform(-400, 400);
-      const y = rng.uniform(-600, 200);
-      expect(Math.abs(loopTerrainHeight(track, x, y, s, l, a) - groundHeight(track, x, y, s, l, b))).toBeLessThan(1e-9);
+      const x = rng.uniform(-900, 900);
+      const y = rng.uniform(-1100, 700);
+      world.sample(x, y, NaN, out);
+      core.project(x, y, NaN, fr);
+      if (Math.abs(fr.l) <= LOOP_CORRIDOR + 0.5) continue;
+      expect(out.zone).toBe('terrain');
+      expect(Math.abs(out.h - world.terrainHeight(x, y))).toBeLessThan(1e-9);
+      // the loop's own terrain function, which the terrain mesh bakes (10-03), agrees wherever one section decides
+      const outer = track.def.width / 2 + track.def.kerbWidth + track.def.runoff;
+      if (Math.abs(fr.l) - outer > 230) {
+        expect(Math.abs(out.h - farField(x, y))).toBeLessThan(1e-9);
+        expect(Math.abs(out.h - loopTerrainHeight(track, x, y, fr.s, fr.l, a))).toBeLessThan(1e-9);
+        far++;
+      } else near++;
     }
+    expect(far).toBeGreaterThan(100);
+    expect(near).toBeGreaterThan(50);
   });
 });

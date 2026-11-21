@@ -14,10 +14,7 @@
 import { BufferAttribute, BufferGeometry } from 'three';
 import type { BuiltTrack, TrackSample } from '../../contracts/track';
 import type { GroundHit, GroundWorld } from '../../contracts/world';
-import { farField, loopTerrainHeight } from '../../sim-core/world/terrain';
-
-/** The M1 single-section terrain profile, now sim-core's (kept as an alias for tests/sim-core/world-ground.test.ts). */
-export const groundHeight: (track: BuiltTrack, x: number, y: number, s: number, l: number, sample: TrackSample) => number = loopTerrainHeight;
+import { farField } from '../../sim-core/world/terrain';
 
 const CELL = 4;
 /** Finest cell, m (two halvings of CELL). */
