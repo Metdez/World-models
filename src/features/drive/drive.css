@@ -10,6 +10,9 @@
 :root:has(#overlay > .sl-drive:not(.is-hidden).has-hint) {
   --sl-hud-drive-h: calc(var(--sl-drive-pill-h) + var(--sl-drive-hint-h) + 2 * var(--sl-hud-gap));
 }
+:root:has(#overlay > .sl-drive:not(.is-hidden).has-tall-hint) {
+  --sl-drive-hint-h: 54px;
+}
 :root {
   --sl-drive-pill-h: 44px;
   --sl-drive-hint-h: 34px;
@@ -308,7 +311,7 @@
   display: none;
 }
 
-.sl-drive-aids-panel {
+.sl-drive-panel {
   position: absolute;
   left: 50%;
   bottom: calc(var(--sl-drive-pill-h) + var(--sl-hud-gap, 8px));
@@ -325,7 +328,7 @@
   pointer-events: auto;
   animation: sl-drive-pop var(--dur-hud) var(--ease);
 }
-.sl-drive-aids-panel[hidden] {
+.sl-drive-panel[hidden] {
   display: none;
 }
 @keyframes sl-drive-pop {
@@ -351,6 +354,9 @@
 .sl-drive-aids-model {
   font-size: 12px;
   color: var(--text-2);
+}
+.sl-drive-aid[hidden] {
+  display: none;
 }
 .sl-drive-aid {
   display: flex;
@@ -454,8 +460,56 @@
 }
 .sl-drive-hint[data-kind='prompt'] [data-kind='prompt'],
 .sl-drive-hint[data-kind='controls'] [data-kind='controls'],
-.sl-drive-hint[data-kind='cue'] [data-kind='cue'] {
+.sl-drive-hint[data-kind='cue'] [data-kind='cue'],
+.sl-drive-hint[data-kind='pad'] [data-kind='pad'],
+.sl-drive-hint[data-kind='station'] [data-kind='station'],
+.sl-drive-hint[data-kind='note'] [data-kind='note'] {
   display: inline-flex;
+}
+.sl-drive-hint-row[data-kind='pad'] {
+  gap: var(--sp-5);
+}
+.sl-drive-padtext,
+.sl-drive-coarse,
+.sl-drive.has-pad .sl-drive-fine {
+  display: none;
+}
+.sl-drive.has-pad .sl-drive-padtext {
+  display: inline;
+}
+.sl-drive-fine .sl-drive-kbd,
+.sl-drive-padtext .sl-drive-kbd {
+  margin: 0 2px;
+}
+.sl-drive-hint[data-kind='note'] {
+  color: var(--text-1);
+}
+/* a station's note: what to watch, up to two lines */
+.sl-drive-hint[data-kind='station'] {
+  height: auto;
+  min-height: var(--sl-drive-hint-h);
+  max-width: min(560px, calc(100vw - 2 * var(--margin)));
+  padding: 7px var(--sp-4);
+  border-radius: var(--radius-panel);
+  white-space: normal;
+  line-height: 1.35;
+}
+.sl-drive-hint-row[data-kind='station'] {
+  display: none;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+.sl-drive-station-name {
+  font-size: var(--fs-label);
+  font-weight: 500;
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--text-1);
+}
+.sl-drive-station-text {
+  font-size: 13px;
+  color: var(--text-2);
 }
 .sl-drive-hint-row .sl-drive-kbd {
   color: var(--text-1);
@@ -514,9 +568,23 @@
     min-height: 52px;
   }
   .sl-drive-kbd,
-  .sl-drive-hint[data-kind='prompt'],
-  .sl-drive-hint[data-kind='controls'] {
+  .sl-drive-hint[data-kind='controls'],
+  .sl-drive .sl-drive-fine,
+  .sl-drive .sl-drive-padtext {
     display: none;
+  }
+  .sl-drive .sl-drive-coarse {
+    display: inline;
+  }
+  .sl-drive-stations-btn,
+  .sl-drive-rejoin {
+    height: 44px;
+  }
+  .sl-drive-stations-btn {
+    min-width: 44px;
+  }
+  .sl-drive-station {
+    min-height: 52px;
   }
 }
 @media (max-width: 720px) {
@@ -526,7 +594,279 @@
   .sl-drive-hint-or {
     display: none;
   }
-  .sl-drive-aids-panel {
+  .sl-drive-panel {
     width: min(300px, calc(100vw - 2 * var(--margin)));
+  }
+}
+
+/* ---------------------------------------------------------------- Returning chip (10-04) */
+
+.sl-drive-return {
+  display: none;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 0 0 var(--sp-3);
+  font-size: 12px;
+  color: var(--text-1);
+  white-space: nowrap;
+}
+.sl-drive-pill.is-returning .sl-drive-return {
+  display: inline-flex;
+}
+.sl-drive-return-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  animation: sl-drive-breathe 1.6s var(--ease) infinite alternate;
+}
+@keyframes sl-drive-breathe {
+  from {
+    opacity: 0.35;
+  }
+}
+.sl-drive-rejoin {
+  height: 30px;
+  margin: 0;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--hair-strong);
+  border-radius: var(--radius-pill);
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-1);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+.sl-drive-rejoin:hover {
+  background: var(--hair);
+  border-color: var(--accent-dim);
+}
+
+/* ---------------------------------------------------------------- stations (10-04) */
+
+.sl-drive-stations-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  min-width: 36px;
+  margin: 0 0 0 var(--sp-1);
+  padding: 0 12px 0 10px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.sl-drive-stations-btn[hidden] {
+  display: none;
+}
+.sl-drive-stations-btn:hover,
+.sl-drive-stations-btn.is-open {
+  color: var(--text-1);
+  background: var(--hair);
+}
+/* in Manual the pill carries speed, gear and lamps: the stations button is an icon there (the popover has the words) */
+.sl-drive-pill[data-mode='manual'] .sl-drive-stations-label {
+  display: none;
+}
+.sl-drive-pill[data-mode='manual'] .sl-drive-stations-btn {
+  padding: 0 10px;
+}
+.sl-drive-stations-panel {
+  width: min(340px, calc(100vw - 2 * var(--margin)));
+  max-height: calc(100vh - var(--margin) - var(--sl-hud-susp-base-h, 96px) - var(--sl-drive-pill-h) - 2 * var(--sl-hud-gap, 8px) - var(--margin));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.sl-drive-station {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  padding: 8px var(--sp-2);
+  border: 0;
+  border-top: 1px solid var(--hair);
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+.sl-drive-station-list {
+  margin: 0 calc(-1 * var(--sp-2));
+}
+.sl-drive-station:hover {
+  background: var(--hair);
+  border-radius: var(--radius-chip);
+}
+.sl-drive-station:hover + .sl-drive-station {
+  border-top-color: transparent;
+}
+.sl-drive-station-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.sl-drive-station-tag {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px dashed var(--hair-strong);
+  border-radius: var(--radius-pill);
+  font-size: 10px;
+  color: var(--text-2);
+}
+
+/* ---------------------------------------------------------------- fade over a cut (10-04) */
+
+.sl-drive-fade {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-0);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------- touch controls (10-04, coarse pointers, Manual) */
+
+#overlay > .sl-drive-touch,
+#overlay > .sl-drive-fade {
+  pointer-events: none;
+}
+/* while touch-driving the controls sit above the HUD corners (a thumb needs them more than the corner cards) */
+#overlay > .sl-drive-touch {
+  z-index: 3;
+}
+.sl-drive-touch {
+  position: absolute;
+  inset: 0;
+}
+.sl-drive-touch[hidden] {
+  display: none;
+}
+.sl-drive-steer,
+.sl-drive-pad {
+  pointer-events: auto;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.sl-drive-steer {
+  position: absolute;
+  left: max(var(--margin), env(safe-area-inset-left));
+  bottom: max(var(--margin), env(safe-area-inset-bottom));
+  display: grid;
+  place-items: center;
+  width: clamp(180px, 28vw, 280px);
+  height: 72px;
+}
+.sl-drive-steer-track {
+  position: absolute;
+  inset: 12px 0;
+  border-radius: var(--radius-pill);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--hair);
+  box-shadow: var(--shadow-panel);
+}
+.sl-drive-steer-mark {
+  position: absolute;
+  left: 50%;
+  top: 10px;
+  bottom: 10px;
+  width: 1px;
+  background: var(--hair-strong);
+}
+.sl-drive-steer-knob {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-pill);
+  background: var(--hair-strong);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--hair-strong);
+  box-shadow:
+    var(--shadow-panel),
+    inset 0 0 0 8px var(--glass);
+  transition: transform var(--dur-thumb) var(--ease);
+}
+.sl-drive-steer.is-held .sl-drive-steer-knob {
+  border-color: var(--accent);
+  transition: none;
+}
+.sl-drive-pedals {
+  position: absolute;
+  right: max(var(--margin), env(safe-area-inset-right));
+  bottom: max(var(--margin), env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.sl-drive-pad {
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 64px;
+  border-radius: var(--radius-panel);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--hair);
+  box-shadow: var(--shadow-panel);
+  font-size: var(--fs-label);
+  font-weight: 500;
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--text-1);
+  transition:
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+.sl-drive-pad[data-pad='gas'] {
+  height: 84px;
+}
+.sl-drive-pad.is-held {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sl-drive-return-dot {
+    animation: none;
+  }
+}
+
+/* touch-driving on a phone or a small tablet: the aid lamps keep their icon and warn border (the title names them),
+   the Approximate badge keeps its word; the pill then stays clear of the pedals */
+@media (pointer: coarse) and (max-width: 1100px) {
+  .sl-drive-lamp:not([data-lamp='approximate']) {
+    padding: 0 5px;
+  }
+  .sl-drive-lamp:not([data-lamp='approximate']) .sl-drive-lamp-text {
+    display: none;
   }
 }

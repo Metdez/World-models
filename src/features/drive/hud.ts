@@ -43,11 +43,12 @@ const svg = (body: string) =>
   `<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 
 /** Inline icons (decoration only: the text beside each one carries the meaning). */
-export const HUD_ICON: Readonly<Record<LampId | 'assists', string>> = {
+export const HUD_ICON: Readonly<Record<LampId | 'assists' | 'stations', string>> = {
   abs: svg('<circle cx="10" cy="10" r="4.5"/><path d="M4.5 5a7.5 7.5 0 0 0 0 10M15.5 5a7.5 7.5 0 0 1 0 10"/>'),
   traction: svg('<circle cx="10" cy="8" r="4.5"/><path d="M3.5 16c2-1.6 3.5 1.6 5.5 0s3.5 1.6 5.5 0 2-.8 2-.8"/>'),
   stability: svg('<path d="M6 17c0-5 8-4 8-10"/><path d="M11 6l3-3 3 3"/>'),
   approximate: svg('<path d="M4 8.5c2-2 4 1.5 6 0s4-2 6 0M4 13.5c2-2 4 1.5 6 0s4-2 6 0"/>'),
+  stations: svg('<path d="M10 17.5s-5.5-5-5.5-9a5.5 5.5 0 0 1 11 0c0 4-5.5 9-5.5 9z"/><circle cx="10" cy="8.5" r="2"/>'),
   assists: svg('<path d="M3.5 6.5h13M3.5 13.5h13"/><circle cx="7.5" cy="6.5" r="2" fill="currentColor"/><circle cx="12.5" cy="13.5" r="2" fill="currentColor"/>'),
 };
 

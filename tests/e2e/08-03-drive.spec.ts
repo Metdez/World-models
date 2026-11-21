@@ -97,12 +97,13 @@ test.describe('08-03 take the wheel', () => {
     expect(reset.speed).toBeLessThan(0.5);
     expect(reset.zone).toBe('loop');
 
-    // Enter hands back; a still-held ↑ cannot retake it until released
+    // Enter hands back (10-04: on the loop that is Returning, the autopilot brings the car back); a still-held ↑
+    // cannot retake it until released
     await page.keyboard.down('ArrowUp');
     await page.keyboard.press('Enter');
-    await expect.poll(() => mode(page)).toBe('auto');
+    await expect.poll(() => mode(page)).not.toBe('manual');
     await page.waitForTimeout(200);
-    expect(await mode(page)).toBe('auto');
+    expect(await mode(page)).not.toBe('manual');
     await page.keyboard.up('ArrowUp');
     await expect(page.locator('.sl-drive-pill')).toHaveAttribute('data-mode', 'auto');
     await expectHealthyBoot(page, errors);

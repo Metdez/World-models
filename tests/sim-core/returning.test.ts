@@ -1,13 +1,13 @@
 /**
  * Returning (ARCHITECTURE-M2 §7.10 B/C/D, §11 H2): Enter while driving hands the SAME plant to the PathDriver, which
  * brings it back from any state and latches onto the Auto lap; a return that has not latched within RETURN_TIMEOUT
- * (20 s; 60 s when it started off the loop corridor) is released with a cut (the drive feature fades).
+ * (40 s since 10-04, the measured p90 of a rejoin; 60 s when it started off the loop corridor) is released with a cut (the drive feature fades).
  * H2 (§11): 500 seeded starts within 12 m of the driving line, any heading, -5..40 m/s, yaw rate up to 1 rad/s. Measured
  * honestly: every return ends within the timeout (latched, or released with a cut), every frame finite; the latch share,
  * rejoin times and the largest distance from the line are printed. The §11 band "all latch <= 20 s within 30 m" does NOT
  * hold for these starts (see 10-01-SUMMARY: a car at 40 m/s heading off the line cannot stay within 30 m, and catching
  * up with a lap that already runs at the grip limit takes longer than 20 s from a standstill); the test keeps a floor.
- * H2-road: 200 takeovers while driving (near the line, 70-115 % of the lap speed) -> >= 95 % latch within 20 s;
+ * H2-road: 200 takeovers while driving (near the line, 70-115 % of the lap speed) -> >= 95 % latch within the timeout;
  * deceleration in the first 2 s vs the Auto lap's own braking at the same places is printed.
  * Annex (10-02 world): station spawns are in bounds with their zone id; 200 m beyond the field is out of bounds;
  * 30 returns from the annex end within 60 s (latched after driving back across the field, or released).
@@ -33,7 +33,7 @@ const annexSim = () => createSimulation({ catalog: annexCatalog, trackId: 'provi
 const ended = (r: ReturnResult) => r.events.some((e) => e.kind === 'mode' && e.mode === 'auto');
 
 describe('Returning (H2)', () => {
-  it('500 seeded starts: every return ends within 20 s (latched or released with a cut), all finite; latch share printed', () => {
+  it('500 seeded starts: every return ends within RETURN_TIMEOUT (latched or released with a cut), all finite; latch share printed', () => {
     const sim = makeSim('proving-loop', 'double-wishbone', 0);
     const rng = createRng(1001);
     const times: number[] = [];
@@ -59,14 +59,14 @@ describe('Returning (H2)', () => {
     }
     const ok = times.filter((t) => t < Infinity);
     console.log(
-      `[H2] 500 starts (|e| <= 12 m, any heading, -5..40 m/s, |r| <= 1 rad/s): latched within 20 s ${ok.length} (${((ok.length / 5) | 0)} %), the rest released by the timeout; ` +
+      `[H2] 500 starts (|e| <= 12 m, any heading, -5..40 m/s, |r| <= 1 rad/s): latched within ${RETURN_TIMEOUT} s ${ok.length} (${((ok.length / 5) | 0)} %), the rest released by the timeout; ` +
         `rejoin median ${pct(ok, 0.5).toFixed(1)} s, p90 ${pct(ok, 0.9).toFixed(1)} s, worst ${Math.max(...ok).toFixed(1)} s; stayed within 30 m of the line ${within30}; max distance ${worstDist.toFixed(1)} m`,
     );
     expect(broken).toEqual([]);
-    expect(ok.length).toBeGreaterThanOrEqual(200); // regression floor (measured 216 / 500)
+    expect(ok.length).toBeGreaterThanOrEqual(400); // regression floor (20 s: 228 / 500; 40 s: see 10-04-SUMMARY)
   }, 600_000);
 
-  it('200 takeovers while driving on the road (70-115 % of the lap speed): >= 95 % latch within 20 s, no hard braking at the hand-over', () => {
+  it('200 takeovers while driving on the road (70-115 % of the lap speed): >= 95 % latch within RETURN_TIMEOUT, no hard braking at the hand-over', () => {
     const sim = makeSim('proving-loop', 'double-wishbone', 0);
     const rng = createRng(2002);
     const times: number[] = [];
@@ -100,7 +100,7 @@ describe('Returning (H2)', () => {
     }
     const ok = times.filter((t) => t < Infinity);
     console.log(
-      `[H2-road] 200 takeovers: latched within 20 s ${ok.length}; median ${pct(ok, 0.5).toFixed(1)} s, p90 ${pct(ok, 0.9).toFixed(1)} s, worst ${Math.max(...ok).toFixed(1)} s; max distance from the line ${m.dist.toFixed(1)} m\n` +
+      `[H2-road] 200 takeovers: latched within ${RETURN_TIMEOUT} s ${ok.length}; median ${pct(ok, 0.5).toFixed(1)} s, p90 ${pct(ok, 0.9).toFixed(1)} s, worst ${Math.max(...ok).toFixed(1)} s; max distance from the line ${m.dist.toFixed(1)} m\n` +
         `[H2-road] first 2 s (0.25 s mean): max deceleration ${(m.decel / G).toFixed(2)} g, beyond the Auto lap's own braking there ${(m.extra / G).toFixed(2)} g ` +
         `(takeovers at <= 100 % of the lap speed: ${(m.decelSlow / G).toFixed(2)} g, brake pedal beyond the lap's own braking there <= ${m.brakeSlow.toFixed(2)}, ${m.slides} slid into BRAKE), max brake pedal ${m.brake.toFixed(2)}; whole return: max lateral ${(m.lat / G).toFixed(2)} g (per-step tyre force), max steer rate ${m.steerRate.toFixed(2)} rad/s`,
     );

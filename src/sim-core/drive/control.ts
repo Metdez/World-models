@@ -55,8 +55,9 @@ export interface DriveControlDeps {
 
 /** The kernel's ride inputs stay as they are at the engage (the car model's input already holds them). */
 const KEEP_INPUTS = { ax: NaN, ay: NaN } as const;
-/** Returning gives up (immediate release, a cut) after this long on the loop corridor / when it started off it, s. */
-export const RETURN_TIMEOUT = 20;
+/** Returning gives up (immediate release, a cut) after this long on the loop corridor / when it started off it, s
+ * (40 s: the measured p90 of a rejoin from any start is 38 s; orchestrator decision for 10-04). */
+export const RETURN_TIMEOUT = 40;
 export const RETURN_TIMEOUT_OFF = 60;
 /** The loop autopilot's speed margin while it recovers (§7.9; it fades to the exact profile speed when tracking). */
 const LOOP_SPEED_SCALE = 0.97;
