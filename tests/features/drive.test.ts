@@ -1,10 +1,11 @@
-/** 08-03 take the wheel: key table, takeover edges, neutral-before-retake, keyboard plumbing, idle timing. */
+/** 08-03 take the wheel: key table, takeover edges, neutral-before-retake, keyboard plumbing, idle timing; 09-05 HUD. */
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { neutralIntent, type DriveIntent, type DriveMode } from '../../src/contracts/drive';
+import { createDriveFrame, DEFAULT_AIDS, neutralIntent, type DriveFrame, type DriveIntent, type DriveMode } from '../../src/contracts/drive';
 import type { DriveIntentSource } from '../../src/contracts/services';
 import { createArbiter, HYSTERESIS_S } from '../../src/features/drive/arbiter';
 import { handBackAfter, idleState, promptVisible, TIMING } from '../../src/features/drive/idle';
-import { capturesCode, gearLabel, keyIntent } from '../../src/features/drive/keys';
+import { AID_COPY, AID_KEYS, aidsSummary, LAMP_HOLD_S, LAMP_TEXT, LAMP_TITLE, LAMPS, updateLamps, withAid } from '../../src/features/drive/hud';
+import { capturesCode, gearLabel, isDriving, keyIntent } from '../../src/features/drive/keys';
 
 const intentOf = (...codes: string[]) => {
   const out = neutralIntent('touch');
@@ -280,5 +281,61 @@ describe('keyboard source', () => {
     key('keydown', 'NumpadEnter');
     expect(st.commands).toEqual(['toggle', 'reset', 'toggle']);
     src.dispose();
+  });
+});
+
+describe('handling HUD (09-05; ARCH-M2 §10.2, §10.5, §13)', () => {
+  const flags = (o: Partial<Pick<DriveFrame, 'absActive' | 'tractionActive' | 'stabilityActive' | 'approximate'>> = {}) => ({
+    absActive: false,
+    tractionActive: false,
+    stabilityActive: false,
+    approximate: false,
+    ...o,
+  });
+  const bit = (id: (typeof LAMPS)[number]) => 1 << LAMPS.indexOf(id);
+
+  it('four switches, labelled as a simplified model, never a brand; copy has no digits', () => {
+    expect([...AID_KEYS]).toEqual(['abs', 'traction', 'stability', 'steering']);
+    const copy = [...Object.values(AID_COPY).flatMap((c) => [c.name, c.hint]), ...Object.values(LAMP_TEXT), ...Object.values(LAMP_TITLE)];
+    for (const s of copy) expect(s).not.toMatch(/\d|ESP|ASR|DSC|VSC|StabiliTrak/);
+    expect(aidsSummary(DEFAULT_AIDS)).toEqual({ tag: '', label: 'Assists: all on. Assist: simplified model' });
+    for (const key of AID_KEYS) expect(LAMP_TITLE.abs + aidsSummary(withAid(DEFAULT_AIDS, key, false)).label).toMatch(/simplified model/);
+  });
+
+  it('withAid flips one aid and leaves the rest; the summary names what is off', () => {
+    const noAbs = withAid(DEFAULT_AIDS, 'abs', false);
+    expect(noAbs).toEqual({ abs: false, traction: true, stability: true, steering: true });
+    expect(DEFAULT_AIDS.abs).toBe(true); // not mutated
+    expect(aidsSummary(noAbs)).toEqual({ tag: 'Some off', label: 'Assists: Anti-lock brakes off. Assist: simplified model' });
+    const none = AID_KEYS.reduce((a, k) => withAid(a, k, false), DEFAULT_AIDS);
+    expect(aidsSummary(none).tag).toBe('Off');
+    expect(aidsSummary(withAid(none, 'steering', true)).label).toBe('Assists: Anti-lock brakes, Traction control, Stability control off. Assist: simplified model');
+  });
+
+  it('lamps follow the frame.drive flags, hold briefly after an intervention, and are dark outside Manual', () => {
+    const hold = new Float64Array(LAMPS.length);
+    expect(updateLamps(flags(), true, 1 / 60, hold)).toBe(0);
+    expect(updateLamps(flags({ absActive: true }), true, 1 / 60, hold)).toBe(bit('abs'));
+    expect(updateLamps(flags({ tractionActive: true, approximate: true }), true, 1 / 60, hold)).toBe(bit('abs') | bit('traction') | bit('approximate'));
+    // a pulsing ABS reads as one lamp: still lit until LAMP_HOLD_S after the last active frame
+    let t = 0;
+    let mask = bit('abs');
+    while (mask & bit('abs')) {
+      mask = updateLamps(flags({ stabilityActive: true }), true, 0.05, hold);
+      t += 0.05;
+    }
+    expect(t).toBeGreaterThan(LAMP_HOLD_S - 1e-9);
+    expect(t).toBeLessThan(LAMP_HOLD_S + 0.05 + 1e-9);
+    expect(mask).toBe(bit('stability') | bit('traction') | bit('approximate')); // those two were lit one frame later
+    // hand-back: everything off at once, even with a flag set
+    expect(updateLamps(flags({ stabilityActive: true, approximate: true }), false, 0.01, hold)).toBe(0);
+    expect([...hold]).toEqual([0, 0, 0, 0]);
+  });
+
+  it('a synthetic stop with ABS from a fake drive frame lights only the ABS lamp', () => {
+    const d = createDriveFrame();
+    d.mode = 'manual';
+    d.absActive = true;
+    expect(updateLamps(d, isDriving(d.mode), 1 / 60, new Float64Array(LAMPS.length))).toBe(bit('abs'));
   });
 });
