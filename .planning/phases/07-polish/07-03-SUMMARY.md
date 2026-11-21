@@ -45,7 +45,23 @@ rest of the a11y CSS/TS edits and the e2e spec were swept into the orchestrator'
 - `tests/features/audio.test.ts` added (not listed in the ROADMAP row).
 
 ## Verification
-VERIFICATION_PLACEHOLDER
+```
+$ npm run check            -> typecheck clean, ✔ no dependency violations (207 modules, 641 dependencies)
+ Test Files  1 failed | 57 passed | 1 skipped (59)   Tests 1 failed | 657 passed | 11 skipped (669)
+   the one failure: simulation.test.ts "step cost" (load-sensitive timing); re-run alone: 11 passed (11)
+$ npx vitest run tests/features/audio.test.ts      -> 6 passed
+$ npx vite build --outDir <scratch>/b0703 && npx vite preview --outDir <scratch>/b0703 --port 4713
+$ PLAYWRIGHT_BASE_URL=http://localhost:4713 npx playwright test tests/e2e/07-03-a11y.spec.ts --trace off
+[07-03] follow: 34 text runs, min ratio 5.53
+[07-03] explore: 34 text runs, min ratio 5.62
+[07-03] help card: 60 text runs, min ratio 4.81
+  ✓ keyboard: every control reachable and named, focus ring, radiogroups, live regions, contrast (3.4m)
+  ✓ reduced motion and higher contrast (18.5s)
+  ✓ tablet 1024x768 with touch: 44 px targets, no overlaps, one-finger orbit (1.2m)
+  ✓ phone remote: every target at least 44 px (203ms)
+  4 passed (4.9m)
+$ ... 04-02-controls 04-03-hud 04-05-layout (regression, same build)   9 passed (18.1m)
+```
 
 Screenshots (inspected): scratchpad `shots/07-03-focus-suspension.png`, `07-03-mute-toggle.png`,
 `07-03-tablet-1024x768.png`.
