@@ -2993,3 +2993,26 @@ driver → 11-04 3D ghost car (keep traces) → braking-platform lanes (keep dry
 8. **Determinism scope:** Chromium + Node only (no Firefox/WebKit binaries). Default: accept the gap; replays resync.
 9. **Motorcycle Manual** (lean-target controller) is out of M2; schedule as v1.5?
 10. **Hill / grade station** not planned (non-goal); confirm.
+
+## 17. Reality notes (13-01 audit; where the built system differs from the text above)
+The contract blocks above are unchanged and still match the code byte for byte (`tests/arch/contracts-verbatim.test.ts`,
+incl. 11-05's `strike` / `hard-stop` DriveEvent kinds). Prose that reality contradicts, with the plan that changed it:
+- §7.1 `Recorder.window(seconds)` is `last(seconds)` (the M1 purity test bans the word in sim-core; 11-03).
+- §7.9 / §11 H2: `RETURN_TIMEOUT` is 40 s (10-04), not 20 s; from 500 random starts 92 % latch within 40 s and the
+  rest are released with a cut; "never leaves a 30 m corridor" does not hold for starts at speed pointing away (10-01).
+  The latch uses the CG, 1.0° heading tolerance (10-01).
+- §7.13 snapshot: `PLANT_SNAPSHOT_LENGTH` 96 (11-03 appended the previous step's tyre values and road rate).
+- §7.14 Compare uses a disclosed ghost driver (the visitor's own commands + small corrections), not the PathDriver
+  (11-04).
+- §10.2 idle: the cue shows over the last 3 s (27 s on `?screen=1`); the take-the-wheel prompt re-arms after every
+  hand-back instead of persisting its dismissal (08-03: a booth sees many visitors).
+- §10.5 friction-ring reference radius 0.4 m (11-01); past-limit test in the plant is slip-based.
+- §11 T15 0–100 km/h measures 4.99 s (band 3.6–4.8 s; friction-limited, not tuned, 09-04); T10 ISO 3888-2 pass speed
+  measures the PathDriver, not the suspension (10-04).
+- §14 cost: the plant step is ~17–20 µs median, but it is not allocation-free in V8: calls V8 does not inline box their
+  double arguments and returns (13-01 measured Returning ~13.6 KB/step, Manual ~11.5, Auto ~3.7 of short-lived
+  garbage after removing the largest sources). The heap tripwires catch retained growth, not this churn.
+- §12.4 engineer: while driving only `set_view` and `highlight_component` are offered (12-03); the daily model-call
+  cap is 280 (13-01; driving answers cost ~27–30 neurons).
+- Off the live lap (MD-07) and "Reset to road" (MD-18) were added in 13-01 (they had no UI before).
+- §16 item 4: the Turnstile widget exists (12-01); saving is on in production.

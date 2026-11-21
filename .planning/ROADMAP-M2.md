@@ -49,12 +49,12 @@ M2 executors start only when phase 7 is complete and `npm run check` is green. M
 - **07-04 (matrix, runbook, CREDITS, smoke-room):** 13-01 extends the runbook and matrix; 12-02 extends smoke-room.
 
 ## Phases
-- [ ] **Phase 8: Walking skeleton (live)** — contracts, kernel plumbing, manual plant v0, take the wheel, driving camera
-- [ ] **Phase 9: Honest handling** — tyre + compliance, powertrain + aids, determinism sweep, integration + validation, handling HUD
-- [ ] **Phase 10: Hand-back and the playground** — autopilot Returning, GroundWorld zones + annex, annex visuals, drive UX v2
-- [ ] **Phase 11: Teaching layer** — friction rings + skid marks, events + coach + audio, replays, same line / different suspension
-- [ ] **Phase 12: Cloudflare blend** — D1 replays + Turnstile, room driver role, engineer for driving, phone driver, shared replays [, crowd insight S, live ghosts S]
-- [ ] **Phase 13: Event readiness** — matrix, audits, runbook, final deploy
+- [x] **Phase 8: Walking skeleton (live)** — contracts, kernel plumbing, manual plant v0, take the wheel, driving camera
+- [x] **Phase 9: Honest handling** — tyre + compliance, powertrain + aids, determinism sweep, integration + validation, handling HUD
+- [x] **Phase 10: Hand-back and the playground** — autopilot Returning, GroundWorld zones + annex, annex visuals, drive UX v2
+- [x] **Phase 11: Teaching layer** — friction rings + skid marks, events + coach + audio, replays, same line / different suspension
+- [x] **Phase 12: Cloudflare blend** (core plans; stretch 12-06, 12-07 not built) — D1 replays + Turnstile, room driver role, engineer for driving, phone driver, shared replays [, crowd insight S, live ghosts S]
+- [x] **Phase 13: Event readiness** (automated parts; real-hardware checks open, see STATE.md) — matrix, audits, runbook, final deploy
 
 ## Phase Details
 
@@ -251,12 +251,24 @@ remote/phone-drive/live-lab, 12-05 replay feature, 12-06 insight route + coach, 
 ## Progress
 | Phase | Plans Complete | Status | Completed |
 |---|---|---|---|
-| 8. Walking skeleton (live) | 0/4 | Not started | - |
-| 9. Honest handling | 0/5 | Not started | - |
-| 10. Hand-back and the playground | 0/4 | Not started | - |
-| 11. Teaching layer | 0/4 | Not started | - |
-| 12. Cloudflare blend | 0/7 | Not started | - |
-| 13. Event readiness | 0/1 | Not started | - |
+| 8. Walking skeleton (live) | 5/5 (08-05 gate fixes added) | Complete, deployed | 2026-11-21 |
+| 9. Honest handling | 5/5 | Complete, deployed (0–100 km/h outside its band, reported) | 2026-11-21 |
+| 10. Hand-back and the playground | 4/4 | Complete, deployed (H2 return band not met, reported) | 2026-11-21 |
+| 11. Teaching layer | 5/5 (11-05 follow-ups added) | Complete, deployed | 2026-11-21 |
+| 12. Cloudflare blend | 5/7 | Core complete, deployed; 12-06 [S] and 12-07 [S] deliberately not built | 2026-11-21 |
+| 13. Event readiness | 1/1 | Automated audits, matrix, runbook, deploy done; real-hardware checks open | 2026-11-21 |
+
+### Plan status (13-01 audit; per-requirement evidence in `.planning/phases/13-audit/13-01-AUDIT.md`)
+| Plan | Status | Notes |
+|---|---|---|
+| 08-01 … 08-05 | done | 08-05 = phase-8 gate fixes (camera e2e, ground evidence, insights while driving) |
+| 09-01 … 09-05 | done | T15 0–100 km/h 4.99 s outside 3.6–4.8 s (friction-limited, not tuned) |
+| 10-01 … 10-04 | done | Return timeout 40 s (H2: 92 % latch ≤ 40 s, not "500/500 ≤ 20 s within 30 m"); T10 measures the driver |
+| 11-01 … 11-05 | done | 11-05 = follow-ups (detectors in the plant, driving layout, annex look) |
+| 12-01 … 12-05 | done | Production replay save never human-verified; per-address 429 not provable from the sandbox |
+| 12-06 [S] | not built | Crowd insight: `/api/insight` stays a 501 stub |
+| 12-07 [S] | not built | Live ghosts: feature stub, `defaultEnabled: false` |
+| 13-01 | done | Final deploy + production smoke; human-verify (performance, premium look while driving) still owed |
 
 ---
 *Roadmap M2 created: 2026-11-21*
