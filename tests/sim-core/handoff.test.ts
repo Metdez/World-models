@@ -128,4 +128,27 @@ describe('Auto -> Manual handoff (H1)', () => {
     expect(Math.abs(c.roll - b.roll)).toBeLessThan(Math.abs(b.roll - a.roll) + 2e-3);
     expect(sim.sample(1).suspensionId).toBe('macpherson');
   });
+
+  // 09-04: the engage with aids, compliance and jacking live. A neutral keyboard intent blends the Auto command to
+  // hands-off over 0.3 s, so in a corner the stability aid rightly reacts; but no wheel is braked into ABS, nothing
+  // faults and the yaw rate has no step.
+  it.each(SUSPENSION_IDS)('%s: the first second after an engage: no ABS, no fault, smooth yaw rate', (id) => {
+    for (const t of [12, 47, 83, 118]) {
+      const sim = makeSim('proving-loop', id, t);
+      sim.step(SIM_DT);
+      sim.drive!.setIntent(neutralIntent('keyboard'));
+      sim.drive!.request('manual');
+      let prevR = NaN;
+      let worstJump = 0;
+      for (let k = 0; k < 240; k++) {
+        sim.step(SIM_DT);
+        const f = sim.sample(1);
+        expect(f.drive.absActive, `ABS lamp @${t} +${k}`).toBe(false);
+        if (prevR === prevR) worstJump = Math.max(worstJump, Math.abs(f.yawRate - prevR));
+        prevR = f.yawRate;
+        expect(f.drive.faults).toBe(0);
+      }
+      expect(worstJump, `yaw-rate step @${t}`).toBeLessThan(0.02);
+    }
+  });
 });
