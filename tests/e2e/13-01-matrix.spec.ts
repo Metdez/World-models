@@ -158,5 +158,23 @@ test.describe('13-01 feature-off matrix', () => {
     expect(await page.evaluate(() => globalThis.__app!.errors)).toEqual([]);
     expect(errors).toEqual([]);
   });
+
+  for (const station of ['ride-street', 'steering-pad', 'slalom', 'lane-change', 'braking-platform'] as const) {
+    test(`Manual at station ${station}: drives with zero console errors (phase 13 criterion 1)`, async ({ page }) => {
+      const errors = captureConsole(page);
+      await page.goto(`/?e2e=1&quality=low&drive=manual&spawn=${station}`);
+      await page.waitForFunction(() => globalThis.__app?.ready === true, undefined, { timeout: 180_000 });
+      await expect.poll(() => mode(page), { timeout: 30_000 }).toBe('manual');
+      await page.evaluate(() => globalThis.__app!.driveIntent({ throttle: 0.5, steer: 0.1 }));
+      await page.evaluate(() => globalThis.__app!.advance(3));
+      const d = await page.evaluate(() => globalThis.__app!.drive());
+      await page.evaluate(() => globalThis.__app!.driveIntent(null));
+      expect(d.mode).toBe('manual');
+      expect(d.speed).toBeGreaterThan(2);
+      expect(d.faults).toBe(0);
+      expect(await page.evaluate(() => globalThis.__app!.errors)).toEqual([]);
+      expect(errors).toEqual([]);
+    });
+  }
 });
 
