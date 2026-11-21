@@ -275,6 +275,6 @@ describe('11-05 facility look', () => {
       }
     }
     const hut = facilityPlacement(world, zones, provingGround.field ?? null).hut!;
-    for (const [dx, dy] of [[-5, -3], [5, 3], [-5, 3], [5, -3]]) expect(world.sample(hut.x + dx, hut.y + dy, NaN, hit).surface).toBe('grass');
+    for (const [dx, dy] of [[-5, -3], [5, 3], [-5, 3], [5, -3]] as const) expect(world.sample(hut.x + dx, hut.y + dy, NaN, hit).surface).toBe('grass');
   });
 });
