@@ -16,6 +16,7 @@ import type { PlantOptions } from '../../src/sim-core/drive/plant';
 import { createDriveCommand } from '../../src/sim-core/drive/types';
 import { buildTrack } from '../../src/sim-core/track/build';
 import { SUSPENSIONS, type SuspensionId } from './08-02-drive';
+import { G } from '../../src/contracts/units';
 
 const loop = buildTrack(provingLoop);
 
@@ -178,3 +179,77 @@ export function slope(x: readonly number[], y: readonly number[]): number {
   }
   return num / den;
 }
+
+// ---- ISO 4138-style quasi-steady constant-radius ramp (T3-T5, the honesty report)
+export interface RampResult {
+  readonly ay: number[];
+  readonly excess: number[]; // delta - L r / u, rad
+  readonly roll: number[];
+  readonly beta: number[];
+  peak: number; // max 1 s mean a_y while on the circle, m/s^2
+}
+
+/** Quasi-steady ramp on radius R (dir +1 left, -1 right) from u0 at `rate` m/s^2 until the circle is lost. */
+export function ramp(suspension: SuspensionId, R: number, dir: 1 | -1, u0 = 8, rate = 0.1, maxU = 40): RampResult {
+  const r = rig({ suspension, aids: { abs: false, traction: false, stability: false, steering: false } });
+  const L = gtCoupe.wheelbase;
+  // start on the circle centred at (0, dir R), heading +x at the origin
+  r.launch(u0, dir / R);
+  const keep = circleKeeper(R, 0, dir * R, dir, L);
+  const out: RampResult = { ay: [], excess: [], roll: [], beta: [], peak: 0 };
+  const win: number[] = [];
+  let integral = 0;
+  for (let k = 0; ; k++) {
+    const t = k * r.dt;
+    const target = u0 + rate * t;
+    if (target > maxU) break;
+    const v = r.plant.view;
+    const e = target - v.u;
+    integral = Math.max(-0.3, Math.min(0.6, integral + e * r.dt * 0.5));
+    r.cmd.throttle = Math.max(0, Math.min(1, 0.3 * e + integral + 0.1));
+    r.cmd.brake = 0;
+    const radial = keep(r);
+    const f = r.step();
+    if (Math.abs(radial) > 2 || r.plant.view.u < target - 3) break;
+    if (t < 3) continue;
+    const ay = dir * f.ay;
+    win.push(ay);
+    if (win.length > 240) win.shift();
+    if (win.length === 240) out.peak = Math.max(out.peak, win.reduce((a, b) => a + b, 0) / 240);
+    if (k % 12 === 0) {
+      out.ay.push(ay);
+      out.excess.push(dir * (v.steer - (L * v.r) / v.u));
+      out.roll.push(dir * f.roll);
+      out.beta.push(dir * v.beta);
+    }
+  }
+  return out;
+}
+
+/** K (deg/g) at a_y0 (g) by a local linear fit within +-0.05 g. */
+export function kAt(res: RampResult, ay0: number, half = 0.05): number {
+  const x: number[] = [];
+  const y: number[] = [];
+  for (let i = 0; i < res.ay.length; i++) {
+    const g = res.ay[i]! / G;
+    if (Math.abs(g - ay0) <= half) {
+      x.push(res.ay[i]!);
+      y.push(res.excess[i]!);
+    }
+  }
+  return degPerG(slope(x, y));
+}
+/** Roll gradient (deg/g) over 0.1..0.5 g; roll + = left side up (a left turn rolls the body to the right). */
+export function rollGradient(res: RampResult): number {
+  const x: number[] = [];
+  const y: number[] = [];
+  for (let i = 0; i < res.ay.length; i++) {
+    const g = res.ay[i]! / G;
+    if (g >= 0.1 && g <= 0.5) {
+      x.push(res.ay[i]!);
+      y.push(res.roll[i]!);
+    }
+  }
+  return degPerG(slope(x, y));
+}
+
