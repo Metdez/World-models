@@ -2,6 +2,7 @@ import type { FeatureModule, FrameInfo } from '../../contracts/app';
 import { CAMERA } from '../../contracts/services';
 import type { AppState } from '../../contracts/store';
 import { h, mount } from '../../ui/dom';
+import { attractMayRun, CLOCK_KEYS } from './gate';
 import { createTimeline, fadeAt, STORYBOARD, type Beat } from './storyboard';
 import './attract.css';
 
@@ -19,6 +20,7 @@ let frameHandler: ((frame: FrameInfo) => void) | undefined;
 /**
  * Attract mode: after IDLE_S without input (or `store.attract` set by ?attract=1 / the presenter) a 60 s
  * storyboard drives the store, camera shots and captions; any input exits with a fade and restores the visitor's state.
+ * Only in Auto (M2): never starts while someone drives, and a takeover ends it.
  * Also the app's source of `user:activity` (DOM input, at most 4 per second).
  */
 export default {
@@ -113,17 +115,23 @@ export default {
       const prior = snapshot;
       snapshot = null;
       if (!prior) return;
+      // A takeover ended it: the kernel owns the clock now (driving runs on the local clock).
+      const driving = !attractMayRun(store.get());
       // Rate and pause first: the kernel forces clock 'local' on those, then 'live' resyncs to the shared lap.
-      set('timeScale', prior.timeScale);
-      set('paused', prior.paused);
+      if (!driving) {
+        set('timeScale', prior.timeScale);
+        set('paused', prior.paused);
+      }
       const swapped = store.get().vehicleId !== prior.vehicleId;
-      for (const key of KEYS) set(key, prior[key]);
+      for (const key of KEYS) if (!driving || !CLOCK_KEYS.has(key)) set(key, prior[key]);
       if (swapped) restoreSuspension = prior.suspensionId;
       exitFade = 1;
     };
 
     ctx.watch((s) => {
-      if (s.attract && !active) enter();
+      // Refused (and ended) while the visitor drives: a takeover always wins over the storyboard.
+      if (s.attract && !attractMayRun(s)) store.setKey('attract', false);
+      else if (s.attract && !active) enter();
       else if (!s.attract && active) exit();
     });
     ctx.on('user:activity', () => {
@@ -159,7 +167,7 @@ export default {
         const text = amp === 1 ? '' : `Motion ×${amp} · values true scale`;
         if (note.textContent !== text) note.textContent = text;
       } else {
-        idle += dt;
+        idle = attractMayRun(store.get()) ? idle + dt : 0;
         if (idleStarts && idle >= IDLE_S) store.setKey('attract', true);
         if (exitFade > 0) {
           exitFade = Math.max(0, exitFade - dt / EXIT_FADE_S);

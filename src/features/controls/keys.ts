@@ -3,6 +3,9 @@ import { AMPLIFICATION_ON, type AppState, type ViewMode } from '../../contracts/
 
 export const SLOW_MO = 0.25;
 
+/** Letters the drive feature owns outside Auto. */
+const DRIVE_LETTERS: ReadonlySet<string> = new Set(['w', 'a', 's', 'd']);
+
 export const VIEW_KEYS: Readonly<Record<string, ViewMode>> = { f: 'follow', e: 'explore', c: 'closeup' };
 
 export interface KeyContext {
@@ -25,6 +28,8 @@ export function keyAction(key: string, s: Readonly<AppState>, k: KeyContext): Ke
     return id === undefined ? null : { suspensionId: id };
   }
   const lower = key.toLowerCase();
+  // While the visitor drives (or the car returns / replays), W A S D belong to the drive feature (ARCH-M2 §10.1).
+  if (s.driveMode !== 'auto' && DRIVE_LETTERS.has(lower)) return null;
   const view = VIEW_KEYS[lower];
   if (view) return { view };
   switch (lower) {

@@ -1,5 +1,6 @@
 /** 04-01 attract storyboard: one 60 s loop, honest short captions, reachable road, deterministic scheduler. */
 import { describe, expect, it } from 'vitest';
+import { attractMayRun, CLOCK_KEYS } from '../../src/features/attract/gate';
 import { beatAt, createTimeline, FADE_IN, FADE_OUT, fadeAt, loopDuration, STORYBOARD } from '../../src/features/attract/storyboard';
 import { provingLoop } from '../../src/sim-core/content/proving-loop';
 
@@ -66,5 +67,15 @@ describe('attract storyboard', () => {
 
   it('the bike beat keeps the bike solid (x-ray off): a naked bike needs none', () => {
     for (const b of STORYBOARD.filter((x) => x.bike)) expect(b.patch.xray).toBe(false);
+  });
+});
+
+describe('attract only in Auto (08-03)', () => {
+  it('never runs while someone drives, returns or replays', () => {
+    expect(attractMayRun({ driveMode: 'auto' })).toBe(true);
+    for (const driveMode of ['manual', 'returning', 'replay'] as const) expect(attractMayRun({ driveMode })).toBe(false);
+  });
+  it('leaves the clock to the kernel when a takeover ended it', () => {
+    expect([...CLOCK_KEYS].sort()).toEqual(['clock', 'paused', 'timeScale']);
   });
 });

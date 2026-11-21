@@ -4,6 +4,7 @@
  * keyboard map with a shortcut card, and the loading overlay. Talks to the rest of the app through the store only.
  */
 import type { FeatureContext, FeatureModule } from '../../contracts/app';
+import { DRIVE } from '../../contracts/services';
 import type { AppState } from '../../contracts/store';
 import type { VehicleDefinition } from '../../contracts/vehicle';
 import { h, mount } from '../../ui/dom';
@@ -20,6 +21,14 @@ const VIEWS: readonly SegmentOption[] = [
 ];
 
 const LOADING_FADE_MS = 700;
+
+const TAKEOVER_ROWS: [string[], string][] = [[['W', '↑'], 'Take the wheel (or Enter)']];
+const DRIVING_ROWS: [string[], string][] = [
+  [['W', 'S'], 'Throttle · brake, reverse'],
+  [['A', 'D'], 'Steer (or arrows)'],
+  [['R'], 'Reset to the road'],
+  [['Enter'], 'Hand back to Auto'],
+];
 
 function otherClassVehicle(c: FeatureContext, current: VehicleDefinition | undefined): VehicleDefinition | undefined {
   return current && c.registries.vehicles.list().find((v) => v.class !== current.class);
@@ -141,6 +150,8 @@ export default {
 
     live.addEventListener('click', () => {
       const s = c.store.get();
+      // While driving, "Rejoin live" releases the car straight back onto the shared lap (a cut, ARCH-M2 §9).
+      if (s.driveMode !== 'auto') c.bus.emit('drive:request', { mode: 'auto', immediate: true });
       if (s.clock !== 'live' || s.paused || s.timeScale !== 1) set(LIVE_PATCH);
     });
     pause.addEventListener('click', () => c.store.setKey('paused', !c.store.get().paused));
@@ -241,14 +252,17 @@ export default {
 
     function renderHelp(): void {
       const k = keyContext();
+      const drive = c.services.tryGet(DRIVE) !== undefined;
+      const driving = c.store.get().driveMode !== 'auto';
       const rows: [string[], string, string?][] = [
         [k.suspensions.map((_, i) => String(i + 1)), 'Suspension'],
         [['F', 'E', 'C'], 'Follow · Explore · Close-up'],
         c.store.get().view === 'closeup' ? [['X'], 'X-ray · always on in close-up'] : [['X'], 'X-ray', 'x'],
         ...(k.otherVehicleId ? ([[['V'], 'Vehicle class', 'v']] as [string[], string, string][]) : []),
         [['Space'], 'Pause', ' '],
-        [['S'], 'Slow motion', 's'],
-        [['A'], 'Amplify motion', 'a'],
+        // the drive feature handles these keys itself (W A S D drive outside Auto)
+        ...((drive ? (driving ? DRIVING_ROWS : TAKEOVER_ROWS) : []) as [string[], string][]),
+        ...((driving ? [] : [[['S'], 'Slow motion', 's'], [['A'], 'Amplify motion', 'a']]) as [string[], string, string][]),
         [['H'], 'Hide controls', 'h'],
         // the audio feature puts its toggle in the Display group and handles M itself
         ...(tools.querySelector('.sl-audio-btn') ? ([[['M'], 'Sound on / off']] as [string[], string][]) : []),
@@ -290,7 +304,7 @@ export default {
       lastView = s.view;
       // The canvas is one picture to assistive tech; its name says what it shows (the HUD carries the numbers).
       const viewLabel = VIEWS.find((v) => v.id === s.view)?.label ?? s.view;
-      const sceneLabel = `3D view, ${viewLabel}: ${vehicle?.name ?? 'vehicle'} with ${copy?.label ?? s.suspensionId} suspension lapping the proving ground`;
+      const sceneLabel = `3D view, ${viewLabel}: ${vehicle?.name ?? 'vehicle'} with ${copy?.label ?? s.suspensionId} suspension ${s.driveMode === 'manual' ? 'driven by you on' : 'lapping'} the proving ground`;
       if (c.dom.stage.getAttribute('aria-label') !== sceneLabel) c.dom.stage.setAttribute('aria-label', sceneLabel);
 
       const other = otherClassVehicle(c, vehicle);

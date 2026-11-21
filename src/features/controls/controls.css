@@ -5,7 +5,7 @@
  * columns stack without measuring each other. Lengths are HUD px: --sl-hud-zoom scales all of them together.
  *   left column : vehicle tag → Live Lab line → presenter card (screen) … telemetry card → engineer pill
  *   right column: time/display groups → camber trace … poll → view control
- *   centre      : amplification chip, debug stats … insight caption → suspension control
+ *   centre      : amplification chip, debug stats … insight caption → drive hint → drive pill → suspension control
  */
 :root {
   --sl-hud-zoom: 1;
@@ -16,7 +16,9 @@
   --sl-hud-top-h: 44px; /* top-right groups */
   --sl-hud-pill-h: 38px; /* "Ask the engineer" pill */
   --sl-hud-view-h: 48px; /* view control */
-  --sl-hud-susp-h: 96px; /* suspension control + descriptor */
+  --sl-hud-susp-base-h: 96px; /* suspension control + descriptor */
+  --sl-hud-drive-h: 0px; /* drive pill (+ hint / action row) stacked on it; set by the drive feature (M2) */
+  --sl-hud-susp-h: calc(var(--sl-hud-susp-base-h) + var(--sl-hud-drive-h)); /* everything at the bottom centre */
 }
 /* big screens at events: the same layout, larger */
 @media (min-width: 1600px) and (min-height: 860px) {

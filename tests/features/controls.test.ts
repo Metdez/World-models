@@ -55,6 +55,19 @@ describe('keyAction (UI-01 keyboard map)', () => {
   it('the amplification chip states the factor and that values stay true scale', () => {
     expect(amplificationText(AMPLIFICATION_ON)).toBe('Motion ×2.5 · values true scale');
   });
+
+  it('outside Auto, W A S D belong to the drive feature (08-03); other keys keep their meanings', () => {
+    for (const driveMode of ['manual', 'returning', 'replay'] as const) {
+      const d = { ...s, driveMode };
+      for (const key of ['a', 's', 'w', 'd', 'A', 'S', 'W', 'D']) expect(keyAction(key, d, car)).toBeNull();
+      expect(keyAction(' ', d, car)).toEqual({ paused: true });
+      expect(keyAction('2', d, car)).toEqual({ suspensionId: 'double-wishbone' });
+      expect(keyAction('v', d, car)).toEqual({ vehicleId: 'cafe-racer' });
+    }
+    expect(keyAction('s', s, car)).toEqual({ timeScale: SLOW_MO });
+    expect(keyAction('a', s, car)).toEqual({ amplification: AMPLIFICATION_ON });
+    expect(keyAction('w', s, car)).toBeNull();
+  });
 });
 
 describe('loading progress (UI-03)', () => {
