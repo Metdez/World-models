@@ -27,6 +27,7 @@ import { buildSpeedProfile, type SpeedProfile } from './path/speed-profile';
 import { buildTrack } from './track/build';
 import { VEHICLE_MODELS, type VehicleModel } from './vehicle-models';
 import type { VehiclePlant } from './drive/plant';
+import { paramsHash } from './replay/format';
 
 /** Built-in content: used when the catalog lacks an id (no content features registered, e.g. kernel tests). */
 const BUILT_IN = {
@@ -127,7 +128,17 @@ export const plantOf = (sim: Simulation): VehiclePlant | undefined => plants.get
 export function createSimulation(options: SimulationOptions): Simulation {
   const resolve = resolver(options.catalog);
   const track = trackFor(resolve.track(options.trackId));
-  const world = worldFor(track, options.catalog.world?.(track.def.id));
+  const worldDef = options.catalog.world?.(track.def.id);
+  const world = worldFor(track, worldDef);
+  // replay paramsHash per (vehicle definition, suspension id): JSON of the definitions, computed once
+  const hashes = new WeakMap<VehicleDefinition, Map<string, string>>();
+  const hashFor = (id: string): string => {
+    let byId = hashes.get(vehicle);
+    if (!byId) hashes.set(vehicle, (byId = new Map()));
+    let h = byId.get(id);
+    if (h === undefined) byId.set(id, (h = paramsHash(vehicle, resolve.suspension(id), worldDef ?? null)));
+    return h;
+  };
   const sectionEvents = track.sections.map((s) => ({ kind: 'section', index: s.index, id: s.id }) as const);
   const events: SimEvent[] = [];
   const path = newPath();
@@ -254,6 +265,9 @@ export function createSimulation(options: SimulationOptions): Simulation {
       model.plant!.releaseToPath(path);
     },
     lapTime: () => lapTime,
+    suspensionId: () => suspension.id,
+    setSuspension: (id) => sim.setSuspension(id),
+    paramsHash: hashFor,
   });
 
   const sim: Simulation = {
@@ -325,6 +339,7 @@ export function createSimulation(options: SimulationOptions): Simulation {
         // Driving: only tables and extras change; pose, velocities and the ride state continue (no pre-roll).
         model.setSuspension(s, true);
         suspension = s;
+        drive.noteSuspension(s.id);
         return;
       }
       model.setSuspension(s);

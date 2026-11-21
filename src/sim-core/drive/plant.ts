@@ -14,7 +14,9 @@
  * (§7.6, RideInput.linkVertical); the full tyre body is 09-01's.
  *
  * Snapshot layout (PLANT_SNAPSHOT_LENGTH doubles): [0, STATE) plant state (offsets below), then roadPrev (4),
- * ride ax/ay low-pass (2), the ride model's q and v (14), the powertrain state (7), the aids state (9).
+ * ride ax/ay low-pass (2), the ride model's q and v (14), the powertrain state (7), the aids state (9), the previous
+ * step's tyre fx, fy, slip ratio and the ride's road rate (16; read by the public restore only: a replay continues
+ * exactly).
  * Determinism: + - * / sqrt and det kernels only; TRUE drive fields are computed here (POSE trig is car-model's).
  */
 import type { DriveAids, DriveEvent, DriveFrame } from '../../contracts/drive';
@@ -157,7 +159,10 @@ const CAMC = 36; // 4: compliance camber (filtered), rad, + top outboard
 const FYLP = 40; // 4: vehicle-frame lateral tyre force per wheel, 8 Hz low-pass (jacking)
 const STATE = 44;
 const EXTRA = 4 + 2 + RIDE_STATE_LENGTH + POWERTRAIN_STATE_LENGTH + AIDS_STATE_LENGTH;
-export const PLANT_SNAPSHOT_LENGTH = STATE + EXTRA;
+/** 11-03: what the next step reads from the previous one besides the state above: tyre fx, fy, slip ratio
+ * (compliance, aids, powertrain) and the ride's road rate (the reported tyre loads). */
+const TYRE_TAIL = STATE + EXTRA;
+export const PLANT_SNAPSHOT_LENGTH = TYRE_TAIL + 16;
 
 // ---- interpolation record
 const RX = 0;
@@ -577,6 +582,10 @@ export function createPlant(core: CarCore, options: PlantOptions = {}): VehicleP
     core.ride().exportState(out, STATE + 6);
     out.set(powertrain.state, STATE + 6 + RIDE_STATE_LENGTH);
     out.set(aidsModel.state, STATE + 6 + RIDE_STATE_LENGTH + POWERTRAIN_STATE_LENGTH);
+    out.set(tyre.fx, TYRE_TAIL);
+    out.set(tyre.fy, TYRE_TAIL + 4);
+    out.set(tyre.slipRatio, TYRE_TAIL + 8);
+    out.set(core.input.roadRate, TYRE_TAIL + 12);
     return out;
   }
   function restore(src: Float64Array): void {
@@ -1164,9 +1173,17 @@ export function createPlant(core: CarCore, options: PlantOptions = {}): VehicleP
 
     snapshot,
     restore(src) {
+      // 11-03: a replay continues exactly from a mid-run snapshot in any simulation: the road rate the ride's loads
+      // were reported with, and (after settle zeroed them) the previous step's tyre outputs
+      for (let i = 0; i < 4; i++) core.input.roadRate[i] = src[TYRE_TAIL + 12 + i]!;
       restore(src);
       core.beginStep();
       settle();
+      for (let i = 0; i < 4; i++) {
+        tyre.fx[i] = src[TYRE_TAIL + i]!;
+        tyre.fy[i] = src[TYRE_TAIL + 4 + i]!;
+        tyre.slipRatio[i] = src[TYRE_TAIL + 8 + i]!;
+      }
     },
   };
   return plant;

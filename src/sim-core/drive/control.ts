@@ -6,9 +6,16 @@
  * when it has converged the simulation latches onto the rails at profile.timeAtS(s) (`converged` + mode, no cut). A
  * return that has not converged within RETURN_TIMEOUT s (RETURN_TIMEOUT_OFF when it started off the loop corridor),
  * and an `immediate` request, release at once onto the rails at the projected lap time (a cut). A 'manual' request
- * while returning takes the wheel back (bumpless, no cut). Replay play/recording arrive with 11-03.
+ * while returning takes the wheel back (bumpless, no cut).
+ * Replays (11-03, §7.10 F/G): every manual run is recorded (replay/recorder.ts: the latched integers the HumanDriver
+ * consumed, suspension/aids/reset events at their ticks, a start-state snapshot = plant snapshot + HumanDriver state
+ * every second). `play()` restores a replay's start state and feeds its integers on the same control ticks, so the
+ * same build re-simulates bit-identically; keyframe CRCs every REPLAY_LIMITS.keyframeTicks detect a divergence (resync
+ * from the recorder's snapshot when the replay came from this recorder, else the status says it may differ). A
+ * 'manual' request, a user aids change or suspension swap during a replay branches into manual from the current state
+ * (the recording continues); the last tick hands over to manual with no cut.
  */
-import { CONTROL_TICKS, DEFAULT_AIDS, neutralIntent, type DecodedReplay, type DriveAids, type DriveControl, type DriveEvent, type DriveFrame, type DriveIntent, type DriveMode } from '../../contracts/drive';
+import { CONTROL_TICKS, DEFAULT_AIDS, neutralIntent, REPLAY_LIMITS, type DecodedReplay, type DriveAids, type DriveControl, type DriveEvent, type DriveFrame, type DriveIntent, type DriveMode, type ReplayEventRecord } from '../../contracts/drive';
 import type { PathState, SimEvent } from '../../contracts/sim';
 import type { BuiltTrack, TrackSample } from '../../contracts/track';
 import type { XYZ } from '../../contracts/units';
@@ -16,8 +23,11 @@ import type { CarDefinition, VehicleDefinition } from '../../contracts/vehicle';
 import type { Frenet, GroundWorld } from '../../contracts/world';
 import type { SpeedProfile } from '../path/speed-profile';
 import type { VehicleModel } from '../vehicle-models';
+import { aidsValue, parseAids, replayFit, SIM_VERSION, stateChecksum, type ReplayFit, type ReplayTarget } from '../replay/format';
+import { createRecorder, type Recorder } from '../replay/recorder';
 import { modeEvent, resetEvent } from './events';
-import { createHumanDriver } from './human-driver';
+import { createHumanDriver, HUMAN_DRIVER_STATE_LENGTH } from './human-driver';
+import { PLANT_SNAPSHOT_LENGTH } from './plant';
 import { createPathDriver, type PathDriver } from './path-driver';
 import { loopLine } from './reference';
 import { createDriveCommand, createQuantIntent, quantiseIntent } from './types';
@@ -36,7 +46,38 @@ export interface DriveHost extends DriveControl {
   attach(): void;
   /** Control-owned DriveFrame fields (mode, available, source, aids, idle, detached, steerDemand, faults in auto). */
   writeFrame(d: DriveFrame): void;
+  /** The newest >= `seconds` of the current run (whole snapshot seconds; the run so far if shorter), null in auto. */
+  window(seconds: number): DecodedReplay | null;
+  /** The current replay, or the last one until the next play / new run; null if none. */
+  readonly replay: ReplayStatus | null;
+  /** CRC (replay/format.ts stateChecksum) of the full current start state: plant snapshot + HumanDriver state. */
+  stateChecksum(): number;
+  /** simulation.setSuspension while driving: recorded; from the user during a replay it branches into manual. */
+  noteSuspension(id: string): void;
 }
+
+/** What a replay is doing (the replay feature reads it every frame; plain mutable fields, no allocation per step). */
+export interface ReplayStatus {
+  readonly replay: DecodedReplay;
+  /** Ticks played so far and in total (240 Hz). */
+  tick: number;
+  readonly ticks: number;
+  /** Recorded with this build's parameters (paramsHash) and SIM_VERSION. */
+  readonly sameModel: boolean;
+  readonly sameVersion: boolean;
+  /** A window of this simulation's own recording (moment replay): resync snapshots available. */
+  readonly moment: boolean;
+  state: 'playing' | 'ended' | 'branched';
+  /** Keyframe CRC mismatches, resyncs from a recorder snapshot, tick of the first mismatch (-1 none). */
+  mismatches: number;
+  resyncs: number;
+  firstMismatch: number;
+  /** stateChecksum() when the replay reached its last tick (0 until then). */
+  endChecksum: number;
+}
+
+/** Start state length: plant snapshot + HumanDriver state (DecodedReplay.start). */
+export const REPLAY_START_LENGTH = PLANT_SNAPSHOT_LENGTH + HUMAN_DRIVER_STATE_LENGTH;
 
 export interface DriveControlDeps {
   readonly model: () => VehicleModel;
@@ -51,6 +92,10 @@ export interface DriveControlDeps {
   readonly latchRails: (lapTime: number) => void;
   /** Current lap time (the detached clock while driving). */
   readonly lapTime: () => number;
+  /** Replays: the installed suspension, switching it (simulation.setSuspension), ids and paramsHash per suspension. */
+  readonly suspensionId: () => string;
+  readonly setSuspension: (id: string) => void;
+  readonly paramsHash: (suspensionId: string) => string;
 }
 
 /** The kernel's ride inputs stay as they are at the engage (the car model's input already holds them). */
@@ -85,12 +130,132 @@ export function createDriveControl(deps: DriveControlDeps): DriveHost {
   const ts: TrackSample = { s: 0, x: 0, y: 0, z: 0, heading: 0, curvature: 0, bank: 0, grade: 0 };
   const xyz: XYZ = { x: 0, y: 0, z: 0 };
 
+  // ---- recording and replay state
+  let recorder: Recorder | null = null;
+  let recording = false; // the recorder follows the plant (manual / replay); frozen while returning
+  let status: ReplayStatus | null = null;
+  let pendingPlay: DecodedReplay | null = null;
+  let resync: Float64Array | null = null; // moment replays: the recorder's keyframe snapshots, REPLAY_START_LENGTH each
+  let resyncFrom = -1;
+  let applying = false; // replay events being applied (not user changes)
+  const scratch = new Float64Array(REPLAY_START_LENGTH);
+  const steps = new Float64Array(2); // [step counter, step of the scratch snapshot]
+  steps[1] = -1;
+
   const plant = () => deps.model().plant;
   function setMode(next: DriveMode, cut: boolean): void {
     if (next === mode) return;
     events.push(modeEvent(deps.simTime(), next, mode, cut));
     mode = next;
   }
+
+  function snapshotInto(out: Float64Array, offset = 0): Float64Array {
+    plant()!.snapshot(scratch);
+    const st = driver.state;
+    for (let k = 0; k < HUMAN_DRIVER_STATE_LENGTH; k++) scratch[PLANT_SNAPSHOT_LENGTH + k] = st[k]!;
+    if (out !== scratch) for (let k = 0; k < REPLAY_START_LENGTH; k++) out[offset + k] = scratch[k]!;
+    return out;
+  }
+  /** The current state in `scratch`, taken at most once per step (recorder snapshot ticks, keyframe checks). */
+  const currentSnapshot = (): Float64Array => {
+    if (steps[1] !== steps[0]) {
+      snapshotInto(scratch);
+      steps[1] = steps[0]!;
+    }
+    return scratch;
+  };
+  function restoreFrom(src: Float64Array, offset = 0): void {
+    // plant.restore reads indices [0, PLANT_SNAPSHOT_LENGTH) only
+    if (offset === 0) plant()!.restore(src);
+    else {
+      for (let k = 0; k < PLANT_SNAPSHOT_LENGTH; k++) scratch[k] = src[offset + k]!;
+      plant()!.restore(scratch);
+    }
+    const st = driver.state;
+    for (let k = 0; k < HUMAN_DRIVER_STATE_LENGTH; k++) st[k] = src[offset + PLANT_SNAPSHOT_LENGTH + k]!;
+    steps[1] = -1;
+  }
+
+  const target: ReplayTarget = {
+    get trackId() {
+      return deps.track.def.id;
+    },
+    worldId: deps.world.def?.id ?? null,
+    get vehicleId() {
+      return deps.vehicle().id;
+    },
+    get suspensions() {
+      return deps.vehicle().suspensions;
+    },
+    paramsHash: deps.paramsHash,
+    startLength: REPLAY_START_LENGTH,
+  };
+
+  function startRecording(): void {
+    recorder ??= createRecorder({ snapshotLength: REPLAY_START_LENGTH, paramsHash: deps.paramsHash });
+    const sid = deps.suspensionId();
+    recorder.start(snapshotInto(scratch), {
+      format: 1,
+      simVersion: SIM_VERSION,
+      paramsHash: deps.paramsHash(sid),
+      trackId: deps.track.def.id,
+      worldId: target.worldId,
+      vehicleId: deps.vehicle().id,
+      suspensionId: sid,
+    });
+    recorder.event('aids', aidsValue(aids));
+    recording = true;
+  }
+  const record = (kind: ReplayEventRecord['kind'], value: string) => {
+    if (recording) recorder!.event(kind, value);
+  };
+
+  /** A user change during a replay: the replay ends here and the visitor drives on from the current state. */
+  function branch(): void {
+    if (mode !== 'replay') return;
+    if (status && status.state === 'playing') status.state = 'branched';
+    setMode('manual', false);
+  }
+
+  function applyAids(next: DriveAids): void {
+    aids = next;
+    driver.setAids(next);
+    record('aids', aidsValue(next));
+  }
+
+  /** The deferred start of a replay (beforeStep): state, recorder, mode. */
+  function beginReplay(replay: DecodedReplay, path: PathState): void {
+    const p = plant()!;
+    if (mode === 'auto') {
+      // seed the plant's records from the Auto state first; the restore then sets every state variable
+      p.engageFromPath(path, KEEP_INPUTS);
+      detached = true;
+    }
+    restoreFrom(replay.start);
+    tick[0] = 0;
+    const origin = recorder ? recorder.origin(replay) : -1;
+    if (origin >= 0) recorder!.rewind(origin);
+    else startRecording();
+    recording = true;
+    if (mode === 'replay') events.push(modeEvent(deps.simTime(), 'replay', 'replay', true));
+    else setMode('replay', true);
+    applyReplayEvents();
+  }
+
+  function applyReplayEvents(): void {
+    const st = status!;
+    const evs = st.replay.events;
+    applying = true;
+    while (st.tick < st.ticks && eventIndex < evs.length && evs[eventIndex]!.tick <= st.tick) {
+      const e = evs[eventIndex++]!;
+      if (e.kind === 'aids') applyAids(parseAids(e.value));
+      else if (e.kind === 'suspension') {
+        if (e.value !== deps.suspensionId()) deps.setSuspension(e.value);
+      } else place(e.value === '' ? null : e.value);
+    }
+    applying = false;
+  }
+  let eventIndex = 0;
 
   function place(spawn: string | null): void {
     const p = plant()!;
@@ -105,8 +270,9 @@ export function createDriveControl(deps: DriveControlDeps): DriveHost {
       p.place(xyz.x, xyz.y, ts.heading);
     }
     driver.engage(p.view, p.command);
-    tick[0] = 0;
+    // the latch phase continues (a reset is an event inside a recording, not a new run)
     events.push(resetEvent(deps.simTime(), station ? spawn : null));
+    record('reset', station ? spawn! : '');
   }
 
   /** §7.10 D: release at once onto the rails at the lap time of the projected s (else the clock's), a cut. */
@@ -114,8 +280,14 @@ export function createDriveControl(deps: DriveControlDeps): DriveHost {
     const p = plant();
     const s = p ? p.loopS : NaN;
     const lap = s === s ? deps.profile().timeAtS(s) : deps.lapTime();
+    endRun();
     setMode('auto', true);
     deps.seekRails(lap);
+  }
+  function endRun(): void {
+    recording = false;
+    pendingPlay = null;
+    if (status && status.state === 'playing') status.state = 'branched';
   }
 
   function loopAutopilot(): PathDriver {
@@ -154,25 +326,79 @@ export function createDriveControl(deps: DriveControlDeps): DriveHost {
       pendingImmediate = immediate;
     },
     setAids(next) {
-      aids = next;
-      driver.setAids(next);
+      if (next.abs === aids.abs && next.traction === aids.traction && next.stability === aids.stability && next.steering === aids.steering) return;
+      if (!applying) branch();
+      applyAids(next);
+    },
+    noteSuspension(id) {
+      if (!applying) branch();
+      record('suspension', id);
     },
     reset(spawn) {
       pendingReset = true;
       resetSpawn = spawn ?? null;
     },
     play(replay: DecodedReplay) {
-      // shortcut: replays arrive with 11-03.
-      void replay;
-      return false;
+      const p = plant();
+      if (!p) return false;
+      const fit: ReplayFit = replayFit(replay, target);
+      if (!fit.ok || replay.intents.length < Math.ceil(replay.header.ticks / CONTROL_TICKS) * 5) return false;
+      // moment replay: keep the recorder's keyframe snapshots of this window for resyncs
+      const origin = recorder ? recorder.origin(replay) : -1;
+      resync = null;
+      resyncFrom = origin;
+      if (origin >= 0) {
+        const n = replay.keyframes.length;
+        resync = new Float64Array(Math.max(1, n) * REPLAY_START_LENGTH);
+        for (let k = 0; k < n; k++) recorder!.snapshotAt(origin + (k + 1) * REPLAY_LIMITS.keyframeTicks, resync, k * REPLAY_START_LENGTH);
+      }
+      if (status && status.state === 'playing') status.state = 'branched';
+      status = {
+        replay,
+        tick: 0,
+        ticks: replay.header.ticks,
+        sameModel: fit.sameModel,
+        sameVersion: fit.sameVersion,
+        moment: origin >= 0,
+        state: 'playing',
+        mismatches: 0,
+        resyncs: 0,
+        firstMismatch: -1,
+        endChecksum: 0,
+      };
+      eventIndex = 0;
+      // the header's suspension now (the kernel syncs the store after play); the start state follows at the next step
+      applying = true;
+      if (deps.suspensionId() !== replay.header.suspensionId) deps.setSuspension(replay.header.suspensionId);
+      applying = false;
+      pending = null;
+      pendingReset = false;
+      pendingPlay = replay;
+      return true;
     },
-    recording: () => null,
+    recording() {
+      return mode === 'auto' || !recorder || recorder.ticks === 0 ? null : recorder.whole();
+    },
+    window(seconds) {
+      return mode === 'auto' || !recorder || recorder.ticks === 0 ? null : recorder.window(seconds);
+    },
+    get replay() {
+      return status;
+    },
+    stateChecksum() {
+      return plant() ? stateChecksum(currentSnapshot()) : 0;
+    },
     drainEvents(handler) {
       for (let i = 0; i < events.length; i++) handler(events[i]!);
       events.length = 0;
     },
 
     beforeStep(path) {
+      if (pendingPlay !== null) {
+        const r = pendingPlay;
+        pendingPlay = null;
+        if (plant()) beginReplay(r, path);
+      } else if (mode === 'replay') applyReplayEvents();
       if (pending !== null) {
         const want = pending;
         const immediate = pendingImmediate;
@@ -184,13 +410,19 @@ export function createDriveControl(deps: DriveControlDeps): DriveHost {
           driver.engage(p.view, p.command);
           tick[0] = 0;
           detached = true;
+          startRecording();
           setMode('manual', false);
         } else if (want === 'manual' && mode === 'returning' && p) {
           // take the wheel back from the autopilot: bumpless from its command, no cut
           driver.engage(p.view, p.command);
           tick[0] = 0;
+          startRecording();
           setMode('manual', false);
-        } else if (want === 'auto' && mode === 'manual' && !immediate && p) {
+        } else if (want === 'manual' && mode === 'replay') {
+          branch();
+        } else if (want === 'auto' && (mode === 'manual' || mode === 'replay') && !immediate && p) {
+          if (status && status.state === 'playing') status.state = 'branched';
+          recording = false;
           const ap = loopAutopilot();
           ap.engage(p.view, p.command);
           returning[0] = 0;
@@ -207,6 +439,7 @@ export function createDriveControl(deps: DriveControlDeps): DriveHost {
         const s = p.loopS;
         if (autopilot!.converged && s === s) {
           // §7.10 C: latch onto the rails at the lap time of the projected s; the next step is an Auto step
+          endRun();
           deps.latchRails(deps.profile().timeAtS(s));
           events.push({ kind: 'converged', simTime: deps.simTime() });
           setMode('auto', false);
@@ -218,20 +451,57 @@ export function createDriveControl(deps: DriveControlDeps): DriveHost {
     stepPlant(dt, simEvents) {
       const p = plant()!;
       (p.view as { simTime: number }).simTime = deps.simTime();
+      const st = mode === 'replay' ? status! : null;
       if (mode === 'returning') {
         autopilot!.step(dt, p.view, cmd);
         returning[0] = returning[0]! + dt;
       } else {
-        if (tick[0]! % CONTROL_TICKS === 0) driver.latch(quantiseIntent(intent, q));
+        if (tick[0]! % CONTROL_TICKS === 0) {
+          if (st) {
+            const a = st.replay.intents;
+            const j = (tick[0]! / CONTROL_TICKS) * 5;
+            q.steer = a[j]!;
+            q.throttle = a[j + 1]!;
+            q.brake = a[j + 2]!;
+            q.handbrake = a[j + 3]!;
+            q.flags = a[j + 4]!;
+          } else quantiseIntent(intent, q);
+          driver.latch(q);
+          if (recording) recorder!.latch(q);
+        }
         driver.step(dt, p.view, cmd);
       }
       p.step(dt, cmd, aids, simEvents, events);
       tick[0] = tick[0]! + 1;
+      steps[0] = steps[0]! + 1;
+      if (st) {
+        st.tick = tick[0]!;
+        // keyframe check (before the recorder stores this tick's snapshot): resync from the recorder's own snapshot
+        const K = REPLAY_LIMITS.keyframeTicks;
+        if (st.tick % K === 0 && st.tick / K <= st.replay.keyframes.length) {
+          const k = st.tick / K - 1;
+          if (stateChecksum(currentSnapshot()) !== st.replay.keyframes[k]) {
+            st.mismatches++;
+            if (st.firstMismatch < 0) st.firstMismatch = st.tick;
+            if (resync && resyncFrom >= 0) {
+              restoreFrom(resync, k * REPLAY_START_LENGTH);
+              st.resyncs++;
+            }
+          }
+        }
+      }
+      if (recording && mode !== 'returning') recorder!.tick(currentSnapshot);
+      if (st && st.tick >= st.ticks) {
+        st.endChecksum = stateChecksum(currentSnapshot());
+        st.state = 'ended';
+        setMode('manual', false);
+      }
     },
 
     releaseNow() {
       pending = null;
       pendingReset = false;
+      endRun();
       setMode('auto', true);
     },
     attach() {
@@ -253,6 +523,10 @@ export function createDriveControl(deps: DriveControlDeps): DriveHost {
         d.source = 'autopilot';
         d.idle = 0;
         d.steerDemand = p ? p.command.steer / p.view.maxSteer : 0;
+      } else if (mode === 'replay') {
+        d.source = 'replay';
+        d.idle = 0;
+        d.steerDemand = driver.steerDemand;
       } else {
         d.source = driver.source;
         d.idle = driver.idle;
