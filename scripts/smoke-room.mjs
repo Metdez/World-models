@@ -7,7 +7,7 @@ const loadIdx = args.indexOf('--load');
 const load = loadIdx >= 0 ? Number(args[loadIdx + 1]) : 0;
 const base = (args.find((a, i) => !a.startsWith('--') && !(loadIdx >= 0 && i === loadIdx + 1)) ?? 'https://suspension-lab.zh-a16.workers.dev').replace(/\/$/, '');
 const wsBase = base.replace(/^http/, 'ws');
-const PV = 2; // PROTOCOL_VERSION (src/contracts/net.ts)
+const PV = 3; // PROTOCOL_VERSION (src/contracts/net.ts)
 const LAP_S = 83.72; // proving loop lap (02-04); only used to express clock error as lap time
 const V = 'gt-coupe';
 
