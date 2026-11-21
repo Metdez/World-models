@@ -126,7 +126,7 @@ Requirements: see `13-01-AUDIT.md` (MET / PARTIAL / NOT MET / STRETCH-SKIPPED wi
   network.
 - **Looks and performance** were judged under SwiftShader only (annex, wet lanes, rings, skid marks, ghost, driving
   camera); the phase-13 "≥ 60 fps at 1440p high on a discrete GPU, ≤ 250 draw calls with everything on" is unmeasured on
-  real hardware (highest measured: 206 calls at the ride street, high tier, without ghost/rings at the same time).
+  real hardware (highest measured: 235 calls for the full high-tier frame at the M1 point, without the ghost and rings at the same time).
 - **Production replay save** never done end to end (needs a human to solve Turnstile); the per-address 429 of saves is
   not provable from this sandbox (rotating egress).
 - **0–100 km/h 4.99 s** is outside its 3.6–4.8 s band (friction-limited; not tuned, tyre μ is shared with Auto).
