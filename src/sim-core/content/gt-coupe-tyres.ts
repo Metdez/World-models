@@ -2,7 +2,9 @@
  * GT coupe tyre slip behaviour and the shared bushing table (ARCHITECTURE-M2 §7.15; research m2/04 §10, m2/23).
  * REPRESENTATIVE model values, never manufacturer data. Peak mu, its load sensitivity and the radius are the
  * existing gtCoupe TyreParams (the same peakMu() Auto uses); these add slip stiffness, relaxation and inertia.
- * The bushing table is ONE role-based table shared by every suspension type (no per-type constant).
+ * The bushing table is ONE role-based table shared by every suspension type (no per-type constant): ASSUMED axial
+ * rates of each link's chassis-side bush (research m2/23 §5.3), from which drive/compliance.ts derives the compliance
+ * coefficients of each type's geometry; quote them with the x0.5..x2 band, never as measured.
  */
 import { DEG_TO_RAD } from '../../contracts/units';
 import type { CarCompliance, TyreHandling } from '../../contracts/vehicle';
