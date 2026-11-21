@@ -8,24 +8,35 @@
 import { describe, expect, it } from 'vitest';
 import type { CarDefinition } from '../../src/contracts/vehicle';
 import { G } from '../../src/contracts/units';
+import { prepareCarSuspension } from '../../src/sim-core/car/car-model';
 import { gtCoupe } from '../../src/sim-core/content/gt-coupe';
+import { createCornerSolution } from '../../src/sim-core/kinematics/table';
 import { doubleWishbone } from '../../src/sim-core/content/susp-double-wishbone';
 import { stiffnessAt, tyreCoefficients } from '../../src/sim-core/drive/tyre';
 import { degPerG, rig, speedHold, type Rig } from '../fixtures/09-04-handling';
 
 const OPTS = { linearTyre: true, rigidLoads: true } as const;
 const h = gtCoupe.handling!;
+/** Compliance off and an open differential (equal torque split: the limited-slip split of the inner/outer rear speed
+ *  difference adds a small understeer moment the single-track model does not have, ~1 % of K at 20 m/s). */
 const variant = (rearCornering = h.tyres.rear.corneringStiffness): CarDefinition => ({
   ...gtCoupe,
-  handling: { ...h, compliance: { ...h.compliance, maxAngle: 0 }, tyres: { ...h.tyres, rear: { ...h.tyres.rear, corneringStiffness: rearCornering } } },
+  handling: {
+    ...h,
+    compliance: { ...h.compliance, maxAngle: 0 },
+    powertrain: { ...h.powertrain, limitedSlipRatio: 1e12 },
+    tyres: { ...h.tyres, rear: { ...h.tyres.rear, corneringStiffness: rearCornering } },
+  },
 });
 
 /** Closed-form single-track parameters of the plant on a vehicle (static loads by the plant's lever rule). */
 function closedForm(r: Rig) {
-  const f = r.place();
   const v = r.vehicle;
-  const xF = (f.corners[0]!.contactPatch.x + f.corners[1]!.contactPatch.x) / 2;
-  const xR = (f.corners[2]!.contactPatch.x + f.corners[3]!.contactPatch.x) / 2;
+  // the plant's contact-patch layout (car-model install: axle x + the table's design patch x)
+  const sol = prepareCarSuspension(v, doubleWishbone);
+  const patch = (t: typeof sol.front.table): number => t.sample(0, 0, createCornerSolution(t)).contactPatch.x;
+  const xF = v.cgToFront + patch(sol.front.table);
+  const xR = v.cgToFront - v.wheelbase + patch(sol.rear.table);
   const mu = [v.front.unsprungMass, v.front.unsprungMass, v.rear.unsprungMass, v.rear.unsprungMass].map((m) => m + doubleWishbone.extras.unsprungMassDelta);
   const m = v.sprungMass + mu.reduce((a, b) => a + b, 0);
   const L = xF - xR;
@@ -41,17 +52,19 @@ function closedForm(r: Rig) {
   return { L, K, m };
 }
 
-/** Steady state at speed u and fixed actuator steer delta: [r, a_y]. */
-function steady(r: Rig, u: number, delta: number): [number, number] {
+const wa = new Float64Array(12);
+/** Steady state at speed u and a fixed actuator steer: [r, a_y, effective road-wheel angle (front mean - rear mean)]. */
+function steady(r: Rig, u: number, actuator: number): [number, number, number] {
   r.launch(u, 0);
   const hold = speedHold(u);
-  r.cmd.steer = delta;
+  r.cmd.steer = actuator;
   let f = r.frame;
   for (let k = 0; k < 240 * 12; k++) {
     hold(r);
     f = r.step();
   }
-  return [f.yawRate, f.ay];
+  r.plant.wheelAngles(wa);
+  return [f.yawRate, f.ay, (wa[0]! + wa[1]!) / 2 - (wa[2]! + wa[3]!) / 2];
 }
 
 describe('linear single-track identities (T1, T2)', () => {
@@ -61,16 +74,15 @@ describe('linear single-track identities (T1, T2)', () => {
     const rows: string[] = [];
     const deltas = [0.004, 0.008];
     for (const u of [20, 27.8, 40]) {
-      const [r1, a1] = steady(r, u, deltas[0]!);
-      const [r2, a2] = steady(r, u, deltas[1]!);
-      const gainR = (r2 - r1) / (deltas[1]! - deltas[0]!);
-      const gainA = (a2 - a1) / (deltas[1]! - deltas[0]!);
+      const [r1, a1, e1] = steady(r, u, deltas[0]!);
+      const [r2, a2, e2] = steady(r, u, deltas[1]!);
+      const gainR = (r2 - r1) / (e2 - e1);
+      const gainA = (a2 - a1) / (e2 - e1);
       const refR = u / (L + K * u * u);
       const refA = (u * u) / (L + K * u * u);
       // K from the steady states: delta = L r / u + K a_y (difference of the two runs: no offset)
-      const kMeas = (deltas[1]! - deltas[0]! - (L * (r2 - r1)) / u) / (a2 - a1);
+      const kMeas = (e2 - e1 - (L * (r2 - r1)) / u) / (a2 - a1);
       rows.push(`u ${u}: r/delta ${gainR.toFixed(4)} (ref ${refR.toFixed(4)}), a_y/delta ${gainA.toFixed(2)} (ref ${refA.toFixed(2)}), K ${degPerG(kMeas).toFixed(4)} deg/g (ref ${degPerG(K).toFixed(4)})`);
-      console.log(rows[rows.length - 1]);
       expect(Math.abs(gainR / refR - 1)).toBeLessThan(0.01);
       expect(Math.abs(gainA / refA - 1)).toBeLessThan(0.01);
       expect(Math.abs(kMeas / K - 1)).toBeLessThan(0.01);
@@ -83,8 +95,8 @@ describe('linear single-track identities (T1, T2)', () => {
     const base = h.tyres.rear.corneringStiffness;
     for (const target of [-0.5, 0, 1, 3]) {
       // solve the rear stiffness for the target K with the closed form (bisection on the per-load coefficient)
-      let lo = base * 0.3;
-      let hi = base * 4;
+      let lo = base * 0.1;
+      let hi = base * 40;
       for (let k = 0; k < 50; k++) {
         const mid = (lo + hi) / 2;
         const { K } = closedForm(rig({ vehicle: variant(mid), options: OPTS }));
@@ -99,14 +111,13 @@ describe('linear single-track identities (T1, T2)', () => {
       const d0 = 0.005;
       const d1 = 0.01;
       const kAt = (u: number): number => {
-        const [ra, aa] = steady(r, u, d0);
-        const [rb, ab] = steady(r, u, d1);
-        return (d1 - d0 - (L * (rb - ra)) / u) / (ab - aa);
+        const [ra, aa, ea] = steady(r, u, d0);
+        const [rb, ab, eb] = steady(r, u, d1);
+        return (eb - ea - (L * (rb - ra)) / u) / (ab - aa);
       };
       const ka = kAt(u1);
       const kb = kAt(u2);
       const kMeas = (ka + kb) / 2;
-      console.log(`[T2 dbg] target ${target} K ${degPerG(K).toFixed(4)} meas ${degPerG(kMeas).toFixed(4)} ka ${degPerG(ka).toFixed(4)} kb ${degPerG(kb).toFixed(4)}`);
       const sign = Math.sign(Math.round(degPerG(kMeas) * 100));
       expect(sign).toBe(Math.sign(target));
       // steer for a fixed radius rises (understeer), stays (neutral) or falls (oversteer) with a_y
@@ -114,7 +125,7 @@ describe('linear single-track identities (T1, T2)', () => {
         const vc = Math.sqrt(L / Math.abs(kMeas));
         const ref = Math.sqrt(L / Math.abs(K));
         expect(Math.abs(vc / ref - 1)).toBeLessThan(0.03);
-        rows.push(`K ${target} deg/g: measured ${degPerG(kMeas).toFixed(3)}, ${target > 0 ? 'V_char' : 'V_crit'} ${vc.toFixed(1)} m/s (ref ${ref.toFixed(1)})`);
+        rows.push(`target ${target} (closed form ${degPerG(K).toFixed(3)}, the rear coefficient alone tops out near 2.85) deg/g: measured ${degPerG(kMeas).toFixed(3)}, ${target > 0 ? 'V_char' : 'V_crit'} ${vc.toFixed(1)} m/s (ref ${ref.toFixed(1)})`);
       } else {
         expect(Math.abs(degPerG(kMeas))).toBeLessThan(0.01);
         rows.push(`K 0: measured ${degPerG(kMeas).toFixed(4)} deg/g`);

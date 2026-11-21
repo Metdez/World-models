@@ -122,8 +122,11 @@ export interface VehiclePlant {
   readonly approximate: boolean;
   /** Applied (post-conditioning) command of the last step. */
   readonly command: Readonly<DriveCommand>;
-  /** Compliance toe (4, rad, + toe-in) then camber (4, rad, + top outboard) currently applied (validation read-out). */
-  complianceAngles(out: Float64Array): Float64Array;
+  /**
+   * Validation read-out of the last step: road-wheel angle per wheel (4, rad, vehicle frame, + left; kinematics +
+   * compliance), compliance toe (4, rad, + toe-in), compliance camber (4, rad, + top outboard).
+   */
+  wheelAngles(out: Float64Array): Float64Array;
 }
 
 // ---- plant state offsets
@@ -729,10 +732,11 @@ export function createPlant(core: CarCore, options: PlantOptions = {}): VehicleP
       return flags[1] === 1;
     },
     command: cmdOut,
-    complianceAngles(out) {
+    wheelAngles(out) {
       for (let i = 0; i < 4; i++) {
-        out[i] = st[TOEC + i]!;
-        out[4 + i] = st[CAMC + i]!;
+        out[i] = delta[i]!;
+        out[4 + i] = st[TOEC + i]!;
+        out[8 + i] = st[CAMC + i]!;
       }
       return out;
     },
