@@ -123,4 +123,19 @@ describe('clumsy keyboard driver (aids on: controllable; aids off: reported)', (
     }
     console.log(`[keyboard] panic brake mid-corner: ${out.join('; ')}`);
   }, 60_000);
+
+  it('MD-22 as written: holding left at 100 km/h on dry asphalt does not spin the car with the aids on (13-01)', () => {
+    const out: string[] = [];
+    for (const id of ['macpherson', 'double-wishbone', 'multilink'] as const) {
+      const sim = makeSim('test-strip', id, 0);
+      sim.drive!.setAids(DEFAULT_AIDS);
+      manualAtRest(sim);
+      upTo(sim, 100 / 3.6);
+      const w = watch(sim, 4, () => key({ steer: 1, throttle: 0 }));
+      out.push(`${id}: max |beta| ${deg(w.beta).toFixed(1)} deg, max |r| ${w.r.toFixed(2)} rad/s, stability lamp ${w.esc}, spin ${w.spin}`);
+      expect(w.spin).toBe(false);
+    }
+    console.log(`[keyboard] hold left at 100 km/h, aids on: ${out.join('; ')}`);
+  }, 60_000);
 });
+
