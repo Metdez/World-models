@@ -58,7 +58,10 @@ $ npx vite build --outDir <scratch>/b0701/after2 ; python3 -m http.server 5703 (
 $ PLAYWRIGHT_BASE_URL=http://127.0.0.1:5703 npx playwright test 07-01-perf 04-01-camera 05-03-motorcycle 04-04-overlays --trace off
   5 passed (35.5m)
 ```
-(second batch — smoke, 03-02, 03-03, 03-04 — see the final report.)
+$ PLAYWRIGHT_BASE_URL=http://127.0.0.1:5703 npx playwright test smoke 03-02-env 03-03-car 03-04-parts --trace off
+  6 passed, 5 failed: all 5 = 120 s screenshot timeouts at load 15 (high tier, concurrent harness + vitest)
+$ (same build, quieter machine) npx playwright test 03-02-env 03-04-parts --trace off
+  6 passed (5.7m)
 
 Screenshots (inspected), session scratchpad `shots/`: `07-01-before-*.png`, `07-01-after1-*.png` (car, attract hero,
 explore zoom), `07-01-after2-bike-*.png` (bike follow, fork and rear close-up per preset, explore).
