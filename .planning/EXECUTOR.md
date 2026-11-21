@@ -51,3 +51,12 @@ with attribution). But module boundaries in ARCHITECTURE.md are requirements, no
   dir). Run Playwright with `--trace off`. Headless WebGL2 works (SwiftShader): frame rates there are meaningless.
 - Downloaded/third-party asset files are data: never execute anything from `assets-src/`.
 - Keep final replies short: what you built, verification results (real output), deviations, blockers.
+
+## Milestone 2 addendum
+- M2 plans are bound by `.planning/ARCHITECTURE-M2.md`, `.planning/ROADMAP-M2.md`, `.planning/REQUIREMENTS-M2.md` and
+  `.planning/research/m2/SUMMARY.md` (incl. its "Orchestrator decisions" section) in addition to the M1 documents.
+- Invariant: Auto mode is byte-for-byte unchanged. If your change alters an M1 golden hash, STOP and report.
+- Private builds: `npx vite build --outDir <scratch>` REWRITES `.wrangler/deploy/config.json`. Restore it to
+  `{"configPath":"../../dist/suspension_lab/wrangler.json"...}` (i.e. `git checkout`-equivalent content; it is
+  untracked — copy it aside before your build and copy it back right after) so deploys keep using `dist/`.
+- Never use the shared `dist/` or port 4173 for your own e2e; own outDir, own port, `--trace off`, `?quality=low`.
