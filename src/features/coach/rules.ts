@@ -9,13 +9,11 @@
 import type { DriveEvent } from '../../contracts/drive';
 import type { TelemetryFrame } from '../../contracts/telemetry';
 import type { StationDefinition } from '../../contracts/world';
-import type { DriveMoment } from '../../sim-core/drive/events';
 import { deg, fmt, kmh, kN, mm } from '../../ui/format';
 
 /** Everything the coach can explain. 'wheel-lift' and 'bump-stop' are the M1 SimEvents seen while driving. */
 export type CoachMoment =
   | DriveEvent
-  | DriveMoment
   | { readonly kind: 'wheel-lift' | 'bump-stop'; readonly corner: number }
   | { readonly kind: 'swap'; readonly previous: string; readonly next: string };
 

@@ -5,14 +5,13 @@
  * there. Same place and look as the insights caption (insights stay with Auto), one polite announcement per line,
  * silent in attract mode and with the HUD hidden. Lines and their rate limits live in rules.ts.
  *
- * shortcut: the plant does not run the sim-core detectors yet (the hook belongs in drive/plant.ts, not owned by 11-02),
- * so the coach runs the same detectors (createDriveDetectors) on each rendered Manual frame. As soon as a detector kind
- * arrives on the bus ('drive:event' slide / lockup / wheelspin / aid) the local copy stops for those kinds.
+ * The moments come from the bus only (11-05): the plant runs the sim-core detectors once per fixed step and the kernel
+ * forwards them as 'drive:event' (slide, lockup, wheelspin, aid, strike, hard-stop), so brief events are never missed
+ * at low frame rates.
  */
 import type { FeatureContext, FeatureModule, FrameInfo } from '../../contracts/app';
 import type { DriveEvent } from '../../contracts/drive';
 import type { TelemetryFrame } from '../../contracts/telemetry';
-import { createDetectorInput, createDriveDetectors, frameDetectorInput, type DetectorInput, type DriveDetectors, type DriveMoment } from '../../sim-core/drive/events';
 import { h, mount } from '../../ui/dom';
 import { CoachEngine, compose, stationIn, stationLine, templateFor, type CoachMoment, type Line } from './rules';
 import './coach.css';
@@ -23,8 +22,6 @@ const CARD_VISIBLE_S = 9;
 const LEAVE_S = 0.3;
 /** Moments right after a takeover are the engage transient, not the driver's doing. */
 const TAKEOVER_QUIET_S = 1;
-/** Longest frame step fed to the detectors, s (a longer gap restarts their timers instead). */
-const MAX_DT = 0.25;
 
 interface State {
   readonly ctx: FeatureContext;
@@ -34,14 +31,7 @@ interface State {
   readonly chip: HTMLElement;
   readonly announce: HTMLElement;
   readonly engine: CoachEngine;
-  readonly input: DetectorInput;
-  readonly events: DriveEvent[];
-  readonly moments: DriveMoment[];
-  detectors: DriveDetectors;
-  /** The simulation already delivers detector events: the local detectors stand down. */
-  hooked: boolean;
   quiet: boolean;
-  lastSimTime: number;
   hideAt: number;
 }
 
@@ -86,13 +76,10 @@ function onDriveEvent(s: State, e: DriveEvent): void {
   const t = s.ctx.sim.frame;
   switch (e.kind) {
     case 'mode':
-      s.detectors.reset();
-      s.lastSimTime = Number.NaN;
       s.engine.clear(e.mode === 'manual' ? t.simTime + TAKEOVER_QUIET_S : Number.NEGATIVE_INFINITY);
       if (e.mode !== 'manual') hide(s);
       return;
     case 'reset':
-      s.detectors.reset();
       s.engine.noteReset(t.simTime);
       s.engine.clear(t.simTime + TAKEOVER_QUIET_S);
       return;
@@ -108,7 +95,8 @@ function onDriveEvent(s: State, e: DriveEvent): void {
     case 'lockup':
     case 'wheelspin':
     case 'aid':
-      s.hooked = true;
+    case 'strike':
+    case 'hard-stop':
       offer(s, e);
       return;
     default:
@@ -117,9 +105,7 @@ function onDriveEvent(s: State, e: DriveEvent): void {
 }
 
 function resetVehicle(s: State): void {
-  s.detectors = createDriveDetectors(s.ctx.sim.current.vehicle);
   s.engine.forget();
-  s.lastSimTime = Number.NaN;
   hide(s);
 }
 
@@ -144,22 +130,12 @@ const coach: FeatureModule = {
       chip,
       announce,
       engine: new CoachEngine(),
-      input: createDetectorInput(),
-      events: [],
-      moments: [],
-      detectors: createDriveDetectors(c.sim.current.vehicle),
-      hooked: false,
       quiet: false,
-      lastSimTime: Number.NaN,
       hideAt: Number.POSITIVE_INFINITY,
     };
     st = s;
 
     c.on('sim:vehicle', () => resetVehicle(s));
-    c.on('sim:seek', () => {
-      s.detectors.reset();
-      s.lastSimTime = Number.NaN;
-    });
     c.on('drive:event', (e) => onDriveEvent(s, e));
     c.on('sim:event', (e) => {
       if (e.kind === 'liftoff') offer(s, { kind: 'wheel-lift', corner: e.corner });
@@ -184,20 +160,7 @@ const coach: FeatureModule = {
       s.caption.classList.add('is-leaving');
       if (t.simTime >= s.hideAt + LEAVE_S) hide(s);
     }
-    if (!driving(t) || t.vehicleClass !== 'car') return;
-    const dt = t.simTime - s.lastSimTime;
-    if (dt === 0) return; // paused: nothing new
-    s.lastSimTime = t.simTime;
-    if (!(dt > 0 && dt <= MAX_DT)) s.detectors.reset();
-    else {
-      s.detectors.step(dt, t.drive, frameDetectorInput(t, s.input), s.events, s.moments);
-      // DriveEvent kinds: from the bus once the simulation delivers them; the moments only come from here
-      if (!s.hooked) for (let i = 0; i < s.events.length; i++) offer(s, s.events[i]!);
-      for (let i = 0; i < s.moments.length; i++) offer(s, s.moments[i]!);
-      s.events.length = 0;
-      s.moments.length = 0;
-    }
-    if (s.quiet) return;
+    if (!driving(t) || t.vehicleClass !== 'car' || s.quiet) return;
     const line = s.engine.tick(t.simTime);
     if (line) present(s, line, VISIBLE_S);
   },

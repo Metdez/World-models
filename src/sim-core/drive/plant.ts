@@ -33,7 +33,7 @@ import { RIDE_STATE_LENGTH, type RideInput, type RideModel } from '../ride/ride7
 import { LOOP_CORRIDOR } from '../world/ground';
 import { AIDS_STATE_LENGTH, createAids, createAidsIo, peakSlipRatio } from './aids';
 import { deriveCompliance } from './compliance';
-import { faultEvent, outOfBoundsEvent, zoneEvent } from './events';
+import { createDetectorInput, createDriveDetectors, faultEvent, outOfBoundsEvent, zoneEvent, type DriveMoment } from './events';
 import { brakeTorques, createPowertrain, createPowertrainIo, POWERTRAIN_STATE_LENGTH } from './powertrain';
 import { createTyreIo, evaluateTyre, limitDeflection, stiffnessAt, tyreCoefficients, type TyreCoefficients, type TyreIo } from './tyre';
 import type { DriveCommand, PlantView } from './types';
@@ -288,6 +288,12 @@ export function createPlant(core: CarCore, options: PlantOptions = {}): VehicleP
   const swellK = (2 * Math.PI * track.def.swell.cycles) / track.length;
   let zone = 'loop';
   const wheelZone: string[] = ['loop', 'loop', 'loop', 'loop'];
+  // 11-05: the drive-event detectors (11-02) run once per fixed step on the plant's own values; observational only
+  const detectors = createDriveDetectors(vehicle);
+  const dIn = createDetectorInput();
+  const moments: DriveMoment[] = [];
+  const KERB = SURFACE_KINDS.indexOf('kerb');
+  const PAVE = SURFACE_KINDS.indexOf('pave');
 
   const view = {
     get x() {
@@ -414,6 +420,34 @@ export function createPlant(core: CarCore, options: PlantOptions = {}): VehicleP
     cur[ROFFG] = (oF - oR) / (xF - xR);
     cur[ROFF] = (oF + oR) / 2 - (cur[ROFFG]! * (xF + xR)) / 2;
     cur[ROFFC] = (((st[OFF]! - st[OFF + 1]!) / (cy[0]! - cy[1]!) + (st[OFF + 2]! - st[OFF + 3]!) / (cy[2]! - cy[3]!)) / 2) * f;
+  }
+
+  /** Drive-event detectors on this step's values (reads only; strike and hard-stop moments forwarded as DriveEvents). */
+  function detect(dt: number, rs: RideModel['state'], driveEvents: DriveEvent[]): void {
+    for (let i = 0; i < 4; i++) {
+      dIn.slipAngle[i] = tyre.slipAngle[i]!;
+      dIn.slipRatio[i] = tyre.slipRatio[i]!;
+      dIn.omega[i] = tyre.omega[i]!;
+      dIn.vx[i] = vwx[i]!;
+      dIn.load[i] = rs.load[i]!;
+      dIn.capacity[i] = tyre.capacity[i]!;
+      dIn.fx[i] = tyre.fx[i]!;
+      dIn.fy[i] = tyre.fy[i]!;
+      dIn.travel[i] = rs.travel[i]!;
+      dIn.travelRate[i] = rs.travelRate[i]!;
+      const sk = tyre.surface[i]!;
+      dIn.kerb[i] = sk === KERB ? 1 : sk === PAVE ? 2 : 0;
+    }
+    dIn.throttle = cmdOut.throttle;
+    dIn.brake = cmdOut.brake;
+    dIn.absActive = flags[3] === 1;
+    dIn.tractionActive = flags[0] === 1;
+    dIn.stabilityActive = flags[4] === 1;
+    dIn.zone = zone;
+    dIn.simTime = view.simTime;
+    detectors.step(dt, view, dIn, driveEvents, moments);
+    for (let k = 0; k < moments.length; k++) driveEvents.push(moments[k]!);
+    moments.length = 0;
   }
 
   /** CG projection, zone and bounds (step 12). */
@@ -777,6 +811,7 @@ export function createPlant(core: CarCore, options: PlantOptions = {}): VehicleP
     },
 
     engageFromPath(path, autoInputs) {
+      detectors.reset();
       const L = vehicle.wheelbase;
       st[X] = path.x;
       st[Y] = path.y;
@@ -830,6 +865,7 @@ export function createPlant(core: CarCore, options: PlantOptions = {}): VehicleP
     },
 
     place(x, y, heading) {
+      detectors.reset();
       st[X] = x;
       st[Y] = y;
       st[C] = dcos(heading);
@@ -1100,8 +1136,10 @@ export function createPlant(core: CarCore, options: PlantOptions = {}): VehicleP
       // 13. safety: finite check, last-good ring
       if (!ok || !isFinite()) {
         recover(driveEvents);
+        detectors.reset();
         return;
       }
+      detect(dt, ride.state, driveEvents);
       ringState[2] = ringState[2]! + 1;
       if (ringState[2]! % RING_EVERY === 0) pushRing();
     },
@@ -1173,6 +1211,7 @@ export function createPlant(core: CarCore, options: PlantOptions = {}): VehicleP
 
     snapshot,
     restore(src) {
+      detectors.reset();
       // 11-03: a replay continues exactly from a mid-run snapshot in any simulation: the road rate the ride's loads
       // were reported with, and (after settle zeroed them) the previous step's tyre outputs
       for (let i = 0; i < 4; i++) core.input.roadRate[i] = src[TYRE_TAIL + 12 + i]!;

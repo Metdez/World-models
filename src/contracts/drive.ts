@@ -138,6 +138,10 @@ export type DriveEvent = { readonly simTime: number } & (
   | { readonly kind: 'lockup'; readonly corner: number }
   | { readonly kind: 'wheelspin'; readonly corner: number }
   | { readonly kind: 'aid'; readonly aid: 'abs' | 'traction' | 'stability' }
+  /** A wheel struck a kerb (`kerb`) or a bump: a fast compression well above its recent travel (11-05). */
+  | { readonly kind: 'strike'; readonly corner: number; readonly kerb: boolean }
+  /** Braking from `from` m/s to a standstill with a high mean deceleration (11-05). */
+  | { readonly kind: 'hard-stop'; readonly from: number }
   | { readonly kind: 'zone'; readonly zone: string; readonly entered: boolean }
   | { readonly kind: 'out-of-bounds' }
   /** Returning reached the driving line and the simulation latched back to auto. */
