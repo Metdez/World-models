@@ -49,7 +49,7 @@ export interface Snap {
 
 const corner = (): SnapCorner => ({ camber: 0, toe: 0, travel: 0, travelRate: 0, load: 0, gripUse: 0, surface: 'asphalt' });
 
-/** An empty snapshot (preallocated slots; `copySnap` targets). */
+/** An empty snapshot (ring slots; a detected drive event's own copy). */
 export function createSnap(cornerIds: readonly string[]): Snap {
   return {
     time: 0, sectionIndex: 0, speed: 0, ax: 0, ay: 0, roll: 0, pitch: 0, rcFront: Number.NaN, rcRear: Number.NaN,
@@ -97,10 +97,6 @@ export function fillSnap(s: Snap, t: TelemetryFrame, time: number): void {
   }
 }
 
-/** A copy of a snapshot (allocates: only on a detected drive event, never per frame). */
-export function copySnap(src: Snap): Snap {
-  return { ...src, corners: src.corners.map((c) => ({ ...c })) };
-}
 
 /** Fixed-size ring of telemetry snapshots. `push` copies TRUE fields only and never allocates. */
 export class SnapshotRing {

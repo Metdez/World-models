@@ -62,6 +62,10 @@
 .sl-engineer.is-open .sl-engineer-toggle {
   border-color: var(--accent-dim);
 }
+/* A drive event has fresh questions in the panel: a quiet accent ring, no motion, nothing pops up (12-03). */
+.sl-engineer.is-fresh .sl-engineer-toggle {
+  border-color: var(--accent);
+}
 
 .sl-engineer-toggle:hover,
 .sl-engineer-why:hover,

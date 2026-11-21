@@ -20,14 +20,31 @@ export default {
     const batcher = createBatcher(send);
     const tracker = createTracker({ push: batcher.push, fps: () => ctx.services.tryGet(RENDER)?.stats().fps });
     ctx.watch(tracker.onState);
+    // station-visit (ARCH-M2 §12.5): entering a station's zone while driving; the nearest station of a shared zone
+    ctx.on('drive:event', (e) => {
+      if (e.kind !== 'zone' || !e.entered) return;
+      const d = ctx.sim.frame.drive;
+      if (d.mode !== 'manual') return;
+      let best: string | undefined;
+      let dist = Infinity;
+      for (const st of ctx.sim.current.world?.def?.stations ?? []) {
+        const dd = st.zone === e.zone ? (st.spawn.x - d.x) ** 2 + (st.spawn.y - d.y) ** 2 : Infinity;
+        if (dd < dist) [dist, best] = [dd, st.id];
+      }
+      if (best) tracker.onStation(best, Math.sqrt(d.u * d.u + d.v * d.v));
+    });
+    const onHide = (): void => {
+      tracker.endDrive();
+      batcher.flush();
+    };
     const onVisibility = (): void => {
-      if (document.visibilityState === 'hidden') batcher.flush();
+      if (document.visibilityState === 'hidden') onHide();
     };
     document.addEventListener('visibilitychange', onVisibility);
-    window.addEventListener('pagehide', batcher.flush);
+    window.addEventListener('pagehide', onHide);
     ctx.addDisposer(() => {
       document.removeEventListener('visibilitychange', onVisibility);
-      window.removeEventListener('pagehide', batcher.flush);
+      window.removeEventListener('pagehide', onHide);
       tracker.dispose();
       batcher.flush();
     });

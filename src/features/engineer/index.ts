@@ -3,6 +3,9 @@
  * section-dependent question chips and "Why did it do that?". Sends a compact telemetry snapshot to
  * POST /api/engineer, shows the answer as a caption card (textContent only) and executes whitelisted actions
  * through the store and bus. Offline / busy / error -> the local rule-based answer, labelled as such.
+ * While the visitor drives (12-03, ARCH-M2 §12.4) the payload carries the `drive` block: the detected event (bus
+ * 'drive:event', wheel lift / bump stop, a swap) with a snapshot captured at its moment and the inputs just before it;
+ * event chips replace the section chips; seek actions are skipped outside Auto.
  */
 import type { FeatureContext, FeatureModule, FrameInfo } from '../../contracts/app';
 import type { DriveAids, DriveEvent } from '../../contracts/drive';
@@ -12,7 +15,7 @@ import type { CornerId } from '../../contracts/units';
 import { h, mount } from '../../ui/dom';
 import './engineer.css';
 import { driveKey, driveLabel, ruleAnswer, type DriveMoment } from './rules';
-import { buildTelemetry, CHIPS, copySnap, DRIVE_CHIPS, EVENT_CHIPS, placeOf, SnapshotRing, type DriveContext, type Snap } from './snapshot';
+import { buildTelemetry, CHIPS, createSnap, DRIVE_CHIPS, EVENT_CHIPS, fillSnap, placeOf, SnapshotRing, type DriveContext, type Snap } from './snapshot';
 
 const SAMPLE_S = 0.1;
 const RING = 20; // 2 s at 10 Hz
@@ -54,6 +57,7 @@ let recent: Detected[] = [];
 let engaged: { event: Detected; at: number } | undefined;
 let chipEvent: Detected | undefined;
 let chipsDriving = false;
+let rootEl: HTMLElement | undefined;
 
 const now = () => performance.now() / 1000;
 
@@ -185,6 +189,7 @@ const engineer: FeatureModule = {
     const panel = h('section', { class: 'sl-engineer-panel', id: 'sl-engineer-panel', 'aria-label': 'Race engineer', hidden: true }, answer, why, chipRow, form);
     const toggle = h('button', { class: 'sl-engineer-toggle', type: 'button', 'aria-expanded': 'false', 'aria-controls': 'sl-engineer-panel' }, 'Ask the engineer');
     const root = h('div', { class: 'sl-engineer' }, panel, toggle);
+    rootEl = root;
     c.addDisposer(mount(c.dom.overlay, root));
 
     const show = (msg: string, label: string | null, busy = false) => {
@@ -249,16 +254,9 @@ const engineer: FeatureModule = {
       const label = driveLabel(m);
       const key = driveKey(label) ?? '';
       const t = now();
-      const snap = ring.latest();
-      if (!snap) return;
-      const frameSnap = copySnap(snap);
-      const live = c.sim.frame;
-      if (live.corners.length === frameSnap.corners.length) {
-        // the moment itself, not the last 10 Hz sample
-        const tmp = new SnapshotRing(1, ring.cornerIds);
-        tmp.push(live, t);
-        Object.assign(frameSnap, copySnap(tmp.latest()!));
-      }
+      // the moment itself (the frame sampled when the event was drained), not the last 10 Hz sample
+      const frameSnap = createSnap(ring.cornerIds);
+      fillSnap(frameSnap, c.sim.frame, t);
       const ev: Detected = { label, key, priority: PRIORITY[key] ?? 1, time: t, snap: frameSnap, before: ring.inputs(t - BEFORE_S - 0.15, t - 0.05) };
       recent = [...recent.slice(-3), ev];
       chipEvent = ev;
@@ -309,6 +307,7 @@ const engineer: FeatureModule = {
       panel.hidden = !s.engineerOpen;
       toggle.setAttribute('aria-expanded', String(s.engineerOpen));
       root.classList.toggle('is-open', s.engineerOpen);
+      if (s.engineerOpen) root.classList.remove('is-fresh');
       root.hidden = !s.hudVisible || s.attract; // H and attract mode hide it with the rest of the HUD
     });
     c.addDisposer(() => {
@@ -322,6 +321,7 @@ const engineer: FeatureModule = {
       engaged = undefined;
       chipEvent = undefined;
       chipsDriving = false;
+      rootEl = undefined;
     });
   },
 
@@ -338,7 +338,7 @@ const engineer: FeatureModule = {
       if (chipEvent && frame.time - chipEvent.time > ENGAGED_WINDOW_S) {
         chipEvent = undefined;
         chipsDriving = false;
-        chipRow.parentElement?.parentElement?.classList.remove('is-fresh');
+        rootEl?.classList.remove('is-fresh');
       }
       if (!chipsDriving) {
         chipsDriving = true;
