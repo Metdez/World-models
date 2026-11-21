@@ -104,7 +104,7 @@ describe('recorder', () => {
       snap[0] = t + 1;
       r.tick(() => snap);
     }
-    const w = r.window(4)!;
+    const w = r.last(4)!;
     // 2000 - 960 = 1040 -> floor to 960
     expect(w.header.ticks).toBe(2000 - 960);
     expect(w.header.suspensionId).toBe('bb');
@@ -236,7 +236,7 @@ describe('re-simulation', () => {
     const h = host(sim);
     const before = h.stateChecksum();
     const ticksBefore = sim.drive!.recording()!.header.ticks;
-    const w = h.window(4)!;
+    const w = h.last(4)!;
     expect(w.header.ticks / 240).toBeGreaterThanOrEqual(4);
     expect(w.header.ticks / 240).toBeLessThan(5);
     const st = runReplay(sim, w)!;
@@ -249,7 +249,7 @@ describe('re-simulation', () => {
     const after = sim.drive!.recording()!;
     expect(after.header.ticks).toBe(ticksBefore);
     // twice in a row
-    expect(runReplay(sim, h.window(4)!)!.endChecksum).toBe(before);
+    expect(runReplay(sim, h.last(4)!)!.endChecksum).toBe(before);
   });
 
   it('a keyframe mismatch resyncs a moment replay from the recorder and marks a shared one "may differ"', () => {
@@ -257,7 +257,7 @@ describe('re-simulation', () => {
     scriptedDriver(2, true)(sim, 12.2);
     const h = host(sim);
     const before = h.stateChecksum();
-    const w = h.window(11)!;
+    const w = h.last(11)!;
     expect(w.keyframes.length).toBe(2);
     (w.keyframes as Uint32Array)[0]! ^= 1; // as if this engine had diverged by then
     const st = runReplay(sim, w)!;
@@ -296,7 +296,7 @@ describe('re-simulation', () => {
       sim.drainEvents(() => {});
       sim.drive!.drainEvents(() => {});
     });
-    const replay = host(sim).window(30)!;
+    const replay = host(sim).last(30)!;
     const playChurn = measure(() => {
       sim.drive!.play(replay);
       for (let k = 0; k < 4800; k++) sim.step(SIM_DT);

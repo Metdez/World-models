@@ -1,8 +1,8 @@
 /**
  * In-memory recorder of a Manual Drive run (ARCHITECTURE-M2 §7.1, §7.10 F/G; research m2/24 §b): the latched,
  * quantised intents (exactly what the HumanDriver consumed), suspension/aids/reset events at their ticks, and every
- * SNAP_TICKS steps a full start-state snapshot with its CRC. Windows (`window(s)`) start on a snapshot tick, so any
- * window — the moment replay's last seconds, 11-04's ghost window, the whole run — replays from an exact state.
+ * SNAP_TICKS steps a full start-state snapshot with its CRC. Spans (`last(s)`) start on a snapshot tick, so any
+ * span — the moment replay's last seconds, 11-04's ghost span, the whole run — replays from an exact state.
  * Buffers are allocated once (first start) and cover REPLAY_LIMITS.maxSeconds; older data is dropped in whole seconds.
  * `latch` and `tick` do not allocate.
  */
@@ -10,7 +10,7 @@ import { CONTROL_TICKS, REPLAY_LIMITS, type DecodedReplay, type ReplayEventRecor
 import type { QuantIntent } from '../drive/types';
 import { keyframesFor, samplesFor, stateChecksum } from './format';
 
-/** Steps between in-memory snapshots (1 s): window starts and resync states. */
+/** Steps between in-memory snapshots (1 s): span starts and resync states. */
 export const SNAP_TICKS = 240;
 const TICKS_PER_S = 240;
 const CH = 5;
@@ -29,12 +29,12 @@ export interface Recorder {
   /** After each step; `snapshotIfKeyframe` is called on snapshot ticks only (its array is copied). */
   tick(snapshotIfKeyframe: () => Float64Array): void;
   /** The newest >= `seconds` (to the next whole snapshot second; less if the run is shorter), or null when empty. */
-  window(seconds: number): DecodedReplay | null;
+  last(seconds: number): DecodedReplay | null;
   whole(): DecodedReplay | null;
   /** Ticks recorded since start (absolute; the retained part starts at `base`). */
   readonly ticks: number;
   readonly base: number;
-  /** Absolute start tick of a window this recorder returned in the current run, or -1. */
+  /** Absolute start tick of a span this recorder returned in the current run, or -1. */
   origin(replay: DecodedReplay): number;
   /** Copies the snapshot of absolute tick `tick` (a retained snapshot tick <= ticks) into `out`; false if none. */
   snapshotAt(tick: number, out: Float64Array, offset?: number): boolean;
@@ -57,7 +57,7 @@ export function createRecorder(o: { readonly snapshotLength: number; readonly pa
   let events: Ev[] = [];
   const st = new Float64Array(3); // [ticks, samples, base]
   let run = 0;
-  const windows = new WeakMap<DecodedReplay, { run: number; start: number }>();
+  const spans = new WeakMap<DecodedReplay, { run: number; start: number }>();
 
   const slot = (tick: number) => ((tick / SNAP_TICKS) % SLOTS) * L;
 
@@ -94,7 +94,7 @@ export function createRecorder(o: { readonly snapshotLength: number; readonly pa
       events: evs,
       keyframes,
     };
-    windows.set(replay, { run, start: startTick });
+    spans.set(replay, { run, start: startTick });
     return replay;
   }
 
@@ -155,7 +155,7 @@ export function createRecorder(o: { readonly snapshotLength: number; readonly pa
         while (T - st[2]! > MAX_TICKS) st[2] = st[2]! + SNAP_TICKS;
       }
     },
-    window(seconds) {
+    last(seconds) {
       const T = st[0]!;
       if (T <= 0) return null;
       const want = T - Math.round(seconds * TICKS_PER_S);
@@ -166,7 +166,7 @@ export function createRecorder(o: { readonly snapshotLength: number; readonly pa
       return build(st[2]!);
     },
     origin(replay) {
-      const w = windows.get(replay);
+      const w = spans.get(replay);
       return w && w.run === run && w.start >= st[2]! && w.start <= st[0]! ? w.start : -1;
     },
     snapshotAt(tick, out, offset = 0) {

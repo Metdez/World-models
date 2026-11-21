@@ -47,7 +47,7 @@ export interface DriveHost extends DriveControl {
   /** Control-owned DriveFrame fields (mode, available, source, aids, idle, detached, steerDemand, faults in auto). */
   writeFrame(d: DriveFrame): void;
   /** The newest >= `seconds` of the current run (whole snapshot seconds; the run so far if shorter), null in auto. */
-  window(seconds: number): DecodedReplay | null;
+  last(seconds: number): DecodedReplay | null;
   /** The current replay, or the last one until the next play / new run; null if none. */
   readonly replay: ReplayStatus | null;
   /** CRC (replay/format.ts stateChecksum) of the full current start state: plant snapshot + HumanDriver state. */
@@ -69,7 +69,7 @@ export interface ReplayStatus {
   /** Recorded with this build's parameters (paramsHash) and SIM_VERSION. */
   readonly sameModel: boolean;
   readonly sameVersion: boolean;
-  /** A window of this simulation's own recording (moment replay): resync snapshots available. */
+  /** A span of this simulation's own recording (moment replay): resync snapshots available. */
   readonly moment: boolean;
   state: 'playing' | 'ended' | 'branched';
   /** Keyframe CRC mismatches, resyncs from a recorder snapshot, tick of the first mismatch (-1 none). */
@@ -347,7 +347,7 @@ export function createDriveControl(deps: DriveControlDeps): DriveHost {
       if (!p) return false;
       const fit: ReplayFit = replayFit(replay, target);
       if (!fit.ok || replay.intents.length < Math.ceil(replay.header.ticks / CONTROL_TICKS) * 5) return false;
-      // moment replay: keep the recorder's keyframe snapshots of this window for resyncs
+      // moment replay: keep the recorder's keyframe snapshots of this span for resyncs
       const origin = recorder ? recorder.origin(replay) : -1;
       resync = null;
       resyncFrom = origin;
@@ -383,8 +383,8 @@ export function createDriveControl(deps: DriveControlDeps): DriveHost {
     recording() {
       return mode === 'auto' || !recorder || recorder.ticks === 0 ? null : recorder.whole();
     },
-    window(seconds) {
-      return mode === 'auto' || !recorder || recorder.ticks === 0 ? null : recorder.window(seconds);
+    last(seconds) {
+      return mode === 'auto' || !recorder || recorder.ticks === 0 ? null : recorder.last(seconds);
     },
     get replay() {
       return status;

@@ -98,7 +98,7 @@ export default {
     const playMoment = () => {
       const d = drive();
       if (mode() !== 'manual' || !d || d.recordedTicks < MIN_RECORDED_S * 240) return;
-      const w = d.window(MOMENT_SECONDS);
+      const w = d.last(MOMENT_SECONDS);
       if (!w) return;
       closeShare();
       bus.emit('drive:play', { replay: w });
@@ -126,7 +126,7 @@ export default {
       const d = drive();
       if (!d || d.recordedTicks < MIN_RECORDED_S * 240) return;
       const { seconds, truncated } = shareSeconds(d.recordedTicks);
-      const r = truncated ? d.window(seconds) : d.recording();
+      const r = truncated ? d.last(seconds) : d.recording();
       if (!r) return;
       // the state at the end of the shared run: a viewer's replay must end with the same CRC (e2e reads it)
       sharePanel.dataset.crc = hex(d.stateChecksum());
