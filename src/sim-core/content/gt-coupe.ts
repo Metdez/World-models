@@ -6,6 +6,7 @@
  */
 import type { CarDefinition, TyreParams } from '../../contracts/vehicle';
 import { GT_GEOMETRY } from './gt-geometry';
+import { gtCoupeHandling } from './gt-coupe-handling';
 
 const tyre = (width: number, verticalStiffness: number, radius: number): TyreParams => ({
   radius,
@@ -61,4 +62,5 @@ export const gtCoupe: CarDefinition = {
     brakeShare: 0.38,
   },
   maxSteer: 0.35,
+  handling: gtCoupeHandling,
 };

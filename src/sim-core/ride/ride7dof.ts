@@ -92,7 +92,14 @@ export interface RideModel {
   /** Static equilibrium under `input` (Newton solve of the force balance, all rates zero). */
   reset(input: RideInput): void;
   step(dt: number, input: RideInput): void;
+  /** Copies q (7) then v (7) into out[offset..offset + 14) (ARCHITECTURE-M2 §7.3: plant snapshots, suspension swaps). */
+  exportState(out: Float64Array, offset?: number): void;
+  /** Restores q and v from src[offset..offset + 14) and recomputes the reported outputs for `input`. */
+  importState(src: Float64Array, input: RideInput, offset?: number): void;
 }
+
+/** Doubles written by RideModel.exportState. */
+export const RIDE_STATE_LENGTH = 14;
 
 const N = 7;
 const FRICTION_V0 = 0.02;
@@ -386,5 +393,20 @@ export function createRideModel(params: RideParams): RideModel {
     outputs(input);
   }
 
-  return { state, reset, step };
+  function exportState(out: Float64Array, offset = 0): void {
+    for (let k = 0; k < N; k++) {
+      out[offset + k] = q[k]!;
+      out[offset + N + k] = v[k]!;
+    }
+  }
+
+  function importState(src: Float64Array, input: RideInput, offset = 0): void {
+    for (let k = 0; k < N; k++) {
+      q[k] = src[offset + k]!;
+      v[k] = src[offset + N + k]!;
+    }
+    outputs(input);
+  }
+
+  return { state, reset, step, exportState, importState };
 }

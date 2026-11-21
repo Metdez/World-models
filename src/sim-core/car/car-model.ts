@@ -28,7 +28,11 @@ import {
   type RideModel,
   type RideParams,
 } from '../ride/ride7dof';
-import { gripUse } from '../ride/tyre';
+import { gripUse, peakMu } from '../ride/tyre';
+import type { SurfaceKind, GroundWorld } from '../../contracts/world';
+import { createPlant, SURFACE_KINDS, type CarCore, type VehiclePlant } from '../drive/plant';
+import { loopSurface } from '../world/ground';
+import { buildGroundWorld } from '../world/ground';
 
 const LAYOUT: readonly CornerLayout[] = [
   { id: 'fl', axle: 'front', side: 1 },
@@ -68,7 +72,16 @@ const GRIP = 10;
 const SPIN = 11;
 const WCX = 12;
 const STRIDE = 13;
-const RECORD = BODY + 4 * STRIDE;
+/** M2 slots, appended after the M1 record so its slots and their interpolation are untouched (ARCH-M2 §7.3 (4)). */
+const TYRE = BODY + 4 * STRIDE;
+const FX = 0;
+const FY = 1;
+const CAP = 2;
+const OMEGA = 3;
+const SLIP_A = 4;
+const SLIP_R = 5;
+const TYRE_STRIDE = 6;
+const RECORD = TYRE + 4 * TYRE_STRIDE;
 
 interface AxleSolution {
   readonly table: KinematicsTable;
@@ -117,7 +130,18 @@ function asCar(def: VehicleDefinition | SuspensionDefinition): void {
   if (cls !== 'car') throw new Error(`"${def.id}" is a ${cls} definition, not a car one`);
 }
 
-export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: SuspensionDefinition, track: BuiltTrack) {
+/** Per-corner tyre values the plant hands to derive (wheel frame). */
+export interface PlantTyreOut {
+  readonly fx: Float64Array;
+  readonly fy: Float64Array;
+  readonly capacity: Float64Array;
+  readonly omega: Float64Array;
+  readonly slipAngle: Float64Array;
+  readonly slipRatio: Float64Array;
+  readonly surface: Uint8Array;
+}
+
+export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: SuspensionDefinition, track: BuiltTrack, world?: GroundWorld) {
   asCar(vehicleDef);
   const vehicle = vehicleDef as CarDefinition;
   const L = vehicle.wheelbase;
@@ -142,7 +166,11 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
   let cornerSols: CornerSolution[] = [];
   let restSol!: CornerSolution;
 
-  function install(suspension: CarSuspensionDefinition): void {
+  const unsprung = new Float64Array(4);
+  const keep = new Float64Array(RIDE_STATE_LENGTH);
+
+  function install(suspension: CarSuspensionDefinition, keepRideState = false): void {
+    if (keepRideState) ride.exportState(keep);
     sol = prepareCarSuspension(vehicle, suspension);
     tables = [sol.front.table, sol.rear.table];
     for (const t of tables) if (t.pointOrder.length > MAX_POINTS) throw new Error(`suspension "${suspension.id}" has more than ${MAX_POINTS} points`);
@@ -171,6 +199,7 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
     // shortcut: one mean static tyre deflection places the body (front/rear differ by ~2 mm, 0.04 deg of pitch).
     staticDeflectionMean = (staticDeflection[0]! + staticDeflection[1]! + staticDeflection[2]! + staticDeflection[3]!) / 4;
     ride = createRideModel(params);
+    if (keepRideState) ride.importState(keep, input);
 
     function rideCorner(i: number): RideCornerParams {
       const s = spec(i);
@@ -179,6 +208,7 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
       const m = (ms * (i < 2 ? -xR : xF)) / (xF - xR) / 2;
       const k = wheelRateForRideFrequency(s.rideFrequency, m, s.tyre.verticalStiffness);
       const mu = s.unsprungMass + suspension.extras.unsprungMassDelta;
+      unsprung[i] = mu;
       staticDeflection[i] = (m * G + mu * G) / s.tyre.verticalStiffness;
       return {
         x: cx[i]!,
@@ -196,16 +226,12 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
     }
   }
 
-  function setSuspension(def: SuspensionDefinition): void {
-    asCar(def);
-    install(def as CarSuspensionDefinition);
-  }
-  setSuspension(suspensionDef);
-
   // ---- scratch (no allocation in step/sample)
   const cur = new Float64Array(RECORD);
   const prev = new Float64Array(RECORD);
   const smp = new Float64Array(RECORD);
+  /** Surface index (SURFACE_KINDS) under each wheel at the current step. */
+  const surf = new Uint8Array(4);
   const quiet = new Float64Array(12);
   const roadPrev = new Float64Array(4);
   const input: RideInput = {
@@ -216,6 +242,12 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
     rcHeight: { front: 0, rear: 0 },
     antiPitch: { front: 0, rear: 0 },
   };
+
+  function setSuspension(def: SuspensionDefinition, keepRideState = false): void {
+    asCar(def);
+    install(def as CarSuspensionDefinition, keepRideState);
+  }
+  setSuspension(suspensionDef);
   const ts: TrackSample = { s: 0, x: 0, y: 0, z: 0, heading: 0, curvature: 0, bank: 0, grade: 0 };
   /** Mutable per-step scalars in a typed array: a double stored in a closure variable is re-boxed on every write. */
   const scalar = new Float64Array(2); // [rack, dt]
@@ -247,6 +279,7 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
       const li = path.l + cx[i]! * sn + cy[i]! * c;
       const h = (track.roadHeight(si - ENVELOPE, li) + track.roadHeight(si, li) + track.roadHeight(si + ENVELOPE, li)) / 3;
       input.road[i] = h - swellA * Math.sin(swellK * si) - li * tb - refZ - refSlope * cx[i]!;
+      surf[i] = SURFACE_KINDS.indexOf(loopSurface(track, si, li));
     }
   }
 
