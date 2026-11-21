@@ -5,13 +5,18 @@
  * string). Replay: what is playing, progress, the honesty line (other model / drifted), "Drive it yourself" (branch
  * into manual). Opening a `#r=` link plays it once the first frame is up; damaged, newer or mismatched links explain
  * themselves calmly. Mode changes go through the bus ('drive:play', 'drive:request'); the kernel calls the simulation.
+ * Saved runs (12-05, ARCHITECTURE-M2 §12.1): "Save a short link" / "Save the whole run" in the share popover loads the
+ * Turnstile check (only then), posts the run and shows a `#rid=` link; the fragment link stays offered on any failure.
+ * Opening `#rid=` fetches the run and plays it like a fragment link.
  */
 import type { FeatureModule, FrameInfo } from '../../contracts/app';
 import type { DecodedReplay, DriveAids } from '../../contracts/drive';
 import type { DriveHost } from '../../sim-core/drive/control';
 import { h, mount } from '../../ui/dom';
-import { COPY, LINK_ERROR, MIN_RECORDED_S, MOMENT_SECONDS, MOMENT_TIME_SCALE, NOTE_S, OFFER_S, offers, REFUSAL, shareSeconds, statusNote } from './copy';
-import { decodeFragment, encodeFragment, fragmentOf, MAX_FRAGMENT_CHARS, shareUrl } from './link';
+import { COPY, FALLBACK, LINK_ERROR, loadMessage, MIN_RECORDED_S, MOMENT_SECONDS, MOMENT_TIME_SCALE, NOTE_S, OFFER_S, offers, REFUSAL, SAVE_ERROR, savedPart, savingPart, shareSeconds, statusNote } from './copy';
+import { decodeFragment, detectPlatform, encodeFragment, fragmentOf, MAX_FRAGMENT_CHARS, shareUrl } from './link';
+import { loadSaved, ridOf, savedUrl, saveReplay, saveSpan } from './server';
+import { challenge, siteKeyFor } from './turnstile';
 import './replay.css';
 
 let frameHandler: ((frame: FrameInfo) => void) | undefined;
@@ -61,13 +66,19 @@ export default {
 
     const shareInput = h('input', { class: 'sl-replay-link', type: 'text', readonly: true, 'aria-label': 'Replay link', spellcheck: 'false' });
     const copyBtn = h('button', { type: 'button', class: 'sl-replay-btn', 'data-action': 'copy' }, COPY.copy);
-    const shareMsg = h('span', { class: 'sl-replay-share-msg' });
+    const shareMsg = h('span', { class: 'sl-replay-share-msg', role: 'status' });
     const shareFine = h('span', { class: 'sl-replay-share-fine' }, COPY.linkNote);
+    const saveBtn = h('button', { type: 'button', class: 'sl-replay-btn sl-replay-save', 'data-action': 'save', title: COPY.saveTitle }, COPY.saveShort);
+    const savePrivacy = h('span', { class: 'sl-replay-share-fine sl-replay-privacy', hidden: true }, COPY.savePrivacy);
+    const widgetHost = h('div', { class: 'sl-replay-turnstile', hidden: true });
     const sharePanel = h(
       'div',
-      { id: 'sl-replay-share', class: 'sl-replay-share', role: 'group', 'aria-label': COPY.shareTitle, hidden: true },
+      { id: 'sl-replay-share', class: 'sl-replay-share', role: 'group', 'aria-label': COPY.shareTitle, tabindex: -1, hidden: true },
       h('div', { class: 'sl-replay-share-row' }, shareInput, copyBtn),
       shareMsg,
+      savePrivacy,
+      widgetHost,
+      saveBtn,
       shareFine,
     );
     const noteText = h('span');
@@ -82,6 +93,9 @@ export default {
     let shared: DecodedReplay | null = null; // a link's replay playing
     let pendingLink: DecodedReplay | null = null;
     let shareGen = 0;
+    let saveGen = 0;
+    let widget: { dispose(): void } | null = null;
+    let fallback: keyof typeof FALLBACK = 'none';
     const shown = { visible: false, row: '', progress: -1, status: '' as string | null, slow: false, label: '', offered: false };
 
     const showNote = (text: string, seconds = NOTE_S) => {
@@ -89,7 +103,15 @@ export default {
       noteS = seconds;
       note.hidden = false;
     };
+    const endChallenge = () => {
+      widget?.dispose();
+      widget = null;
+      widgetHost.hidden = true;
+      savePrivacy.hidden = true;
+    };
     const closeShare = () => {
+      saveGen++;
+      endChallenge();
       sharePanel.hidden = true;
       shareBtn.setAttribute('aria-expanded', 'false');
     };
@@ -136,12 +158,22 @@ export default {
       shareInput.value = '';
       copyBtn.disabled = true;
       shareMsg.textContent = truncated ? COPY.shareLastMinute : '';
+      saveGen++;
+      endChallenge();
+      fallback = truncated ? 'minute' : 'whole';
+      saveBtn.hidden = false;
+      saveBtn.textContent = truncated ? COPY.saveWhole : COPY.saveShort;
+      sharePanel.dataset.save = 'idle';
+      delete sharePanel.dataset.saveError;
+      delete sharePanel.dataset.rid;
       const gen = ++shareGen;
       void encodeFragment(r).then(
         (fragment) => {
           if (gen !== shareGen) return;
           if (fragment.length > MAX_FRAGMENT_CHARS) {
-            shareMsg.textContent = COPY.tooBig;
+            fallback = 'none';
+            shareMsg.textContent = COPY.tooBigSave;
+            saveBtn.textContent = COPY.saveWhole;
             return;
           }
           shareInput.value = shareUrl(location, fragment);
@@ -150,10 +182,65 @@ export default {
           shareInput.focus({ preventScroll: true });
           shareInput.select();
         },
-        () => gen === shareGen && (shareMsg.textContent = COPY.tooBig),
+        () => {
+          if (gen !== shareGen) return;
+          fallback = 'none';
+          shareMsg.textContent = COPY.tooBigSave;
+        },
       );
     };
     shareBtn.addEventListener('click', share);
+
+    // --- saving (12-05): the check loads only now; nothing about the visitor is sent, only the run
+    const saveFailed = (code: keyof typeof SAVE_ERROR) => {
+      endChallenge();
+      const e = SAVE_ERROR[code];
+      sharePanel.dataset.save = 'error';
+      sharePanel.dataset.saveError = code;
+      shareMsg.textContent = [e.text, FALLBACK[fallback]].filter(Boolean).join(' ');
+      saveBtn.textContent = COPY.saveRetry;
+      saveBtn.hidden = !e.retry;
+      (e.retry ? saveBtn : shareInput.value ? shareInput : sharePanel).focus({ preventScroll: true });
+    };
+    const save = () => {
+      const d = drive();
+      if (!d || sharePanel.hidden) return;
+      const gen = ++saveGen;
+      endChallenge();
+      saveBtn.hidden = true;
+      sharePanel.focus({ preventScroll: true }); // the button that had focus is gone
+      sharePanel.dataset.save = 'checking';
+      delete sharePanel.dataset.saveError;
+      sharePanel.dataset.saveCrc = hex(d.stateChecksum());
+      shareMsg.textContent = COPY.checking;
+      void saveSpan(d).then((span) => {
+        if (gen !== saveGen) return;
+        if (!span) return saveFailed(detectPlatform().compress ? 'too_large' : 'unsupported');
+        sharePanel.dataset.saveTicks = String(span.replay.header.ticks);
+        if (span.minutes) shareMsg.textContent = savingPart(span.minutes);
+        savePrivacy.hidden = false;
+        widgetHost.hidden = false;
+        widget = challenge(widgetHost, siteKeyFor(location), (o) => {
+          if (gen !== saveGen) return;
+          if ('error' in o) return saveFailed(o.error);
+          sharePanel.dataset.save = 'saving';
+          shareMsg.textContent = COPY.saving;
+          void saveReplay(o.token, span.data).then((res) => {
+            if (gen !== saveGen) return;
+            if ('error' in res) return saveFailed(res.error);
+            endChallenge();
+            sharePanel.dataset.save = 'saved';
+            sharePanel.dataset.rid = res.id;
+            shareInput.value = savedUrl(location, res.id);
+            copyBtn.disabled = false;
+            shareMsg.textContent = span.minutes ? savedPart(span.minutes) : COPY.saved;
+            shareInput.focus({ preventScroll: true });
+            shareInput.select();
+          });
+        });
+      });
+    };
+    saveBtn.addEventListener('click', save);
     copyBtn.addEventListener('click', () => {
       const url = shareInput.value;
       if (!url) return;
@@ -173,8 +260,22 @@ export default {
       if (mode() === 'replay') bus.emit('drive:request', { mode: 'manual' });
     });
 
-    // --- opening a link (#r=): decode now, play once frames run and the simulation can take it
+    // --- opening a link (#r= decoded here, #rid= fetched first): play once frames run and the simulation can take it
+    let loadGen = 0;
     const openHash = () => {
+      const id = ridOf(location.hash);
+      if (id !== null) {
+        const gen = ++loadGen;
+        showNote(COPY.fetching, 30);
+        void loadSaved(id).then((res) => {
+          if (gen !== loadGen) return;
+          if ('error' in res) return showNote(loadMessage(res.error), 10);
+          noteS = 0;
+          note.hidden = true;
+          pendingLink = res.replay;
+        });
+        return;
+      }
       const fragment = fragmentOf(location.hash);
       if (fragment === null) return;
       void decodeFragment(fragment).then((res) => {

@@ -216,6 +216,35 @@
   white-space: normal;
   text-align: center;
 }
+/* saving (12-05): one action, the privacy line and the check, inside the same popover */
+.sl-replay-share:focus {
+  outline: none;
+}
+.sl-replay-save {
+  align-self: flex-start;
+}
+.sl-replay-save[hidden],
+.sl-replay-privacy[hidden],
+.sl-replay-turnstile[hidden] {
+  display: none;
+}
+.sl-replay-privacy {
+  color: var(--text-2);
+}
+.sl-replay-turnstile {
+  min-height: 65px;
+  border-radius: var(--radius-chip);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+/* driving: the chips sit at the right edge, so the popover opens leftwards from it */
+.sl-drive-actions.is-driving .sl-replay-share,
+.sl-drive-actions.is-driving .sl-replay-note {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+
 /* the share panel wins the space above the row */
 .sl-replay-share:not([hidden]) ~ .sl-replay-note,
 .sl-replay-note:has(~ .sl-replay-share:not([hidden])) {
