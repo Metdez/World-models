@@ -155,7 +155,7 @@ async function measureContrast(page: Page) {
 }
 
 test.describe('07-03 accessibility', () => {
-  test.describe.configure({ timeout: 300_000 });
+  test.describe.configure({ timeout: 600_000 }); // SwiftShader on a loaded machine: ~1 frame/s
 
   test('keyboard: every control reachable and named, focus ring, radiogroups, live regions, contrast', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
