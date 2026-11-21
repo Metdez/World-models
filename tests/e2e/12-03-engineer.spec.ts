@@ -100,6 +100,9 @@ test.describe('12-03 engineer while driving', () => {
 
     await intent(page, null);
     expect(events).toBe(0); // analytics off in e2e
-    await expectHealthyBoot(page, errors);
+    // the one aborted request is ours (offline); anything else fails the boot check
+    const aborted = errors.filter((e) => /net::ERR_FAILED/.test(e));
+    expect(aborted.length).toBeLessThanOrEqual(1);
+    await expectHealthyBoot(page, errors.filter((e) => !aborted.includes(e)));
   });
 });
