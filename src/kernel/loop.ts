@@ -1,4 +1,5 @@
 import type { FrameInfo, FramePhase } from '../contracts/app';
+import type { DriveEvent } from '../contracts/drive';
 import type { AppBus } from '../contracts/events';
 import type { SimEvent } from '../contracts/sim';
 import type { AppStore } from '../contracts/store';
@@ -36,6 +37,19 @@ export function createLoop(deps: {
   let lastMs: number | undefined;
   const info = { dt: 0, time: 0, alpha: 0, t: host.frame };
   const emitSimEvent = (e: SimEvent) => bus.emit('sim:event', e);
+  // store.driveMode is a mirror written only here (ARCHITECTURE-M2 §6.3).
+  const emitDriveEvent = (e: DriveEvent) => {
+    if (e.kind === 'mode') {
+      store.setKey('driveMode', e.mode);
+      host.syncSuspension();
+      if (e.cut) host.acc = 0;
+      bus.emit('drive:mode', { mode: e.mode, previous: e.previous, cut: e.cut });
+    }
+    bus.emit('drive:event', e);
+  };
+  const applyTestIntent = () => {
+    if (host.testIntent) host.current.drive?.setIntent(host.testIntent);
+  };
 
   function render(dt: number, nowMs: number): void {
     const st = store.get();
@@ -44,6 +58,7 @@ export function createLoop(deps: {
     info.alpha = host.acc / SIM_DT;
     info.t = host.frame = host.current.sample(info.alpha, st.amplification);
     host.current.drainEvents(emitSimEvent);
+    host.current.drive?.drainEvents(emitDriveEvent);
     for (const phase of PHASES) features.update(phase, info as FrameInfo);
     if (first) {
       first = false;
@@ -56,6 +71,7 @@ export function createLoop(deps: {
     lastMs = nowMs;
     const st = store.get();
     if (!st.paused) {
+      applyTestIntent();
       host.acc += dt * st.timeScale;
       if (st.clock === 'live' && st.timeScale === 1) host.liveCorrection(dt);
       let steps = 0;
@@ -105,6 +121,7 @@ export function createLoop(deps: {
       for (let i = 0; i < n; i++) frame((now += dt * 1000));
     },
     advance(seconds) {
+      applyTestIntent();
       for (let i = Math.round(seconds / SIM_DT); i > 0; i--) host.current.step(SIM_DT);
       render(0, lastMs ?? 0);
     },

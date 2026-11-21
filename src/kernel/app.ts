@@ -1,8 +1,8 @@
 import type { AppContext, AssetManifest, FeatureModule } from '../contracts/app';
 import { RENDER } from '../contracts/services';
-import type { CreateSimulation } from '../contracts/sim';
+import type { CreateSimulation, SimCatalog } from '../contracts/sim';
 import type { AppStore } from '../contracts/store';
-import { createSimulation as defaultCreateSimulation } from '../sim-core/index';
+import { createSimulation as defaultCreateSimulation, runDriveScript } from '../sim-core/index';
 import { createAssets, EMPTY_MANIFEST, fetchManifest } from './assets';
 import { createBus, listenerCount } from './bus';
 import { createClock } from './clock';
@@ -91,18 +91,23 @@ export function createApp(options: CreateAppOptions): App {
     features.contribute(registries);
     validateIds(store, registries, flags.suspension !== undefined, warn);
     const st = store.get();
-    const sim = (options.createSimulation ?? defaultCreateSimulation)({
-      catalog: {
-        track: (id) => registries.tracks.get(id),
-        vehicle: (id) => registries.vehicles.get(id),
-        suspension: (id) => registries.suspensions.get(id),
-      },
+    const createSim = options.createSimulation ?? defaultCreateSimulation;
+    const catalog: SimCatalog = {
+      track: (id) => registries.tracks.get(id),
+      vehicle: (id) => registries.vehicles.get(id),
+      suspension: (id) => registries.suspensions.get(id),
+      world: (trackId) => registries.worlds.list().find((w) => w.trackId === trackId),
+    };
+    const sim = createSim({
+      catalog,
       trackId: st.trackId,
       vehicleId: st.vehicleId,
       suspensionId: st.suspensionId,
       ...(flags.lapTime === undefined ? {} : { lapTime: flags.lapTime }),
     });
+    sim.drive?.setAids(store.get().driveAids);
     host = createSimHost({ sim, store, bus, clock, registries, warn });
+    const kernelHost = host;
     const app: AppContext = { store, bus, registries, services, flags, clock, assets: createAssets(manifest), sim: host, dom };
     ctx = app;
     const raf = options.raf ?? ((cb: (nowMs: number) => void) => requestAnimationFrame(cb));
@@ -116,10 +121,19 @@ export function createApp(options: CreateAppOptions): App {
         store.setKey('loading', 1);
         bus.emit('app:ready');
         if (globalThis.__app) globalThis.__app.ready = true;
+        if (flags.drive === 'manual') {
+          bus.emit('drive:request', { mode: 'manual' });
+          if (flags.spawn) bus.emit('drive:reset', { spawn: flags.spawn });
+        }
       },
     });
     const kernelLoop = loop;
-    if (flags.e2e || flags.debug) uninstallHooks = installTestHooks(getCtx, features, (s) => kernelLoop.advance(s));
+    const driveHash = (seed: number, seconds: number) => {
+      const fresh = createSim({ catalog, trackId: sim.track.def.id, vehicleId: sim.vehicle.id, suspensionId: sim.suspension.id });
+      return runDriveScript(fresh, seed, seconds);
+    };
+    if (flags.e2e || flags.debug)
+      uninstallHooks = installTestHooks(getCtx, features, { host: () => kernelHost, advance: (s) => kernelLoop.advance(s), driveHash });
     busBaseline = listenerCount(bus);
 
     await features.init(app, (rec) => {

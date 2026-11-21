@@ -61,6 +61,15 @@ export function parseFlags(search: string, warn: (msg: string) => void = console
         else bad(key, value);
         break;
       }
+      case 'drive':
+        if (value === 'manual') flags.drive = value;
+        else bad(key, value);
+        break;
+      case 'spawn': {
+        const v = id(key, value);
+        if (v) flags.spawn = v;
+        break;
+      }
       case 'clock':
         if (value === 'live' || value === 'local') flags.clock = value;
         else bad(key, value);

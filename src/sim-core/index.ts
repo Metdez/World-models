@@ -2,3 +2,4 @@
 export { createSimulation } from './simulation';
 export { buildTrack } from './track/build';
 export { solveAxleKinematics } from './kinematics/table';
+export { runDriveScript } from './drive/script';

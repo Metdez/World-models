@@ -1,4 +1,5 @@
 import type { Clock, Registries, SimHost } from '../contracts/app';
+import type { DecodedReplay, DriveIntent } from '../contracts/drive';
 import type { AppBus } from '../contracts/events';
 import type { Simulation } from '../contracts/sim';
 import type { AppStore } from '../contracts/store';
@@ -17,6 +18,10 @@ export interface KernelSimHost extends SimHost {
   liveTarget(): number;
   /** One render frame of live-clock tracking: seek if > 0.5 s off, else slew by at most +/-2 % of dt. */
   liveCorrection(dt: number): void;
+  /** Writes `store.suspensionId = sim.suspension.id` if they differ (after replay starts and drive mode changes). */
+  syncSuspension(): void;
+  /** Test-only intent override (`__app.driveIntent`); the loop re-applies it before every frame's fixed steps. */
+  testIntent: DriveIntent | null;
   dispose(): void;
 }
 
@@ -54,17 +59,55 @@ export function createSimHost(deps: {
       if (Math.abs(err) > SEEK_THRESHOLD_S) host.seek(host.liveTarget());
       else host.acc += Math.max(-SLEW * dt, Math.min(SLEW * dt, err));
     },
+    syncSuspension() {
+      if (store.get().suspensionId !== sim.suspension.id) store.setKey('suspensionId', sim.suspension.id);
+    },
+    testIntent: null,
     dispose() {
       unlisten();
       bus.off('sim:seek-to', onSeekTo);
+      bus.off('drive:request', onDriveRequest);
+      bus.off('drive:reset', onDriveReset);
+      bus.off('drive:play', onDrivePlay);
     },
   };
 
   const onSeekTo = ({ lapTime }: { lapTime: number }) => {
+    if (sim.drive && sim.drive.mode !== 'auto') return warn('Seek ignored while driving');
     if (store.get().clock !== 'local') store.setKey('clock', 'local');
     host.seek(lapTime);
   };
   bus.on('sim:seek-to', onSeekTo);
+
+  // Manual Drive requests (ARCHITECTURE-M2 §6.2); no-ops when the simulation has no drive control.
+  const driveLocal = () => {
+    store.setKey('clock', 'local');
+    store.setKey('paused', false);
+  };
+  const onDriveRequest = ({ mode, immediate }: { mode: 'auto' | 'manual'; immediate?: boolean }) => {
+    const drive = sim.drive;
+    if (!drive) return;
+    if (mode === 'manual') {
+      if (!drive.available) return warn(`Manual Drive is not available for vehicle "${sim.vehicle.id}"`);
+      driveLocal();
+      drive.request('manual');
+    } else if (immediate) {
+      // The clock watcher seeks to the live target; sim.seek releases the plant first (a cut).
+      if (store.get().clock !== 'live') store.setKey('clock', 'live');
+      else host.seek(host.liveTarget());
+    } else drive.request('auto');
+  };
+  const onDriveReset = ({ spawn }: { spawn?: string }) => sim.drive?.reset(spawn);
+  const onDrivePlay = ({ replay }: { replay: DecodedReplay }) => {
+    const drive = sim.drive;
+    if (!drive) return;
+    driveLocal();
+    if (!drive.play(replay)) warn('Replay does not fit this simulation');
+    host.syncSuspension();
+  };
+  bus.on('drive:request', onDriveRequest);
+  bus.on('drive:reset', onDriveReset);
+  bus.on('drive:play', onDrivePlay);
 
   // nanostores queues setKey calls made inside a listener, so reverts/write-backs below re-enter as separate changes.
   const unlisten = store.listen((st, old, key) => {
@@ -106,6 +149,9 @@ export function createSimHost(deps: {
         return;
       case 'clock':
         if (st.clock === 'live') host.seek(host.liveTarget());
+        return;
+      case 'driveAids':
+        sim.drive?.setAids(st.driveAids);
         return;
     }
   });
