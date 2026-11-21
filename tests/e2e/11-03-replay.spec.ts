@@ -24,6 +24,13 @@ const pause = (page: Page) => page.evaluate(() => globalThis.__app!.set('paused'
 const intent = (page: Page, i: Record<string, number> | null) => page.evaluate((x) => globalThis.__app!.driveIntent(x), i);
 const data = (page: Page, sel: string, key: string) => page.evaluate(([s, k]) => (document.querySelector(s!) as HTMLElement | null)?.dataset[k!] ?? null, [sel, key]);
 
+/** waitForReady with a longer boot budget (a second page on the software renderer). */
+async function open(page: Page, path: string): Promise<void> {
+  await page.goto('about:blank'); // a hash-only change would not reload the app
+  await page.goto(path);
+  await page.waitForFunction(() => globalThis.__app?.ready === true, undefined, { timeout: 60_000 });
+}
+
 /** Manual, paused, then a scripted ~10 s drive in fixed steps. */
 async function recordDrive(page: Page): Promise<void> {
   await waitForReady(page, MANUAL);
@@ -82,11 +89,12 @@ test.describe('11-03 replays', () => {
     const ending = await drive(page);
     await page.screenshot({ path: join(SHOTS, '11-03-share.png') });
     await expectHealthyBoot(page, errors);
+    await page.close(); // one WebGL page at a time on the software renderer
 
     // the viewer: a new page, paused Auto elsewhere on the lap, opens the link
     const viewer = await context.newPage();
     const vErrors = captureConsole(viewer);
-    await waitForReady(viewer, `${VIEWER}${url.hash}`);
+    await open(viewer, `${VIEWER}${url.hash}`);
     await expect.poll(() => mode(viewer)).toBe('replay');
     await expect(viewer.locator('.sl-replay [data-row="play"]')).toBeVisible();
     await expect(viewer.locator('.sl-replay-label')).toHaveText('Shared run');
@@ -114,7 +122,8 @@ test.describe('11-03 replays', () => {
     const other = await encodeFragment({ ...decoded.replay, header: { ...decoded.replay.header, vehicleId: 'cafe-racer' } });
     const v2 = await context.newPage();
     const v2Errors = captureConsole(v2);
-    await waitForReady(v2, `${VIEWER}#r=${older}`);
+    await viewer.close();
+    await open(v2, `${VIEWER}#r=${older}`);
     await expect.poll(() => mode(v2)).toBe('replay');
     await expect(v2.locator('.sl-replay-note')).toContainText('older model');
     await pause(v2);
@@ -122,12 +131,10 @@ test.describe('11-03 replays', () => {
     await v2.locator('[data-action="drive"]').click();
     await advance(v2, 0.1);
     expect(await mode(v2)).toBe('manual');
-    await v2.goto(`${VIEWER}#r=${other}`);
-    await v2.waitForFunction(() => globalThis.__app?.ready === true);
+    await open(v2, `${VIEWER}#r=${other}`);
     await expect(v2.locator('.sl-replay-note')).toContainText('another vehicle');
     expect(await mode(v2)).toBe('auto');
-    await v2.goto(`${VIEWER}#r=${older.slice(0, 60)}xx${older.slice(62, 200)}`);
-    await v2.waitForFunction(() => globalThis.__app?.ready === true);
+    await open(v2, `${VIEWER}#r=${older.slice(0, 60)}xx${older.slice(62, 200)}`);
     await expect(v2.locator('.sl-replay-note')).toContainText('damaged');
     expect(await mode(v2)).toBe('auto');
     await v2.screenshot({ path: join(SHOTS, '11-03-damaged.png') });

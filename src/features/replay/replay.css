@@ -11,6 +11,12 @@
 .sl-replay[hidden] {
   display: none;
 }
+/* The action row is shared (drive.css places every .sl-drive-action at its centre): while another feature's chip is
+ * shown there (e.g. a single centred toggle), this chip starts just right of it instead of on top of it. */
+#overlay:has(> .sl-drive-action:not(.sl-replay):not([hidden])) > .sl-replay {
+  transform: translateX(var(--sl-replay-shift, 84px));
+  align-items: flex-start;
+}
 
 .sl-replay-row {
   display: flex;
@@ -205,6 +211,7 @@
   color: var(--text-3);
 }
 .sl-replay-note {
+  width: max-content;
   max-width: min(460px, calc(100vw - 2 * var(--margin)));
   padding: var(--sp-2) var(--sp-3);
   border-radius: var(--radius-chip);

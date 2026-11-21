@@ -50,7 +50,7 @@ export default {
       h('kbd', { class: 'sl-drive-kbd' }, 'Q'),
     );
     const shareBtn = h('button', { type: 'button', class: 'sl-replay-btn', 'data-action': 'share', title: COPY.shareTitle, 'aria-expanded': 'false', 'aria-controls': 'sl-replay-share' }, icon(ICON_SHARE), COPY.share);
-    const recRow = h('div', { class: 'sl-replay-row', 'data-row': 'record' }, recDot, momentBtn, shareBtn);
+    const recRow = h('div', { class: 'sl-replay-row', 'data-row': 'record', hidden: true }, recDot, momentBtn, shareBtn);
 
     const playLabel = h('span', { class: 'sl-replay-label' }, COPY.replay);
     const slowTag = h('span', { class: 'sl-replay-tag', hidden: true }, COPY.slow);
