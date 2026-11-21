@@ -35,9 +35,9 @@ export function driverKeyFromHash(hash: string): string | null {
 export function readRemoteTarget(
   loc: Pick<Location, 'search' | 'hash' | 'pathname'>,
   storage: Storage | null,
-): { code: string | null; hostKey: string | null; driverKey: string | null } {
+): { code: string | null; hostKey: string | null; driverKey?: string } {
   const code = normaliseCode(new URLSearchParams(loc.search).get('room'));
-  if (!code) return { code: null, hostKey: null, driverKey: null };
+  if (!code) return { code: null, hostKey: null };
   let driverKey = driverKeyFromHash(loc.hash);
   let hostKey = driverKey ? null : hostKeyFromHash(loc.hash);
   try {
@@ -54,7 +54,7 @@ export function readRemoteTarget(
   } catch {
     /* storage blocked: the key lives only as long as the fragment */
   }
-  return { code, hostKey, driverKey };
+  return driverKey ? { code, hostKey, driverKey } : { code, hostKey };
 }
 
 export function forgetHostKey(code: string, storage: Storage | null): void {

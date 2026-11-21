@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { driverKeyFromHash, readRemoteTarget, statusForClose } from '../../src/remote/connection';
 import { inFrame, learnSign, OneEuro, pedalStep, rawAngle, sliderSteer, steerFromAngle, TILT, wrap180 } from '../../src/remote/tilt';
 import { createPhoneLink, deliberate, failsafeGain, LINK, linkLevel, phaseOf, seqNewer, telFrame, type LinkOutput } from '../../src/features/phone-drive/link';
 
@@ -259,5 +260,30 @@ describe('touch controls and the input frame', () => {
     expect(inFrame(1, Number.NaN, 0, 0, 1).s).toBe(0);
     expect(Object.is(inFrame(1, 0, 0, 0, 1).s, -0)).toBe(false);
     expect(JSON.stringify(inFrame(0xfffffffe, -1, 1, 1, 7)).length).toBeLessThan(128);
+  });
+});
+
+describe('driver link on the phone', () => {
+  it('takes the key from #d=, keeps it per room in sessionStorage, and one role replaces the other', () => {
+    const m = new Map<string, string>();
+    const storage = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) } as unknown as Storage;
+    const d = 'D'.repeat(32);
+    const k = 'K'.repeat(32);
+    expect(driverKeyFromHash(`#d=${d}`)).toBe(d);
+    expect(driverKeyFromHash(`#k=${d}`)).toBeNull();
+    expect(driverKeyFromHash('#d=short')).toBeNull();
+    const loc = (hash: string) => ({ search: '?room=ab2cd', hash, pathname: '/remote' });
+    expect(readRemoteTarget(loc(`#k=${k}`), storage)).toEqual({ code: 'AB2CD', hostKey: k });
+    expect(readRemoteTarget(loc(`#d=${d}`), storage)).toEqual({ code: 'AB2CD', hostKey: null, driverKey: d });
+    expect(readRemoteTarget(loc(''), storage)).toEqual({ code: 'AB2CD', hostKey: null, driverKey: d }); // reload: still the driver
+    expect(m.has('sl-remote-host:AB2CD')).toBe(false);
+  });
+
+  it('4409 (another phone took the wheel) and 4401 are final; network closes reconnect', () => {
+    expect(statusForClose(4409)).toBe('replaced');
+    expect(statusForClose(4401)).toBe('denied');
+    expect(statusForClose(4404)).toBe('gone');
+    expect(statusForClose(1006)).toBeNull();
+    expect(statusForClose(1008)).toBeNull();
   });
 });
