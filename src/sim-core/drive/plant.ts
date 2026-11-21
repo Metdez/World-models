@@ -360,7 +360,9 @@ export function createPlant(core: CarCore, options: PlantOptions = {}): VehicleP
         track.sample(sw, ts);
         vc[i] = ts.z - swellA * dsin(swellK * sw);
       } else {
-        // off the corridor (the ground is a function of (x, y) alone since 09-04: no hint to keep current)
+        // off the corridor (the ground is a function of (x, y) alone since 09-04: the hint only has to stay finite
+        // for the state's finite check)
+        if (st[HINT + i] !== st[HINT + i]) st[HINT + i] = 0;
         h[i] = hit.h;
         vc[i] = 0;
       }
