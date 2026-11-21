@@ -95,8 +95,9 @@ test.describe('13-01 feature-off matrix', () => {
       // without `car` the coupe is not registered and the app runs the motorcycle: Auto only (MD-03), so no takeover
       const vehicle = await page.evaluate(() => globalThis.__app!.state().vehicleId);
       const available = (await page.evaluate(() => globalThis.__app!.drive())).available;
-      expect(available, `plant for ${vehicle}`).toBe(on('car'));
-      if (!on('car')) expect(vehicle).not.toBe('gt-coupe');
+      // (with no vehicle feature at all the kernel falls back to its built-in coupe, which has a plant)
+      expect(available, `plant for ${vehicle}`).toBe(vehicle === 'gt-coupe');
+      if (!on('car') && on('motorcycle')) expect(vehicle).not.toBe('gt-coupe');
       await page.keyboard.down('ArrowUp');
       if (on('drive') && available) {
         await expect.poll(() => mode(page), { timeout: 30_000 }).toBe('manual');
