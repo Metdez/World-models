@@ -138,7 +138,7 @@ function execute(c: FeatureContext, a: EngineerAction): void {
   const okCorner = (k: CornerId | 'all' | undefined): k is CornerId => k !== undefined && k !== 'all' && corners.includes(k);
   switch (a.tool) {
     case 'switch_suspension':
-      if (c.sim.current.vehicle.suspensions.includes(a.args.id)) c.store.setKey('suspensionId', a.args.id);
+      if (c.store.get().driveMode === 'auto' && c.sim.current.vehicle.suspensions.includes(a.args.id)) c.store.setKey('suspensionId', a.args.id);
       break;
     case 'set_view':
       c.store.setKey('view', a.args.view);
@@ -148,6 +148,7 @@ function execute(c: FeatureContext, a: EngineerAction): void {
       }
       break;
     case 'set_slow_motion':
+      if (c.store.get().driveMode === 'manual') break; // never slow the car under the driver's hands
       c.store.setKey('timeScale', Math.min(1, Math.max(0.1, a.args.scale)));
       break;
     case 'highlight_component':

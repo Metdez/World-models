@@ -278,7 +278,7 @@ describe('prompt and number check while driving', () => {
     expect(text.length).toBeLessThan(12_000);
   });
 
-  it('jump_to_section is not offered while driving and a model call to it is dropped', async () => {
+  it('while driving only set_view and highlight_component are offered; other model calls are dropped', async () => {
     let tools: { function: { name: string } }[] = [];
     const ai = {
       run: async (_m: string, inputs: { tools: typeof tools }) => {
@@ -287,7 +287,7 @@ describe('prompt and number check while driving', () => {
       },
     } as unknown as Ai;
     const res = await answer(req('Why did I spin?', S.liftoff), ai);
-    expect(tools.map((t) => t.function.name)).not.toContain('jump_to_section');
+    expect(tools.map((t) => t.function.name)).toEqual(['set_view', 'highlight_component']);
     expect(res.body.actions).toEqual([{ tool: 'set_view', args: { view: 'closeup', corner: 'rl' } }]);
     expect(res.body.source).toBe('model');
   });

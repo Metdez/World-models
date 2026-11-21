@@ -23,6 +23,8 @@ function idsFor(vehicleClass: 'car' | 'motorcycle'): ActionIds {
     : { suspensions: MOTO_SUSPENSIONS, sections: SECTION_IDS, corners: MOTO_CORNERS };
 }
 
+const DRIVE_TOOLS: ReadonlySet<string> = new Set(['set_view', 'highlight_component']);
+
 export type EngineerOutcome = 'model' | 'no-model' | 'model-error' | 'empty' | 'ungrounded';
 
 /** Pure post-processing of one request: model call (if any) -> clean text, validated actions, number check. */
@@ -35,8 +37,9 @@ export async function answer(req: EngineerRequest, ai: Ai | undefined): Promise<
   const fallback = (actions: EngineerAction[] = []): EngineerResponse => ({ text: ruleAnswer(req.question, section?.phenomenon, t), actions, source: 'fallback' });
   if (!ai) return { body: fallback(), outcome: 'no-model' };
   const ids = idsFor(t.vehicle_class);
-  // A seek (jump_to_section) is an Auto action; while driving it is not offered (the client skips it anyway).
-  const tools = buildEngineerTools(ids).filter((tool) => !driving || tool.function.name !== 'jump_to_section');
+  // While driving only the camera and the glow are offered: a seek, a suspension swap or slow motion would take the
+  // car out of the visitor's hands (live evaluation: unasked swaps and slow motion mid-drive). The client re-checks.
+  const tools = buildEngineerTools(ids).filter((tool) => !driving || DRIVE_TOOLS.has(tool.function.name));
   let run;
   try {
     run = await runEngineerModel(ai, buildMessages(req, section, station), tools);
@@ -45,7 +48,7 @@ export async function answer(req: EngineerRequest, ai: Ai | undefined): Promise<
   }
   const actions: EngineerAction[] = [];
   for (const call of run.reply.toolCalls) {
-    const a = driving && call.name === 'jump_to_section' ? null : parseAction(call.name, call.args, ids);
+    const a = driving && !DRIVE_TOOLS.has(call.name) ? null : parseAction(call.name, call.args, ids);
     if (a && actions.length < ENGINEER_MAX_ACTIONS && !actions.some((b) => JSON.stringify(b) === JSON.stringify(a))) actions.push(a);
   }
   const text = cleanText(run.reply.text);

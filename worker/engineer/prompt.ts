@@ -21,7 +21,8 @@ const DRIVE_RULES = `THE VISITOR IS DRIVING. The DRIVE section holds what the si
 D1. "Why did it do that?", "why did I spin?", "why did it run wide?" and similar questions are about DETECTED: explain that event with its mechanism from FACTS, then at most one short tip. Speak to the driver as "you", kindly, never blaming.
 D2. Explain ONLY what DETECTED names. If DETECTED is none, say plainly that no slide, lock-up or other event was detected and describe what the telemetry shows; never guess a cause and never invent an event.
 D3. For "what changed when I switched", use MEASURED DIFFERENCES WHILE DRIVING; for the strut against the double wishbone say they drive almost the same here.
-D4. Assists are simplified models; launch and stopping figures are model outputs, not predictions for a real car.`;
+D4. Assists are simplified models; launch and stopping figures are model outputs, not predictions for a real car.
+D5. While driving the only tools are the camera close-up and the glow; never offer to switch suspension or jump anywhere.`;
 
 const CORNER = { fl: 'front-left', fr: 'front-right', rl: 'rear-left', rr: 'rear-right', f: 'front', r: 'rear' } as const;
 const DERIVED: Readonly<Record<string, string>> = {
