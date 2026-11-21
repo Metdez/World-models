@@ -72,7 +72,7 @@ function literals(dirs: readonly string[]): string[] {
     }
   return out;
 }
-const HUD_SOURCES = ['src/features/drive', 'src/features/coach', 'src/features/replay', 'src/features/ghost-lab', 'src/features/phone-drive', 'src/features/tyre-vfx', 'src/features/proving-ground', 'src/features/engineer', 'src/remote', 'worker/engineer'];
+const HUD_SOURCES = ['src/features/audio', 'src/features/drive', 'src/features/coach', 'src/features/replay', 'src/features/ghost-lab', 'src/features/phone-drive', 'src/features/tyre-vfx', 'src/features/proving-ground', 'src/features/engineer', 'src/remote', 'worker/engineer'];
 
 const MOMENTS: DriveMoment[] = [
   { kind: 'slide', axle: 'front', lift: false },
@@ -125,6 +125,7 @@ describe('M2 copy (13-01): no digits, no rankings, models labelled', () => {
     for (const st of provingGround.stations.filter((x) => !x.suspension)) expect(st.caption).toMatch(/approximate surface grip/i);
     const sources = literals(['src/features/tyre-vfx']).join(' ') + readFileSync('src/features/tyre-vfx/index.ts', 'utf8');
     expect(sources).toMatch(/'model'/); // the grip-rings chip carries the "model" tag
+    expect(literals(['src/features/audio']).join(' ')).toMatch(/The tyre sound is a model cue/); // MD-45
   });
 });
 

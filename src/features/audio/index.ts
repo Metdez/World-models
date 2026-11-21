@@ -181,7 +181,8 @@ function init(c: FeatureContext): void {
   let solo: HTMLElement | null = null;
   const sync = () => {
     btn.setAttribute('aria-pressed', String(on));
-    btn.title = on ? 'Sound on (M)' : 'Sound off (M)';
+    // MD-45: the tyre sound is a model cue (it follows the model's grip use), not a recording of real tyres
+    btn.title = on ? 'Sound on (M). The tyre sound is a model cue: it rises as the tyres near their grip limit' : 'Sound off (M)';
     btn.innerHTML = on ? ICON_ON : ICON_OFF;
   };
   sync();
