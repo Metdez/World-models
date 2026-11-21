@@ -20,11 +20,13 @@ export const ANNEX_MATERIALS = ['asphalt', 'cobbles', 'wetAsphalt', 'wetTiles'] 
 export type AnnexMaterial = (typeof ANNEX_MATERIALS)[number];
 const SLOT: Readonly<Record<SurfaceKind, number>> = { asphalt: 0, kerb: 0, grass: 0, pave: 1, 'asphalt-wet': 2, 'ceramic-wet': 3 };
 
-/** Base grid spacing per tier, m, and the quad budget per zone (the dynamics pad gets a coarser grid at high). */
-export const ZONE_STEP = { low: 2, medium: 1.5, high: 1 } as const;
-const MAX_QUADS = 60_000;
-/** Ride street (class B roughness): base row spacing per tier, m; columns on the roughness rails (exact laterally). */
-const STREET_ROW = { low: 0.5, medium: 0.5, high: 0.25 } as const;
+/** Base grid spacing per tier, m, and the quad budget per zone (the dynamics pad gets a coarser grid). `far` is the
+ *  distant level of detail: no feature rows (a 3 cm bump is not visible from 100 m). */
+export const ZONE_STEP = { low: 2, medium: 1.5, high: 1, far: 4 } as const;
+const MAX_QUADS = 16_000;
+/** Ride street (class B roughness): base row spacing per tier, m; the high tier adds columns on the roughness rails
+ *  (exact laterally). */
+const STREET_ROW = { low: 0.5, medium: 0.5, high: 0.5, far: 4 } as const;
 const RAIL = 0.8;
 const EPS = 1e-6;
 /** Asphalt tint (x the texture) by the zone's role: large pads newer and lighter, patched platforms light, feature
@@ -35,10 +37,11 @@ function zoneTint(zone: CompiledZone): number {
   if (zone.def.patches?.length) return 1.2;
   return zone.length * zone.halfWidth * 2 > 20_000 ? 1.3 : 1.05;
 }
-const CONCRETE = [2.35, 2.3, 2.15] as const;
+/** Concrete sleepers and blocks (x the dark asphalt map: about a light concrete albedo). */
+const CONCRETE = [5.2, 5.0, 4.6] as const;
 const POTHOLE = 0.55;
 
-type Tier = keyof typeof ZONE_STEP;
+export type ZoneDetail = keyof typeof ZONE_STEP;
 
 const range = (a: number, b: number, step: number): number[] => {
   const n = Math.max(1, Math.ceil((b - a) / step - EPS));
@@ -61,7 +64,7 @@ interface Span {
 }
 
 /** Dense rows / columns of one closed-form feature (zone-local u, w). */
-function featureSpans(f: RoadFeature, halfWidth: number): Span[] {
+function featureSpans(f: RoadFeature, halfWidth: number, coarse: boolean): Span[] {
   switch (f.kind) {
     case 'cosine-bump': {
       const [l0, l1] = f.lateral;
@@ -81,9 +84,11 @@ function featureSpans(f: RoadFeature, halfWidth: number): Span[] {
       // Stones on a grid of f.stone from the feature start (u) and w = 0: rows and columns at the stone centres (each
       // stone's own height; the joints between them are in the cobbles texture: resolving them needs 3 rows per stone).
       const rows: number[] = [f.s, f.s + f.length];
-      for (let u = f.stone / 2; u < f.length; u += f.stone) rows.push(f.s + u);
+      // the low tier: every other stone (the cobbles texture carries the rest)
+      const k = coarse ? 2 : 1;
+      for (let u = f.stone / 2; u < f.length; u += k * f.stone) rows.push(f.s + u);
       const cols: number[] = [];
-      for (let j = Math.floor(-halfWidth / f.stone); (j + 0.5) * f.stone < halfWidth; j++) if ((j + 0.5) * f.stone > -halfWidth) cols.push((j + 0.5) * f.stone);
+      for (let j = Math.floor(-halfWidth / f.stone); (j + 0.5) * f.stone < halfWidth; j += k) if ((j + 0.5) * f.stone > -halfWidth) cols.push((j + 0.5) * f.stone);
       return [{ u0: f.s, u1: f.s + f.length, rows, cols }];
     }
     case 'kerb-strike':
@@ -98,7 +103,7 @@ export interface ZoneGrid {
 }
 
 /** Rows (u) and per-row columns (w) of a zone mesh at a tier. */
-export function zoneGrid(zone: CompiledZone, tier: Tier): ZoneGrid {
+export function zoneGrid(zone: CompiledZone, tier: ZoneDetail): ZoneGrid {
   const { length: L, halfWidth: hw } = zone;
   const E = ZONE_EDGE;
   const features = zone.def.features ?? [];
@@ -108,11 +113,12 @@ export function zoneGrid(zone: CompiledZone, tier: Tier): ZoneGrid {
   if (!street) step = Math.max(step, Math.sqrt(area / MAX_QUADS));
   const rowStep = street ? STREET_ROW[tier] : step;
 
-  const spans = features.flatMap((f) => featureSpans(f, hw));
+  const spans = tier === 'far' ? [] : features.flatMap((f) => featureSpans(f, hw, tier === 'low'));
   const rowValues = [-E, L + E, ...range(0, L, rowStep)].filter((u) => !spans.some((s) => u > s.u0 + EPS && u < s.u1 - EPS));
   for (const s of spans) rowValues.push(...s.rows);
   const baseCols = [-hw - E, hw + E, ...range(-hw, hw, step)];
-  if (street) baseCols.push(...range(-Math.floor(hw / RAIL) * RAIL, Math.floor(hw / RAIL) * RAIL, RAIL), -hw + E, hw - E);
+  if (street) baseCols.push(-hw + E, hw - E);
+  if (street && tier === 'high') baseCols.push(...range(-Math.floor(hw / RAIL) * RAIL, Math.floor(hw / RAIL) * RAIL, RAIL));
   for (const p of zone.def.patches ?? []) {
     rowValues.push(...p.u);
     baseCols.push(...p.w);
@@ -186,7 +192,7 @@ export interface ZoneMesh {
  * Builds the meshes of `zones` (all of the world's compiled zones in priority order are needed for ownership: pass them
  * as `all`) into ONE geometry whose groups follow ANNEX_MATERIALS. Three coordinates: (x, h, -y); uv = world (x, y) m.
  */
-export function buildZoneMesh(world: GroundWorld, all: readonly CompiledZone[], zones: readonly CompiledZone[], tier: Tier): ZoneMesh {
+export function buildZoneMesh(world: GroundWorld, all: readonly CompiledZone[], zones: readonly CompiledZone[], tier: ZoneDetail): ZoneMesh {
   const owner = createOwner(all);
   const hit: GroundHit = { h: 0, base: 0, surface: 'asphalt', zone: '', s: NaN, l: NaN };
   const p = { x: 0, y: 0 };

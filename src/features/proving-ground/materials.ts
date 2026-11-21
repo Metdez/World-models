@@ -28,12 +28,13 @@ const TILE = { asphalt: 3, cobbles: 1.1 } as const;
 const CERAMIC = { tile: 0.6, grout: 0.012 } as const;
 const WET_ALBEDO = 0.65;
 
-/** A far-scaled copy of the same map breaks the tiling over the open pads. */
+/** A far-scaled, blurred copy of the same map (relative to the map's mean) breaks the tiling over the open pads. */
 const BREAK_UP = /* glsl */ `
 #include <map_fragment>
 {
-  float b = dot(texture2D(map, vMapUv * 0.043 + 0.21).rgb, vec3(0.333));
-  diffuseColor.rgb *= 0.8 + 1.6 * (b - 0.12);
+  float mean = max(dot(texture2D(map, vec2(0.5), 12.0).rgb, vec3(0.333)), 1e-3);
+  float b = dot(texture2D(map, vMapUv * 0.037 + 0.21, 3.0).rgb, vec3(0.333));
+  diffuseColor.rgb *= clamp(1.0 + 0.8 * (b - mean) / mean, 0.82, 1.18);
 }
 `;
 
@@ -55,6 +56,16 @@ const TILES_FRAGMENT = /* glsl */ `
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.32, 0.33, 0.34), grout);
 }
 `;
+
+/** The water film reflects the sky at a fraction of the scene's environment intensity (a material's envMapIntensity
+ *  is overridden by scene.environmentIntensity when the scene environment is used): dark and glossy, not a mirror. */
+const WET_REFLECTION = 0.5;
+const dimReflection = (s: WebGLProgramParametersWithUniforms) => {
+  s.fragmentShader = s.fragmentShader.replace(
+    '#include <lights_fragment_end>',
+    `#include <lights_fragment_end>\nreflectedLight.indirectSpecular *= ${WET_REFLECTION.toFixed(2)};\nclearcoatSpecularIndirect *= ${WET_REFLECTION.toFixed(2)};`,
+  );
+};
 
 function tile(t: Texture, metres: number): void {
   t.wrapS = t.wrapT = RepeatWrapping;
@@ -82,11 +93,15 @@ export function createAnnexMaterials(tex: AnnexTextures): Record<AnnexMaterial, 
   const asphalt = patch(new MeshStandardMaterial({ map: tex.asphalt, normalMap: tex.asphaltNormal, roughness: 0.86, ...ground }), 'asphalt', breakUp);
   asphalt.normalScale.set(0.6, 0.6);
   const cobbles = new MeshStandardMaterial({ map: tex.cobbles, normalMap: tex.cobblesNormal, roughness: 0.8, color: new Color(0.55, 0.55, 0.57), ...ground });
-  const wet = { roughness: 0.15, clearcoat: 1, clearcoatRoughness: 0.08, ...ground } as const;
+  // a film of water: clearcoat 1, roughness 0.15 (§8.4), the sky's reflection dimmed (WET_REFLECTION)
+  const wet = { roughness: 0.15, clearcoat: 1, clearcoatRoughness: 0.1, ...ground } as const;
   const wetAsphalt = patch(
     new MeshPhysicalMaterial({ map: tex.asphalt, normalMap: tex.asphaltNormal, color: new Color(WET_ALBEDO, WET_ALBEDO, WET_ALBEDO), ...wet }),
     'wet-asphalt',
-    breakUp,
+    (sh) => {
+      breakUp(sh);
+      dimReflection(sh);
+    },
   );
   wetAsphalt.normalScale.set(0.35, 0.35);
   const basalt = 0.11 * WET_ALBEDO;
@@ -95,6 +110,7 @@ export function createAnnexMaterials(tex: AnnexTextures): Record<AnnexMaterial, 
       .replace('#include <common>', `#include <common>\n${TILES_VERTEX}`)
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWorldXY = (modelMatrix * vec4(transformed, 1.0)).xz * vec2(1.0, -1.0);');
     s.fragmentShader = s.fragmentShader.replace('#include <common>', `#include <common>\n${TILES_VERTEX}`).replace('#include <color_fragment>', TILES_FRAGMENT);
+    dimReflection(s);
   });
   return { asphalt, cobbles, wetAsphalt, wetTiles };
 }

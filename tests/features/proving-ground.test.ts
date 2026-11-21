@@ -5,13 +5,13 @@ import type { GroundHit, WorldDefinition } from '../../src/contracts/world';
 import feature, { annexChunks } from '../../src/features/proving-ground/index';
 import { annexMarkings, buildMarkings, MARK_LIFT } from '../../src/features/proving-ground/markings';
 import { coneGeometry } from '../../src/features/proving-ground/props';
-import { ANNEX_MATERIALS, buildZoneMesh, createOwner } from '../../src/features/proving-ground/surface';
+import { buildZoneMesh } from '../../src/features/proving-ground/surface';
 import { buildRibbon } from '../../src/features/track/ribbon';
 import { provingGround } from '../../src/sim-core/content/proving-ground';
 import { provingLoop } from '../../src/sim-core/content/proving-loop';
 import { buildTrack } from '../../src/sim-core/track/build';
 import { buildGroundWorld } from '../../src/sim-core/world/ground';
-import { compileZones, createZoneLocal, ZONE_EDGE } from '../../src/sim-core/world/zones';
+import { compileZones, createZoneLocal } from '../../src/sim-core/world/zones';
 
 const track = buildTrack(provingLoop);
 const world = buildGroundWorld(track, provingGround);
@@ -101,16 +101,17 @@ describe('zone meshes', () => {
     });
   }
 
-  it('high: between vertices the drawn zones match the GroundWorld (each zone, the ride-street features)', () => {
+  it('high: between vertices the drawn zones match the GroundWorld; each point is drawn once, with its surface material', () => {
     const report: string[] = [];
     const probes = meshes.high.chunks.map((c) => probe(c.geometry));
-    const loc = createZoneLocal();
     const p = { x: 0, y: 0 };
+    const slot = { asphalt: 0, kerb: 0, grass: 0, pave: 1, 'asphalt-wet': 2, 'ceramic-wet': 3 } as const;
     let seed = 7;
-    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    let twice = 0;
+    let points = 0;
     for (const z of zones) {
       let worst = 0;
-      let worstFeature = 0;
       const perKind: Record<string, number> = {};
       const features = z.def.features ?? [];
       for (let k = 0; k < 20_000; k++) {
@@ -118,47 +119,101 @@ describe('zone meshes', () => {
         const w = (rnd() * 2 - 1) * (z.halfWidth - 0.05);
         z.toWorld(u, w, p);
         const hs = probes.flatMap((pr) => pr(p.x, p.y));
+        points++;
         expect(hs.length).toBeGreaterThan(0); // no holes inside a footprint
-        const e = Math.max(...hs.map((q) => Math.abs(q.h - groundH(p.x, p.y))));
-        const on = features.find((f) => f.kind !== 'vertical-curve' && f.kind !== 'kerb-strike' && u >= f.s - 0.5 && u <= f.s + ('length' in f ? f.length : 0) + (f.kind === 'humps' ? 40 : 0) + 0.5);
-        if (on) {
-          worstFeature = Math.max(worstFeature, e);
-          perKind[on.kind] = Math.max(perKind[on.kind] ?? 0, e);
-        }
+        if (hs.length > 1) twice++;
+        world.sample(p.x, p.y, NaN, hit);
+        expect(hs[0]!.group).toBe(slot[hit.surface]);
+        const e = Math.max(...hs.map((q) => Math.abs(q.h - hit.h)));
+        const on = features.find((f) => f.kind !== 'vertical-curve' && f.kind !== 'kerb-strike' && u >= f.s - 0.5 && u <= f.s + ('length' in f ? f.length : 0) + (f.kind === 'humps' ? f.count * f.spacing : 0) + 0.5);
+        if (on) perKind[on.kind] = Math.max(perKind[on.kind] ?? 0, e);
         else worst = Math.max(worst, e);
-        z.local(p.x, p.y, loc);
       }
-      report.push(`${z.def.id} ${(worst * 1000).toFixed(1)} mm${features.length ? `, features ${(worstFeature * 1000).toFixed(1)} mm ${JSON.stringify(perKind)}` : ''}`);
+      report.push(`${z.def.id} ${(worst * 1000).toFixed(1)} mm${features.length ? ` (${Object.entries(perKind).map(([k, v]) => `${k} ${(v * 1000).toFixed(1)}`).join(', ')})` : ''}`);
+      expect(worst).toBeLessThan(0.008);
+      for (const [kind, e] of Object.entries(perKind)) expect(e).toBeLessThan(kind === 'pave' ? 0.02 : 0.005);
     }
-    console.log(`zone mesh vs GroundWorld between vertices (high): ${report.join('; ')}`);
+    console.log(`zone mesh vs GroundWorld between vertices (high), worst: ${report.join('; ')}`);
+    // points exactly on a shared triangle edge count twice; overlapping zone meshes would make it common
+    expect(twice / points).toBeLessThan(0.002);
+  });
+
+  it('the link roads cover the loop ribbon where they overlay it (no hole between the two meshes)', () => {
+    const ribbon = buildRibbon(track, 0.25, true, { world, zones });
+    const top = [probe(ribbon.geometry, 40), ...meshes.low.chunks.map((c) => probe(c.geometry))];
+    const loc = createZoneLocal();
+    const fr = { s: 0, l: 0, heading: 0, curvature: 0, converged: true };
+    const p = { x: 0, y: 0 };
+    let n = 0;
+    for (const z of zones.filter((q) => q.def.shape.kind === 'path'))
+      for (let u = -0.4; u < z.length; u += 0.37)
+        for (let w = -z.halfWidth - 0.4; w <= z.halfWidth + 0.4; w += 0.29) {
+          z.toWorld(u, w, p);
+          world.project(p.x, p.y, NaN, fr);
+          if (Math.abs(fr.l) > 18) continue;
+          n++;
+          const hs = top.flatMap((pr) => pr(p.x, p.y).map((q) => q.h));
+          expect(hs.length).toBeGreaterThan(0);
+          // inside the footprint only the link road draws
+          if (z.local(p.x, p.y, loc).inside > 0.05) expect(Math.max(...hs) - Math.min(...hs)).toBeLessThan(0.01);
+        }
+    expect(n).toBeGreaterThan(500);
   });
 });
 
 describe('budgets', () => {
-  it('prints per tier', () => {
+  it('draw calls and triangles per tier', () => {
+    const cones = provingGround.props.filter((p) => p.kind === 'cone').length;
+    const caps = { low: 100_000, medium: 160_000, high: 230_000 };
     for (const tier of TIERS) {
-      const tris = meshes[tier].chunks.reduce((n, c) => n + c.triangles, 0);
-      const verts = meshes[tier].chunks.reduce((n, c) => n + c.geometry.getAttribute('position').count, 0);
-      const draws = meshes[tier].chunks.reduce((n, c) => n + c.geometry.groups.length, 0);
-      console.log(`${tier}: zone triangles ${tris}, vertices ${verts}, ground draws ${draws}, build ${meshes[tier].ms.toFixed(0)} ms`);
+      const { chunks, ms } = meshes[tier];
+      const tris = chunks.reduce((n, c) => n + c.triangles, 0);
+      // ground groups + markings + cones (instanced) + signs; N8AO's prepass (high) draws each again, shadows the casters
+      const draws = chunks.reduce((n, c) => n + c.geometry.groups.length, 0) + 3;
+      const cone = coneGeometry().getAttribute('position').count / 3;
+      console.log(`${tier}: annex ${draws} draws per pass, ground ${tris} triangles + ${cones} cones x ${cone}, built in ${ms.toFixed(0)} ms`);
+      expect(draws * 2 + 2).toBeLessThanOrEqual(25);
+      expect(tris).toBeLessThan(caps[tier]);
+    }
+    // the distant level of detail (beyond each chunk's bounding sphere + 120 m)
+    const far = annexChunks(zones).map((c) => buildZoneMesh(world, zones, c, 'far'));
+    const farTris = far.reduce((n, c) => n + c.triangles, 0);
+    console.log(`far LOD: ${farTris} triangles`);
+    expect(farTris).toBeLessThan(25_000);
+    for (const { geometry } of far) {
+      const pos = geometry.getAttribute('position');
+      for (let i = 0; i < pos.count; i += 5) expect(Math.abs(pos.getY(i) - groundH(pos.getX(i), -pos.getZ(i)))).toBeLessThan(0.001);
     }
   });
 });
 
-describe('misc', () => {
-  it('markings, cones', () => {
+describe('markings and props', () => {
+  it('markings lie MARK_LIFT above the GroundWorld; the circle and every cone are painted', () => {
     const strips = annexMarkings(provingGround, zones);
     const g = buildMarkings(world, strips);
     const pos = g.getAttribute('position');
-    let worst = 0;
-    for (let i = 0; i < pos.count; i++) worst = Math.max(worst, Math.abs(pos.getY(i) - MARK_LIFT - groundH(pos.getX(i), -pos.getZ(i))));
-    console.log('markings', strips.length, 'strips', pos.count, 'verts', g.getIndex()!.count / 3, 'tris', 'worst', worst);
-    console.log('cone tris', coneGeometry().getAttribute('position').count / 3);
-    void createOwner;
-    void ANNEX_MATERIALS;
-    void ZONE_EDGE;
-    const t0 = performance.now();
-    const r = buildRibbon(track, 0.25, true, { world, zones });
-    console.log('ribbon cut ms', performance.now() - t0, r.geometry.getIndex()!.count / 3);
+    for (let i = 0; i < pos.count; i += 3) expect(Math.abs(pos.getY(i) - MARK_LIFT - groundH(pos.getX(i), -pos.getZ(i)))).toBeLessThan(1e-4);
+    const circle = provingGround.props.find((p) => p.kind === 'circle')!;
+    const onCircle = strips.filter((s) => s.points.every(([x, y]) => Math.abs(Math.hypot(x - circle.x, y - circle.y) - circle.radius) < 1e-6));
+    expect(onCircle.length).toBe(1);
+    // every slalom cone has its spot ring, every gate post pair a gate line
+    const cones = provingGround.props.filter((p) => p.kind === 'cone');
+    const near = (px: number, py: number, d: number) =>
+      strips.some((s) =>
+        s.points.some(([x0, y0], i) => {
+          const [x1, y1] = s.points[Math.min(i + 1, s.points.length - 1)]!;
+          const L2 = (x1 - x0) ** 2 + (y1 - y0) ** 2;
+          const t = L2 > 0 ? Math.max(0, Math.min(1, ((px - x0) * (x1 - x0) + (py - y0) * (y1 - y0)) / L2)) : 0;
+          return Math.hypot(px - x0 - t * (x1 - x0), py - y0 - t * (y1 - y0)) < d;
+        }),
+      );
+    for (const c of cones) expect(near(c.x, c.y, 0.5)).toBe(true);
+    // the braking lanes: a line at every lane edge of the wet patches
+    const bp = zones.find((z) => (z.def.patches?.length ?? 0) > 0 && !(z.def.features?.length ?? 0))!;
+    for (const w of [4.5, 0, -4.5, -9]) {
+      const p = { x: 0, y: 0 };
+      bp.toWorld(200, w, p);
+      expect(near(p.x, p.y, 0.01)).toBe(true);
+    }
   });
 });

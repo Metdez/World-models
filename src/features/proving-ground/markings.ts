@@ -96,11 +96,14 @@ export function annexMarkings(def: WorldDefinition, zones: readonly CompiledZone
     strips.push(...dashed(circle(p.x, p.y, p.radius - 2.5), 1.5, 1.5, 0.12, WHITE));
     strips.push(...dashed(circle(p.x, p.y, p.radius + 2.5), 1.5, 1.5, 0.12, WHITE));
   }
-  // Cones: two at the same x are a gate post pair (lane change), a lone cone is a slalom cone.
+  // Cones: two at the same x within a lane width of each other are a gate post pair (lane change), a lone cone is a
+  // slalom cone.
   const cones = def.props.filter((p) => p.kind === 'cone');
+  const partner = (c: (typeof cones)[number]) => cones.find((o) => o !== c && o.x === c.x && Math.abs(o.y - c.y) < 6);
+  const posts = cones.filter((c) => partner(c));
+  const slalom = cones.filter((c) => !partner(c));
   const byX = new Map<number, number[]>();
-  for (const c of cones) byX.set(c.x, [...(byX.get(c.x) ?? []), c.y]);
-  const slalom = cones.filter((c) => byX.get(c.x)!.length === 1);
+  for (const c of posts) byX.set(c.x, [...(byX.get(c.x) ?? []), c.y]);
   // Slalom: a spot ring round each cone, a dashed run-up line and a start bar.
   if (slalom.length) {
     for (const c of slalom) solid(circle(c.x, c.y, 0.45), 0.08);
@@ -110,7 +113,7 @@ export function annexMarkings(def: WorldDefinition, zones: readonly CompiledZone
     solid(line(x0 - 10, y - 2.5, x0 - 10, y + 2.5), 0.3);
   }
   // Lane change: gate sections of three post pairs (start, middle, end): edge lines along them, gates across.
-  const xs = [...byX.keys()].filter((x) => byX.get(x)!.length === 2).sort((a, b) => a - b);
+  const xs = [...byX.keys()].sort((a, b) => a - b);
   for (let i = 0; i + 2 < xs.length; i += 3) {
     const [lo, hi] = byX.get(xs[i]!)!.sort((a, b) => a - b) as [number, number];
     solid(line(xs[i]!, lo, xs[i + 2]!, lo), 0.1);
