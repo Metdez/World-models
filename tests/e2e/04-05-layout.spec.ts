@@ -33,7 +33,16 @@ const HUD = [
   '.sl-insights-caption',
   '.sl-teaching-overlays-trace',
   '.sl-debug-stats',
+  // drive (08-03, 09-05): the pill (lamps and Assists button inside it), its hint, the action row, the Assists popover
+  '.sl-drive-pill',
+  '.sl-drive-hint',
+  '#overlay > .sl-drive-action',
+  '.sl-drive-aids-panel',
 ];
+
+/** Deliberate stacking inside one feature: the Assists popover opens over the drive hint / action row above the pill. */
+const ALLOWED_OVERLAP = new Set(['.sl-drive-aids-panel|.sl-drive-hint', '.sl-drive-aids-panel|#overlay > .sl-drive-action']);
+const allowed = (a: string, b: string) => ALLOWED_OVERLAP.has(`${a}|${b}`) || ALLOWED_OVERLAP.has(`${b}|${a}`);
 
 interface Box {
   sel: string;
@@ -78,22 +87,33 @@ async function expectClean(page: Page, label: string, mustShow: readonly string[
       const b = list[j]!;
       const ix = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
       const iy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
-      if (ix > 0.5 && iy > 0.5) overlaps.push(`${a.sel} × ${b.sel} (${Math.round(ix)}×${Math.round(iy)} px)`);
+      if (ix > 0.5 && iy > 0.5 && !allowed(a.sel, b.sel)) overlaps.push(`${a.sel} × ${b.sel} (${Math.round(ix)}×${Math.round(iy)} px)`);
     }
   }
   expect.soft(overlaps, label).toEqual([]);
   return list;
 }
 
-/** Points on a grid outside every HUD box must hit the canvas (no invisible overlay child swallows input). */
+/**
+ * Points outside every HUD box must hit the canvas (no invisible overlay child swallows input). Probe columns and rows
+ * come from the measured boxes: a coarse grid plus the middle of every gap between consecutive box edges, so the
+ * probes follow the layout instead of fixed coordinates.
+ */
 async function expectCanvasReachable(page: Page, list: readonly Box[], label: string): Promise<void> {
   const blocked = await page.evaluate((hud) => {
     const out: string[] = [];
     const inside = (x: number, y: number) => hud.some((b) => x >= b.x - 2 && x <= b.x + b.w + 2 && y >= b.y - 2 && y <= b.y + b.h + 2);
-    for (let gx = 0.04; gx < 0.98; gx += 0.08) {
-      for (let gy = 0.04; gy < 0.98; gy += 0.08) {
-        const x = gx * innerWidth;
-        const y = gy * innerHeight;
+    const probes = (size: number, edges: number[]) => {
+      const e = [0, size, ...edges].map((v) => Math.min(size, Math.max(0, v))).sort((a, b) => a - b);
+      const at = new Set<number>();
+      for (let g = 0.04; g < 0.98; g += 0.08) at.add(Math.round(g * size));
+      for (let i = 1; i < e.length; i++) if (e[i]! - e[i - 1]! > 8) at.add(Math.round((e[i]! + e[i - 1]!) / 2));
+      return [...at];
+    };
+    const xs = probes(innerWidth, hud.flatMap((b) => [b.x, b.x + b.w]));
+    const ys = probes(innerHeight, hud.flatMap((b) => [b.y, b.y + b.h]));
+    for (const x of xs) {
+      for (const y of ys) {
         if (inside(x, y)) continue;
         const el = document.elementFromPoint(x, y);
         if (!(el instanceof HTMLCanvasElement) || !el.closest('#stage')) out.push(`${Math.round(x)},${Math.round(y)}: ${el?.className || el?.tagName}`);
@@ -155,6 +175,27 @@ test('desktop: follow, close-up and engineer-open layouts never overlap; the can
     await shot(page, `engineer-${tag}`);
     list = await expectClean(page, `engineer ${tag}`, ['.sl-engineer']);
     await expectCanvasReachable(page, list, `engineer ${tag}`);
+  }
+
+  // Manual Drive (08-03, 09-05): the driving pill with its Assists popover open keeps clear of every other HUD box.
+  if (await page.evaluate(() => globalThis.__app!.drive().available)) {
+    await set(page, 'view', 'follow');
+    await set(page, 'engineerOpen', false);
+    await page.keyboard.down('ArrowUp');
+    await expect.poll(() => page.evaluate(() => globalThis.__app!.state().driveMode)).toBe('manual');
+    for (const size of SIZES) {
+      await page.setViewportSize(size);
+      const tag = `${size.width}x${size.height}`;
+      const aids = page.locator('.sl-drive-aids-btn');
+      if ((await aids.getAttribute('aria-expanded')) !== 'true') await aids.click();
+      await expect(page.locator('.sl-drive-aids-panel')).toBeVisible();
+      await shot(page, `manual-aids-${tag}`);
+      const list = await expectClean(page, `manual aids ${tag}`, ['.sl-drive-pill', '.sl-drive-aids-panel', '.sl-telemetry-panel']);
+      await expectCanvasReachable(page, list, `manual aids ${tag}`);
+    }
+    await page.keyboard.up('ArrowUp');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => page.evaluate(() => globalThis.__app!.state().driveMode)).toBe('auto');
   }
 
   // Close-up keeps x-ray on: X is explained there instead of turning the body back on in front of the camera.

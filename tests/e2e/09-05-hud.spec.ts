@@ -1,7 +1,7 @@
 /**
  * 09-05 handling HUD (ARCHITECTURE-M2 §10.2, §10.5, §13): the Assists popover writes store.driveAids, aid lamps and the
  * Approximate badge follow frame.drive. Needs the Manual Drive plant; without it the tests are skipped, never faked.
- * The ABS lamp on a hard stop waits for 09-04 (the plant does not set absActive yet): test.fixme, not a pass.
+ * ABS lamp on a hard stop needs 09-04's aid wiring (plant sets absActive).
  */
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -116,13 +116,17 @@ test.describe('09-05 handling HUD', () => {
   });
 
   test('ABS lamp on a scripted hard stop', async ({ page }) => {
-    test.fixme(true, 'pending 09-04: the plant does not wire ABS or set absActive yet (stability lamp likewise)');
+    const errors = captureConsole(page);
     await waitForReady(page, BOOT);
+    test.skip(!(await drive(page)).available, 'Manual Drive plant not in this build');
     await takeOver(page);
     await intent(page, { throttle: 1 });
     await stepUntil(page, async () => (await drive(page)).speed > 25, 80, 0.25);
     await intent(page, { brake: 1 });
     expect(await stepUntil(page, () => lamp(page, 'abs').isVisible(), 40, 0.05)).toBe(true);
     await expect(lamp(page, 'abs')).toContainText('ABS');
+    await intent(page, null);
+    await page.keyboard.up('ArrowUp');
+    await expectHealthyBoot(page, errors);
   });
 });
