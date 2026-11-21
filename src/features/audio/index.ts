@@ -1,6 +1,9 @@
 /**
  * Audio (plan 07-03): engine loop pitched by speed and throttle (car / motorcycle loops crossfaded by vehicle
  * class), tyre noise from grip use, a thump on kerbs, bumps and bump-stop hits, a quiet tick on a suspension swap.
+ * While driving (11-02): the engine follows the powertrain's real engine speed and throttle, the tyre cue starts
+ * before the grip limit (SQUEAL_ONSET) as a warning, and a synthesised road-noise bed follows the wheels' travel rate
+ * with a cobble / kerb texture (in every mode). Not listened to by the author: tuned on paper and in unit tests only.
  * Muted by default; M or the HUD button toggles it and the choice is remembered. No AudioContext exists before a
  * user gesture, nothing is downloaded until sound is first switched on, and attract mode is silent unless this is
  * the presenter's screen. The WebAudio graph is built once; update() does not allocate.
@@ -8,7 +11,7 @@
 import type { Assets, FeatureContext, FeatureModule, FrameInfo } from '../../contracts/app';
 import type { VehicleClass } from '../../contracts/suspension';
 import { h, mount } from '../../ui/dom';
-import { engineTone, MASTER_GAIN, ramp, skidTone, THUMP_RATE, thumpGain, type Tone } from './mix';
+import { engineTone, engineToneDrive, MASTER_GAIN, ramp, skidTone, squealTone, surfaceTone, THUMP_RATE, thumpGain, tyreUse, type SurfaceTone, type Tone } from './mix';
 import './audio.css';
 
 const STORAGE_KEY = 'sl-audio';
@@ -29,12 +32,25 @@ interface Voice {
   readonly r: { v: number };
 }
 
+/** Road noise: looped white noise -> band-pass -> gain, the gain amplitude-modulated by a sine (texture). */
+interface Road {
+  readonly gain: GainNode;
+  readonly filter: BiquadFilterNode;
+  readonly osc: OscillatorNode;
+  readonly depth: GainNode;
+  readonly g: { v: number };
+  readonly f: { v: number };
+  readonly m: { v: number };
+  readonly d: { v: number };
+}
+
 interface Graph {
   readonly ac: AudioContext;
   readonly master: GainNode;
   readonly m: { v: number };
   readonly engines: Readonly<Record<VehicleClass, Voice>>;
   readonly skid: Voice;
+  readonly road: Road;
   readonly impact: AudioBuffer | null;
   readonly tick: AudioBuffer;
 }
@@ -89,7 +105,32 @@ async function buildGraph(ac: AudioContext, assets: Assets): Promise<Graph> {
     const t = i / ac.sampleRate;
     d[i] = Math.sin(2 * Math.PI * 1800 * t) * Math.exp(-t / 0.006) * Math.min(1, t / 0.001);
   }
-  return { ac, master, m: { v: 0 }, engines: { car: loop(car), motorcycle: loop(motorcycle) }, skid: loop(skid), impact, tick };
+  // Road noise bed: 2 s of white noise (synthesised once, no asset), looped; everything starts at gain 0 (no click).
+  const noise = ac.createBuffer(1, Math.round(ac.sampleRate * 2), ac.sampleRate);
+  const n = noise.getChannelData(0);
+  for (let i = 0; i < n.length; i++) n[i] = Math.random() * 2 - 1;
+  const roadGain = ac.createGain();
+  roadGain.gain.value = 0;
+  roadGain.connect(master);
+  const filter = ac.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.frequency.value = 110;
+  filter.Q.value = 0.9;
+  filter.connect(roadGain);
+  const noiseSrc = ac.createBufferSource();
+  noiseSrc.buffer = noise;
+  noiseSrc.loop = true;
+  noiseSrc.connect(filter);
+  noiseSrc.start();
+  const depth = ac.createGain();
+  depth.gain.value = 0;
+  depth.connect(roadGain.gain); // adds osc * depth to the bed's gain: the texture
+  const osc = ac.createOscillator();
+  osc.frequency.value = 20;
+  osc.connect(depth);
+  osc.start();
+  const road: Road = { gain: roadGain, filter, osc, depth, g: { v: 0 }, f: { v: 110 }, m: { v: 20 }, d: { v: 0 } };
+  return { ac, master, m: { v: 0 }, engines: { car: loop(car), motorcycle: loop(motorcycle) }, skid: loop(skid), road, impact, tick };
 }
 
 let frameHandler: ((frame: FrameInfo) => void) | undefined;
@@ -223,6 +264,7 @@ function init(c: FeatureContext): void {
   };
 
   const tone: Tone = { rate: 1, gain: 0 };
+  const road: SurfaceTone = { gain: 0, freq: 110, mod: 0, depth: 0 };
   const armed = new Uint8Array(8).fill(1);
   frameHandler = ({ t }) => {
     const g = graph;
@@ -232,7 +274,11 @@ function init(c: FeatureContext): void {
     ramp(g.master.gain, g.m, audible() ? MASTER_GAIN : 0, now);
     if (g.m.v === 0) return;
 
-    engineTone(tone, t.vehicleClass, t.speed, t.ax, s.timeScale, s.paused);
+    const d = t.drive;
+    const vehicle = c.sim.current.vehicle;
+    const pt = d.mode !== 'auto' && vehicle.class === 'car' ? vehicle.handling?.powertrain : undefined;
+    if (pt) engineToneDrive(tone, t.vehicleClass, d.engineRpm, pt.idleRpm, pt.redlineRpm, d.throttle, s.timeScale, s.paused);
+    else engineTone(tone, t.vehicleClass, t.speed, t.ax, s.timeScale, s.paused);
     for (let i = 0; i < CLASSES.length; i++) {
       const cls = CLASSES[i]!;
       const v = g.engines[cls];
@@ -242,18 +288,34 @@ function init(c: FeatureContext): void {
     }
 
     let grip = 0;
+    let use = 0;
+    let rough = 0;
+    let kerb = false;
+    let pave = false;
     for (let i = 0; i < t.corners.length; i++) {
       const corner = t.corners[i]!;
       if (corner.gripUse > grip) grip = corner.gripUse;
+      use = Math.max(use, tyreUse(corner.gripUse, corner.slipAngle, corner.slipRatio));
+      kerb ||= corner.surface === 'kerb';
+      pave ||= corner.surface === 'pave';
       const rate = Math.abs(corner.travelRate);
+      rough += rate / t.corners.length;
       if (armed[i] === 1 && rate > THUMP_RATE && !s.paused) {
         armed[i] = 0;
         thump(0, rate);
       } else if (rate < THUMP_RATE / 2) armed[i] = 1;
     }
-    skidTone(tone, grip, t.speed, s.paused);
+    if (pt) squealTone(tone, use, t.speed, s.paused);
+    else skidTone(tone, grip, t.speed, s.paused);
     ramp(g.skid.gain.gain, g.skid.g, tone.gain, now);
     if (g.skid.src) ramp(g.skid.src.playbackRate, g.skid.r, tone.rate, now);
+
+    surfaceTone(road, kerb ? 'kerb' : pave ? 'pave' : t.corners[0]?.surface ?? 'asphalt', rough, t.speed, s.paused);
+    const r = g.road;
+    ramp(r.gain.gain, r.g, road.gain * (1 - 0.5 * road.depth), now);
+    ramp(r.depth.gain, r.d, road.gain * 0.5 * road.depth, now);
+    ramp(r.filter.frequency, r.f, road.freq, now, 1);
+    if (road.mod > 0) ramp(r.osc.frequency, r.m, road.mod, now, 0.5);
   };
 
   c.addDisposer(() => {

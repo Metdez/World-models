@@ -9,6 +9,14 @@ import {
   RATE_MIN,
   SKID_GAIN_MAX,
   skidTone,
+  engineToneDrive,
+  squealTone,
+  SQUEAL_ONSET,
+  surfaceTone,
+  SURFACE_GAIN_MAX,
+  tyreUse,
+  PAVE_STONE,
+  type SurfaceTone,
   THUMP_GAIN_MAX,
   THUMP_RATE,
   thumpGain,
@@ -91,5 +99,84 @@ describe('audio mapping (sim state -> rates and gains)', () => {
       [0.2, 1.02, RAMP_TAU],
     ]);
     expect(RAMP_TAU).toBeGreaterThanOrEqual(0.02);
+  });
+});
+
+describe('audio while driving (11-02): real engine speed and load, tyre cue, road noise', () => {
+  const NUMS = [-1e9, -5, 0, 0.3, 0.75, 0.8, 1, 1.2, 900, 2200, 6500, 7000, 1e9, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
+  const surf = (): SurfaceTone => ({ gain: 0, freq: 0, mod: 0, depth: 0 });
+
+  it('engine from rpm and throttle: bounded and finite for any input, pitch follows the revs, gain follows the load', () => {
+    for (const cls of CLASSES)
+      for (const rpm of NUMS)
+        for (const thr of [-1, 0, 0.5, 1, 3, Number.NaN])
+          for (const [idle, red] of [[900, 7000], [7000, 900], [Number.NaN, 7000], [900, 900]] as const) {
+            const o = engineToneDrive(tone(), cls, rpm, idle, red, thr, 1, false);
+            expect(Number.isFinite(o.rate) && Number.isFinite(o.gain)).toBe(true);
+            expect(o.rate).toBeGreaterThanOrEqual(RATE_MIN);
+            expect(o.rate).toBeLessThanOrEqual(RATE_MAX);
+            expect(o.gain).toBeGreaterThanOrEqual(0);
+            expect(o.gain).toBeLessThanOrEqual(ENGINE_GAIN_MAX);
+          }
+    const at = (rpm: number, thr = 0.5) => engineToneDrive(tone(), 'car', rpm, 900, 7000, thr, 1, false);
+    expect(at(6000).rate).toBeGreaterThan(at(3000).rate);
+    expect(at(900).rate).toBeLessThan(at(1500).rate);
+    expect(at(3000, 1).gain).toBeGreaterThan(at(3000, 0).gain);
+    expect(engineToneDrive(tone(), 'car', 3000, 900, 7000, 1, 1, true).gain).toBe(0);
+    expect(engineToneDrive(tone(), 'car', 7000, 900, 7000, 1, 0.25, false).rate).toBeLessThan(at(7000).rate); // slow motion lowers it
+  });
+
+  it('tyre cue starts before the limit (onset 0.75), is full at the limit, silent at a standstill', () => {
+    expect(SQUEAL_ONSET).toBe(0.75);
+    expect(squealTone(tone(), 0.7, 20, false).gain).toBe(0);
+    expect(squealTone(tone(), 0.8, 20, false).gain).toBeGreaterThan(0);
+    expect(squealTone(tone(), 0.8, 20, false).gain).toBeLessThan(squealTone(tone(), 0.95, 20, false).gain);
+    expect(squealTone(tone(), 1, 20, false).gain).toBeCloseTo(SKID_GAIN_MAX, 9);
+    expect(squealTone(tone(), 1, 0.5, false).gain).toBe(0);
+    expect(squealTone(tone(), 1, 20, true).gain).toBe(0);
+    // earlier than the Auto skid noise (silent below 0.8)
+    expect(skidTone(tone(), 0.78, 20, false).gain).toBe(0);
+    expect(squealTone(tone(), 0.78, 20, false).gain).toBeGreaterThan(0);
+    for (const u of NUMS)
+      for (const v of NUMS) {
+        const o = squealTone(tone(), u, v, false);
+        expect(Number.isFinite(o.rate) && Number.isFinite(o.gain)).toBe(true);
+        expect(o.gain).toBeGreaterThanOrEqual(0);
+        expect(o.gain).toBeLessThanOrEqual(SKID_GAIN_MAX);
+        expect(o.rate).toBeGreaterThanOrEqual(RATE_MIN);
+        expect(o.rate).toBeLessThanOrEqual(RATE_MAX);
+      }
+  });
+
+  it('tyre use: the model grip use, and over the limit when the slip is clearly past the peak', () => {
+    expect(tyreUse(0.5, 0.01, 0.02)).toBe(0.5);
+    expect(tyreUse(0.88, 0.3, 0)).toBeGreaterThan(1); // sliding sideways: the model force has fallen a little
+    expect(tyreUse(0.9, 0, -0.6)).toBeGreaterThan(1); // locked
+    expect(tyreUse(Number.NaN, 0, 0)).toBe(0);
+    expect(tyreUse(5, 0, 0)).toBeLessThanOrEqual(1.2);
+  });
+
+  it('road noise: bounded and finite; level follows wheel travel rate; cobbles and kerbs add a texture at the stone rate', () => {
+    for (const surface of ['asphalt', 'asphalt-wet', 'kerb', 'pave', 'grass', 'ceramic-wet', 'unknown'])
+      for (const r of NUMS)
+        for (const v of NUMS) {
+          const o = surfaceTone(surf(), surface, r, v, false);
+          for (const x of [o.gain, o.freq, o.mod, o.depth]) expect(Number.isFinite(x)).toBe(true);
+          expect(o.gain).toBeGreaterThanOrEqual(0);
+          expect(o.gain).toBeLessThanOrEqual(SURFACE_GAIN_MAX);
+          expect(o.depth).toBeGreaterThanOrEqual(0);
+          expect(o.depth).toBeLessThanOrEqual(1);
+          expect(o.freq).toBeGreaterThan(20);
+          expect(o.mod).toBeGreaterThanOrEqual(0);
+          expect(o.mod).toBeLessThanOrEqual(80);
+        }
+    expect(surfaceTone(surf(), 'asphalt', 0.3, 15, false).gain).toBeGreaterThan(surfaceTone(surf(), 'asphalt', 0.02, 15, false).gain);
+    expect(surfaceTone(surf(), 'asphalt', 0.3, 0, false).gain).toBe(0);
+    expect(surfaceTone(surf(), 'asphalt', 0.3, 15, true).gain).toBe(0);
+    expect(surfaceTone(surf(), 'asphalt', 0.3, 15, false).depth).toBe(0);
+    const pave = surfaceTone(surf(), 'pave', 0, 6, false);
+    expect(pave.gain).toBeGreaterThan(0);
+    expect(pave.mod).toBeCloseTo(6 / PAVE_STONE, 9);
+    expect(surfaceTone(surf(), 'kerb', 0, 10, false).mod).toBeGreaterThan(surfaceTone(surf(), 'kerb', 0, 5, false).mod);
   });
 });

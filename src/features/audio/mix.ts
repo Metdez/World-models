@@ -96,3 +96,79 @@ export function ramp(param: RampParam, last: { v: number }, target: number, now:
   last.v = target;
   param.setTargetAtTime(target, now, RAMP_TAU);
 }
+
+// ---- Manual Drive (11-02; research m2/18 §2): real engine speed and load, a tyre cue before the limit, road texture
+
+/**
+ * Engine loop from the powertrain's real engine speed (rpm, idle..redline of the car's model powertrain) and the
+ * applied throttle (load): the pitch follows the revs, so shifts, launch and overrun are heard as they happen.
+ */
+export function engineToneDrive(out: Tone, cls: VehicleClass, rpm: number, idleRpm: number, redlineRpm: number, throttle: number, timeScale: number, paused: boolean): Tone {
+  const span = redlineRpm - idleRpm;
+  const revs = Number.isFinite(rpm) && span > 0 ? clamp((rpm - idleRpm) / span, 0, 1) : 0;
+  const [idle, red] = RATE[cls];
+  const slow = 0.5 + 0.5 * clamp(Number.isFinite(timeScale) ? timeScale : 1, 0, 1);
+  out.rate = clamp((idle + (red - idle) * revs) * slow, RATE_MIN, RATE_MAX);
+  const load = Number.isFinite(throttle) ? clamp(throttle, 0, 1) : 0;
+  out.gain = paused ? 0 : clamp(0.14 + 0.28 * load + 0.08 * revs, 0, ENGINE_GAIN_MAX);
+  return out;
+}
+
+/** Slip ratio and tan(slip angle) clearly past the tyre curve's peak (model estimates for the GT coupe: about 1.25x). */
+const PAST_PEAK_KAPPA = 0.2;
+const PAST_PEAK_ALPHA = 0.15;
+
+/**
+ * How close one tyre is to (or past) its limit, 0..~1.2, from the model's grip use. Past the peak the model's force
+ * falls a little while the tyre slides, so a slip clearly past the peak counts as over the limit.
+ */
+export function tyreUse(gripUse: number, slipAngle: number, slipRatio: number): number {
+  const g = Number.isFinite(gripUse) ? clamp(gripUse, 0, 1.2) : 0;
+  return Math.abs(slipRatio) > PAST_PEAK_KAPPA || Math.abs(slipAngle) > PAST_PEAK_ALPHA ? Math.max(g, 1.1) : g;
+}
+
+/** Squeal begins at this tyre use (a warning before the limit, research m2/18) and is full at the limit. */
+export const SQUEAL_ONSET = 0.75;
+
+/** Tyre cue while driving: silent below SQUEAL_ONSET, full at 1, pitch rising into the slide; gated by speed. */
+export function squealTone(out: Tone, use: number, speed: number, paused: boolean): Tone {
+  const u = Number.isFinite(use) ? use : 0;
+  const v = Number.isFinite(speed) ? Math.abs(speed) : 0;
+  out.rate = clamp(0.85 + 0.35 * smoothstep(SQUEAL_ONSET, 1.15, u), RATE_MIN, RATE_MAX);
+  out.gain = paused ? 0 : SKID_GAIN_MAX * smoothstep(SQUEAL_ONSET, 1, u) * smoothstep(2, 6, v);
+  return out;
+}
+
+export interface SurfaceTone {
+  /** Gain of the filtered noise bed. */
+  gain: number;
+  /** Band-pass centre, Hz. */
+  freq: number;
+  /** Texture (amplitude modulation) rate, Hz, and depth 0..1. */
+  mod: number;
+  depth: number;
+}
+
+export const SURFACE_GAIN_MAX = 0.22;
+/** Stone and kerb-stripe spacing the texture rate follows (m; the proving ground's cobbles are 0.12-0.15 m). */
+export const PAVE_STONE = 0.15;
+export const KERB_STRIPE = 0.5;
+const SURFACE_FREQ: Readonly<Record<string, number>> = { asphalt: 110, 'asphalt-wet': 900, kerb: 260, pave: 190, grass: 80, 'ceramic-wet': 1200 };
+/** Texture heard even on a smooth stretch of that surface (cobbles and kerbs always buzz). */
+const SURFACE_FLOOR: Readonly<Record<string, number>> = { kerb: 0.6, pave: 0.45, 'asphalt-wet': 0.25, 'ceramic-wet': 0.25 };
+
+/**
+ * Road noise: a band-passed noise bed whose level follows how hard the wheels work (mean |travel rate|, m/s — rough
+ * road, washboard and kerbs move them fast, and the frame-to-frame level carries the washboard's beat), coloured per
+ * surface; cobbles and kerbs add a texture at the rate the stones or stripes pass under the tyre.
+ */
+export function surfaceTone(out: SurfaceTone, surface: string, roughness: number, speed: number, paused: boolean): SurfaceTone {
+  const v = Number.isFinite(speed) ? Math.abs(speed) : 0;
+  const r = Number.isFinite(roughness) ? Math.abs(roughness) : 0;
+  const level = Math.max(clamp(r / 0.4, 0, 1), SURFACE_FLOOR[surface] ?? 0);
+  out.freq = SURFACE_FREQ[surface] ?? SURFACE_FREQ.asphalt!;
+  out.gain = paused ? 0 : SURFACE_GAIN_MAX * level * smoothstep(1, 5, v);
+  out.mod = surface === 'pave' ? clamp(v / PAVE_STONE, 0, 80) : surface === 'kerb' ? clamp(v / KERB_STRIPE, 0, 60) : 0;
+  out.depth = surface === 'pave' ? 0.6 : surface === 'kerb' ? 0.8 : 0;
+  return out;
+}
