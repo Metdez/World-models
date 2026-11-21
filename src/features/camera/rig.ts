@@ -9,8 +9,10 @@ import type { DirectorShot, ShotKind } from '../../contracts/services';
 import type { PathState, Simulation } from '../../contracts/sim';
 import type { ViewMode } from '../../contracts/store';
 import type { TelemetryFrame } from '../../contracts/telemetry';
+import type { GroundHit } from '../../contracts/world';
 import { RAD_TO_DEG, simQuatToThree, simToThree, type CornerId } from '../../contracts/units';
 import { clamp, damp, dampAngle, smootherstep, wrapAngle } from './damp';
+import { dampAngleRamp, dampRamp, MANUAL, manualHeading } from './manual';
 
 export interface Pose {
   readonly pos: Vector3;
@@ -91,9 +93,14 @@ export class CarFrame {
 
   set(path: PathState): void {
     simToThree(path.x, path.y, path.z, this.pos);
-    this.heading = path.heading;
+    this.setHeading(path.heading);
+  }
+
+  /** Origin (three coordinates, already in `pos`) and heading set directly (Manual Drive anchor). */
+  setHeading(heading: number): void {
+    this.heading = heading;
     // Sim heading is CCW from +X seen from above = rotation about three +Y.
-    this.quat.setFromAxisAngle(UP, path.heading);
+    this.quat.setFromAxisAngle(UP, heading);
     this.inv.copy(this.quat).invert();
   }
 
@@ -151,10 +158,14 @@ export class Chase {
   private readonly eye = new Vector3();
   private readonly aim = new Vector3();
   private readonly local = createPose();
+  /** Targets of the previous stepTo() (ramp smoothing); invalid after an auto step or a reset. */
+  private ramp = false;
+  private readonly prev = { heading: 0, dist: 0, height: 0, fov: 0 };
 
   /** Snap every channel to its target (after a seek or on first use). */
-  reset(frame: CarFrame, speed01: number): void {
-    this.heading = frame.heading;
+  reset(frame: CarFrame, speed01: number, heading = frame.heading): void {
+    this.ramp = false;
+    this.heading = heading;
     const f = this.framing;
     this.dist = f.dist[0] + (f.dist[1] - f.dist[0]) * speed01;
     this.height = f.height[0] + (f.height[1] - f.height[0]) * speed01;
@@ -164,6 +175,7 @@ export class Chase {
 
   /** Steps the damped channels by dt. `aheadLocal` is the look-ahead line point in the car frame. */
   step(dt: number, frame: CarFrame, speed01: number, aheadLocal: Vector3): void {
+    this.ramp = false;
     this.heading = dampAngle(this.heading, frame.heading, CHASE.headingLambda, dt);
     const lag = wrapAngle(this.heading - frame.heading);
     if (Math.abs(lag) > CHASE.maxHeadingLag) this.heading = frame.heading + Math.sign(lag) * CHASE.maxHeadingLag;
@@ -171,6 +183,42 @@ export class Chase {
     this.dist = damp(this.dist, f.dist[0] + (f.dist[1] - f.dist[0]) * speed01, CHASE.speedLambda, dt);
     this.height = damp(this.height, f.height[0] + (f.height[1] - f.height[0]) * speed01, CHASE.speedLambda, dt);
     this.fov = damp(this.fov, f.fov[0] + (f.fov[1] - f.fov[0]) * smootherstep(speed01), CHASE.speedLambda, dt);
+    const w = CHASE.aheadWeight;
+    const k = 1 - Math.exp(-CHASE.lookLambda * dt);
+    this.look.x += (aheadLocal.x * w - this.look.x) * k;
+    this.look.y += (f.aimY + aheadLocal.y * w - this.look.y) * k;
+    this.look.z += (aheadLocal.z * w - this.look.z) * k;
+  }
+
+  /**
+   * Outside auto: the same channels follow a predicted `target` heading (research m2/08) with ramp smoothing (no
+   * frame-rate dependent lag while the target moves) and a soft lag limit (the follow rate grows with the lag, so a
+   * spin never parks the camera beside the car and never hits a hard stop).
+   */
+  stepTo(dt: number, target: number, speed01: number, aheadLocal: Vector3): void {
+    const f = this.framing;
+    const dist = f.dist[0] + (f.dist[1] - f.dist[0]) * speed01;
+    const height = f.height[0] + (f.height[1] - f.height[0]) * speed01;
+    const fov = f.fov[0] + (f.fov[1] - f.fov[0]) * smootherstep(speed01);
+    const p = this.prev;
+    if (!this.ramp) {
+      p.heading = target;
+      p.dist = dist;
+      p.height = height;
+      p.fov = fov;
+      this.ramp = true;
+    }
+    const lag = wrapAngle(this.heading - p.heading) / MANUAL.softLag;
+    this.heading = dampAngleRamp(this.heading, p.heading, target, CHASE.headingLambda * (1 + lag * lag), dt);
+    const over = wrapAngle(this.heading - target);
+    if (Math.abs(over) > MANUAL.hardLag) this.heading = target + Math.sign(over) * MANUAL.hardLag;
+    this.dist = dampRamp(this.dist, p.dist, dist, CHASE.speedLambda, dt);
+    this.height = dampRamp(this.height, p.height, height, CHASE.speedLambda, dt);
+    this.fov = dampRamp(this.fov, p.fov, fov, CHASE.speedLambda, dt);
+    p.heading = target;
+    p.dist = dist;
+    p.height = height;
+    p.fov = fov;
     const w = CHASE.aheadWeight;
     const k = 1 - Math.exp(-CHASE.lookLambda * dt);
     this.look.x += (aheadLocal.x * w - this.look.x) * k;
@@ -291,6 +339,12 @@ export class CameraRig {
   fade = 0;
   /** Seconds the lap clock may jump before the chase snaps instead of swinging. */
   static readonly SNAP_S = 0.5;
+  /** Target provider weight: 0 = Auto (the M1 code path, untouched), 1 = Manual Drive; eased over MANUAL.blendS. */
+  mix = 0;
+  /** The last frame was outside auto (manual, returning, replay). */
+  driving = false;
+  /** Set by the owner from the store: mode switches cut (with the dip from black) instead of cross-fading. */
+  reducedMotion = false;
 
   private corners: CornerGeometry[] = [];
   private readonly path: PathState = { lapTime: 0, s: 0, l: 0, v: 0, ax: 0, ay: 0, curvature: 0, heading: 0, x: 0, y: 0, z: 0, bank: 0, grade: 0, sectionIndex: 0 };
@@ -318,6 +372,17 @@ export class CameraRig {
   private layoutFor = '';
   private lastLapTime = Number.NaN;
   private started = false;
+  private cutPending = false;
+  // Manual anchor: CG ground point (sim x, y) and the smoothed body height (raw = last frame's target).
+  private anchorValid = false;
+  private anchorX = 0;
+  private anchorY = 0;
+  private zRaw = 0;
+  private zSmooth = 0;
+  private readonly anchor = new Vector3();
+  private readonly anchorAhead = new Vector3();
+  private readonly pathPos = new Vector3();
+  private readonly ground: GroundHit = { h: 0, base: 0, surface: 'asphalt', zone: '', s: 0, l: 0 };
 
   constructor(
     private readonly sim: () => Simulation,
@@ -333,6 +398,11 @@ export class CameraRig {
     this.shotScale = bike ? BIKE_SHOT_SCALE : 1;
   }
 
+  /** Discontinuous car pose (reset, teleport, immediate release): the next update snaps instead of swinging. */
+  cut(): void {
+    this.cutPending = true;
+  }
+
   get transitioning(): boolean {
     return this.blend < 1;
   }
@@ -346,6 +416,8 @@ export class CameraRig {
   }
 
   playShot(shot: DirectorShot, instant: boolean): void {
+    // Director shots are refused outside auto (ARCHITECTURE-M2 §10.3).
+    if (this.driving) return;
     this.cuts = instant;
     this.shot = {
       kind: shot.kind,
@@ -371,18 +443,34 @@ export class CameraRig {
   /** Advance one render frame. `reducedMotion` turns blends into cuts (callers pass `instant`). */
   update(dt: number, t: TelemetryFrame): Pose {
     const sim = this.sim();
-    sim.stateAt(t.lapTime, this.path);
-    this.frame.set(this.path);
-    const speed01 = clamp(this.path.v / sim.vehicle.limits.vMax, 0, 1);
-    sim.stateAt(t.lapTime + CHASE.aheadS, this.ahead);
-    simToThree(this.ahead.x, this.ahead.y, this.ahead.z, this.aheadWorld);
-    this.frame.pointToLocal(this.aheadWorld, this.aheadLocal);
-    const d = sim.lapDuration;
-    const step = t.lapTime - this.lastLapTime;
-    const jumped = !this.started || !(Math.abs(step - d * Math.round(step / d)) <= CameraRig.SNAP_S);
+    this.driving = t.drive.mode !== 'auto';
+    // Director shots are an Auto feature: one still playing when the visitor takes the wheel glides back to the chase.
+    if (this.driving && this.shot) this.clearShot(this.cuts);
+    const goal = this.driving ? 1 : 0;
+    if (this.mix !== goal) {
+      if (!this.started || this.cutPending) this.mix = goal;
+      else if (this.reducedMotion) {
+        this.mix = goal;
+        this.cutPending = true;
+        this.fade = 1;
+      } else this.mix = goal > this.mix ? Math.min(1, this.mix + dt / MANUAL.blendS) : Math.max(0, this.mix - dt / MANUAL.blendS);
+    }
+    if (this.mix === 0) {
+      this.anchorValid = false;
+      sim.stateAt(t.lapTime, this.path);
+      this.frame.set(this.path);
+      const speed01 = clamp(this.path.v / sim.vehicle.limits.vMax, 0, 1);
+      sim.stateAt(t.lapTime + CHASE.aheadS, this.ahead);
+      simToThree(this.ahead.x, this.ahead.y, this.ahead.z, this.aheadWorld);
+      this.frame.pointToLocal(this.aheadWorld, this.aheadLocal);
+      const d = sim.lapDuration;
+      const step = t.lapTime - this.lastLapTime;
+      const jumped = !this.started || !(Math.abs(step - d * Math.round(step / d)) <= CameraRig.SNAP_S);
+      if (jumped || this.cutPending || !Number.isFinite(this.chase.heading)) this.chase.reset(this.frame, speed01);
+      else this.chase.step(dt, this.frame, speed01, this.aheadLocal);
+    } else this.driven(dt, t, sim);
     this.lastLapTime = t.lapTime;
-    if (jumped || !Number.isFinite(this.chase.heading)) this.chase.reset(this.frame, speed01);
-    else this.chase.step(dt, this.frame, speed01, this.aheadLocal);
+    this.cutPending = false;
     if (this.corners.length !== t.corners.length || this.layoutFor !== sim.suspension.id) this.layout(t);
 
     if (this.shot) {
@@ -451,9 +539,66 @@ export class CameraRig {
     if (fov !== undefined) out.fov = fov;
   }
 
+  /**
+   * Outside auto (or blending to/from it): the car frame and the chase target cross-fade from the driving-line point
+   * (Auto provider) to the driven car (Manual provider) with weight smootherstep(mix). Rig state is never reset by a
+   * mode change; only a cut (or an anchor jump > MANUAL.cutJumpM) snaps it.
+   */
+  private driven(dt: number, t: TelemetryFrame, sim: Simulation): void {
+    const d = t.drive;
+    const vMax = sim.vehicle.limits.vMax;
+    let snap = !this.started || this.cutPending || !Number.isFinite(this.chase.heading);
+    if (this.anchorValid && Math.hypot(d.x - this.anchorX, d.y - this.anchorY) > MANUAL.cutJumpM) snap = true;
+    const z = t.bodyPosition.z;
+    this.zSmooth = this.anchorValid && !snap ? dampRamp(this.zSmooth, this.zRaw, z, MANUAL.zLambda, dt) : z;
+    this.zRaw = z;
+    this.anchorX = d.x;
+    this.anchorY = d.y;
+    this.anchorValid = true;
+
+    const wheelbase = t.wheelbase > 0 ? t.wheelbase : sim.vehicle.wheelbase;
+    const target = manualHeading(d, t.yawRate, t.steer, wheelbase);
+    const reach = (MANUAL.aheadM * wheelbase) / MANUAL.refWheelbase;
+    simToThree(d.x, d.y, this.zSmooth, this.anchor);
+    // Sim heading h points along three (cos h, 0, -sin h).
+    this.anchorAhead.set(this.anchor.x + reach * Math.cos(target), this.anchor.y, this.anchor.z - reach * Math.sin(target));
+    let heading = d.yaw;
+    let aim = target;
+    let speed01 = clamp(Math.abs(d.u) / vMax, 0, 1);
+    const e = smootherstep(this.mix);
+    if (e < 1) {
+      sim.stateAt(t.lapTime, this.path);
+      sim.stateAt(t.lapTime + CHASE.aheadS, this.ahead);
+      simToThree(this.path.x, this.path.y, this.path.z, this.pathPos);
+      simToThree(this.ahead.x, this.ahead.y, this.ahead.z, this.aheadWorld);
+      this.anchor.lerpVectors(this.pathPos, this.anchor, e);
+      this.anchorAhead.lerpVectors(this.aheadWorld, this.anchorAhead, e);
+      heading = this.path.heading + wrapAngle(d.yaw - this.path.heading) * e;
+      aim = this.path.heading + wrapAngle(target - this.path.heading) * e;
+      speed01 += (clamp(this.path.v / vMax, 0, 1) - speed01) * (1 - e);
+    }
+    this.frame.pos.copy(this.anchor);
+    this.frame.setHeading(heading);
+    this.frame.pointToLocal(this.anchorAhead, this.aheadLocal);
+    if (snap) this.chase.reset(this.frame, speed01, aim);
+    else this.chase.stepTo(dt, aim, speed01, this.aheadLocal);
+  }
+
   private chasePose(sim: Simulation, out: Pose): void {
     const track = sim.track;
-    const minY = track.roadHeight(this.path.s - this.chase.dist, this.path.l) + CHASE.clearance;
+    if (this.mix === 0) {
+      const minY = track.roadHeight(this.path.s - this.chase.dist, this.path.l) + CHASE.clearance;
+      this.chase.pose(this.frame, minY, out);
+      return;
+    }
+    // Ground under the eye (three x, -z = sim x, y); without a world (test fakes) the anchor height.
+    const h = this.chase.heading;
+    const ex = this.frame.pos.x - this.chase.dist * Math.cos(h);
+    const ey = -(this.frame.pos.z + this.chase.dist * Math.sin(h));
+    const world = sim.world;
+    let minY = (world ? world.sample(ex, ey, Number.NaN, this.ground).h : this.frame.pos.y) + MANUAL.clearance;
+    const e = smootherstep(this.mix);
+    if (e < 1) minY += (track.roadHeight(this.path.s - this.chase.dist, this.path.l) + CHASE.clearance - minY) * (1 - e);
     this.chase.pose(this.frame, minY, out);
   }
 

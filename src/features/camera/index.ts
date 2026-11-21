@@ -14,7 +14,8 @@ let frameHandler: ((frame: FrameInfo) => void) | undefined;
 
 /**
  * Poses the renderer's camera (RENDER.camera) every frame: follow / explore / closeup from store.view, director
- * shots from the CAMERA service, smooth blends (fade-cuts under reduced motion).
+ * shots from the CAMERA service, smooth blends (fade-cuts under reduced motion). Outside auto the chase follows the
+ * driven car (manual.ts); director shots are refused there.
  */
 export default {
   id: 'camera',
@@ -109,6 +110,13 @@ export default {
       else if (ctx.store.get().view === 'closeup') ctx.store.setKey('view', 'follow');
     });
     ctx.on('user:activity', () => rig.clearShot(instant()));
+    // Manual Drive: discontinuous car poses snap the chase instead of swinging it (ARCHITECTURE-M2 §10.3).
+    ctx.on('drive:mode', ({ cut }) => {
+      if (cut) rig.cut();
+    });
+    ctx.on('drive:event', (e) => {
+      if (e.kind === 'reset') rig.cut();
+    });
     ctx.on('sim:vehicle', () => {
       rig.layout(ctx.sim.frame);
       zoomRange();
@@ -130,6 +138,7 @@ export default {
     let shownFade = 0;
 
     frameHandler = ({ dt, t }) => {
+      rig.reducedMotion = instant();
       const pose = rig.update(dt, t);
       camera.position.copy(pose.pos);
       camera.quaternion.copy(pose.quat);
