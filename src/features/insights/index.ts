@@ -3,8 +3,8 @@
  * and simulation events (rules.ts), at most one per 8 s, 6 s visible, announced politely to screen readers and
  * on the bus (`insight:shown`). On a suspension swap, after 1 s of settling, a delta chip compares the previous
  * suspension with the new one at the same place on the lap (lap-record.ts). Silent during attract mode.
- * While the visitor drives there is no shared line: the swap caption says the comparison is made in Auto, with no
- * numbers, and section captions wait until the car is on the loop corridor (rules.ts onSection).
+ * Quiet outside Auto (11-02): while the visitor drives the coach feature explains the driven car instead; a caption on
+ * screen leaves on the takeover and a swap made while driving gets no delta (the coach acknowledges it).
  */
 import type { FeatureContext, FeatureModule, FrameInfo } from '../../contracts/app';
 import type { TelemetryFrame } from '../../contracts/telemetry';
@@ -85,10 +85,6 @@ function showDelta(s: State, t: TelemetryFrame, swap: Swap): boolean {
   const c = s.ctx;
   const p = phenomenonAt(c, t.sectionIndex);
   const pair = `${suspensionLabel(c, swap.previous)} → ${suspensionLabel(c, c.sim.current.suspension.id)}`;
-  if (t.drive.mode !== 'auto') {
-    present(s, 'delta', pair, [h('span', { class: 'sl-insights-chip-label' }, 'Compared in Auto')], false);
-    return true;
-  }
   const d = computeDelta(s.rec, swap.previous, t, p, swap.section === t.sectionIndex ? swap.s : null);
   if (!d) return false;
   const f = formatDelta(d, d.corner < 0 ? '' : t.corners[d.corner]!.id.toUpperCase());
@@ -160,7 +156,13 @@ const insights: FeatureModule = {
       s.lastSimTime = Number.NEGATIVE_INFINITY;
       if (s.swap) s.swap.section = -1; // the before-swap position is no longer "just before"
     });
-    c.on('drive:mode', () => {
+    c.on('drive:mode', ({ mode }) => {
+      if (mode !== 'auto') {
+        s.caption.hidden = true;
+        s.hideAt = Number.POSITIVE_INFINITY;
+        s.live = null;
+        s.swap = null;
+      }
       s.rec.break();
       s.engine.resetSection();
       if (s.swap) s.swap.section = -1; // a fallback "just before the swap" spot is no longer on the same run
@@ -202,6 +204,10 @@ const insights: FeatureModule = {
     if (t.sectionIndex !== s.section) {
       s.section = t.sectionIndex;
       s.engine.resetSection();
+    }
+    if (t.drive.mode !== 'auto') {
+      s.swap = null;
+      return;
     }
     if (s.swap && t.simTime - s.swap.at >= SETTLE_S) {
       const swap = s.swap;

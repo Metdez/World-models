@@ -130,19 +130,24 @@ describe('InsightEngine', () => {
 });
 
 describe('while driving (Manual)', () => {
-  it('section captions only on the loop corridor; event captions (the car itself) always', () => {
+  it('quiet outside Auto: no section captions anywhere and no event captions (the coach explains the driven car)', () => {
     const e = new InsightEngine();
     const t = frame(CAR, { ay: lat(0.6), roll: 0.02 });
-    t.drive.mode = 'manual';
-    t.drive.zone = 'terrain';
-    expect(onSection(t)).toBe(false);
-    for (let k = 0; k <= 20; k++) expect(e.tick(t, 'steady-state-roll', k * 0.1)).toBeNull();
-    t.drive.zone = 'loop';
+    for (const mode of ['manual', 'returning', 'replay'] as const) {
+      t.drive.mode = mode;
+      for (const zone of ['loop', 'terrain', 'dynamics-pad']) {
+        t.drive.zone = zone;
+        expect(onSection(t)).toBe(false);
+        for (let k = 0; k <= 30; k++) expect(e.tick(t, 'steady-state-roll', k * 0.1)).toBeNull();
+        expect(e.event({ kind: 'liftoff', corner: 1 } as never, t, 100)).toBeNull();
+        expect(e.event({ kind: 'bump-stop', corner: 0 } as never, t, 200)).toBeNull();
+      }
+    }
+    t.drive.mode = 'auto';
     expect(onSection(t)).toBe(true);
-    expect(e.tick(t, 'steady-state-roll', 2.1)).toBeNull(); // sustain restarts on the corridor
-    expect(e.tick(t, 'steady-state-roll', 2.8)?.id).toBe('roll');
-    t.drive.zone = 'terrain';
-    expect(e.event({ kind: 'liftoff', corner: 1 } as never, t, 2.8 + MIN_GAP_S)?.id).toBe('liftoff');
+    expect(e.tick(t, 'steady-state-roll', 10)).toBeNull(); // sustain restarts in Auto
+    expect(e.tick(t, 'steady-state-roll', 10.7)?.id).toBe('roll');
+    expect(e.event({ kind: 'liftoff', corner: 1 } as never, t, 10.7 + MIN_GAP_S)?.id).toBe('liftoff');
   });
 
   it('no same-place delta and no lap record from a driven car', () => {

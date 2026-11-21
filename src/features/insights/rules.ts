@@ -246,12 +246,11 @@ export function compose(rule: Rule, t: TelemetryFrame, corner: number): Insight 
 }
 
 /**
- * Section rules speak only where the section's phenomenon applies: always in Auto, and while driving only on the loop
- * corridor (signals still gate every caption, so a driven corner reads true; off the road no section applies).
- * Event rules (a wheel going light, the grip limit, a bump stop) describe the car itself and always apply.
+ * Insights speak in Auto only (11-02): while the visitor drives (or a run replays) there is no shared line and the coach
+ * explains the driven car's moments instead, so the two never talk over each other.
  */
 export function onSection(t: TelemetryFrame): boolean {
-  return t.drive.mode === 'auto' || t.drive.zone === 'loop';
+  return t.drive.mode === 'auto';
 }
 
 /** Minimum time between two captions, s. */
@@ -302,7 +301,7 @@ export class InsightEngine {
 
   tick(t: TelemetryFrame, phenomenon: Phenomenon | undefined, now: number): Insight | null {
     if (!onSection(t)) {
-      // Driven off the loop corridor: the section (and its phenomenon) is not where the car is.
+      // Driving: the coach speaks; sustain timers restart when the lap resumes.
       this.resetSection();
       return null;
     }
@@ -336,7 +335,7 @@ export class InsightEngine {
   }
 
   event(e: SimEvent, t: TelemetryFrame, now: number): Insight | null {
-    if (!('corner' in e)) return null;
+    if (!('corner' in e) || !onSection(t)) return null;
     for (let i = 0; i < this.rules.length; i++) {
       const r = this.rules[i]!;
       if (r.event === e.kind && this.ready(i, now)) return this.fire(i, t, e.corner, now);
