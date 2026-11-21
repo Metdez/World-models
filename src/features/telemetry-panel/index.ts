@@ -1,7 +1,8 @@
 /**
  * Telemetry card (plan 04-03, research 14 B1/D5): g-g with trail, per-corner camber arc + travel bar + load
  * square laid out like the car seen from above, and one sparkline (Camber | Travel | Load) for a chosen corner
- * with the previous suspension's trace at the same track positions as a dashed ghost. TRUE values only;
+ * with the previous suspension's trace at the same track positions as a dashed ghost (Auto only: a driven car is off
+ * the shared line, so its samples have no ghost and the legend says so). TRUE values only;
  * draws at <= 30 Hz of simulation time, numbers at half that and only when their displayed digits change.
  */
 import type { FeatureContext, FeatureModule, FrameInfo } from '../../contracts/app';
@@ -76,6 +77,9 @@ interface State {
   readonly liveLegend: HTMLElement;
   readonly ghostLegend: HTMLElement;
   readonly ghostName: HTMLElement;
+  /** " · Auto only" after the ghost's name while the visitor drives (no shared line, so no ghost). */
+  readonly ghostNote: HTMLElement;
+  driving: boolean;
   readonly trail: GgTrail;
   readonly scale: SparkScale;
   palette: Palette;
@@ -240,7 +244,8 @@ const telemetryPanel: FeatureModule = {
     );
     const liveLegend = h('span', { class: 'sl-telemetry-panel-legend is-live' });
     const ghostName = h('span');
-    const ghostLegend = h('span', { class: 'sl-telemetry-panel-legend is-ghost', hidden: true }, ghostName);
+    const ghostNote = h('span', { hidden: true }, ' · Auto only');
+    const ghostLegend = h('span', { class: 'sl-telemetry-panel-legend is-ghost', hidden: true }, ghostName, ghostNote);
     const root = h(
       'section',
       { class: 'sl-telemetry-panel', 'aria-label': 'Telemetry' },
@@ -285,6 +290,8 @@ const telemetryPanel: FeatureModule = {
       liveLegend,
       ghostLegend,
       ghostName,
+      ghostNote,
+      driving: false,
       trail: new GgTrail(TRAIL),
       scale: { lo: 0, hi: 0 },
       palette: readPalette(root),
@@ -331,6 +338,11 @@ const telemetryPanel: FeatureModule = {
     if (t.simTime - s.lastSimTime < SAMPLE_DT - 1e-9) return;
     s.lastSimTime = t.simTime;
     s.history.push(t);
+    const driving = t.drive.mode !== 'auto';
+    if (driving !== s.driving) {
+      s.driving = driving;
+      s.ghostNote.hidden = !driving;
+    }
     s.trail.push(gUnits(t.ay), gUnits(t.ax));
     if (s.root.hidden) return; // keep recording (the ghost needs the lap), skip the drawing
     draw(s);

@@ -245,6 +245,15 @@ export function compose(rule: Rule, t: TelemetryFrame, corner: number): Insight 
   return { id: rule.id, rule, corner, text: fill(rule.text, t, corner), chip: rule.chip ? fill(rule.chip, t, corner) : '', warn: rule.warn ?? false };
 }
 
+/**
+ * Section rules speak only where the section's phenomenon applies: always in Auto, and while driving only on the loop
+ * corridor (signals still gate every caption, so a driven corner reads true; off the road no section applies).
+ * Event rules (a wheel going light, the grip limit, a bump stop) describe the car itself and always apply.
+ */
+export function onSection(t: TelemetryFrame): boolean {
+  return t.drive.mode === 'auto' || t.drive.zone === 'loop';
+}
+
 /** Minimum time between two captions, s. */
 export const MIN_GAP_S = 8;
 /** Minimum time before the same rule speaks again, s. */
@@ -292,6 +301,11 @@ export class InsightEngine {
   }
 
   tick(t: TelemetryFrame, phenomenon: Phenomenon | undefined, now: number): Insight | null {
+    if (!onSection(t)) {
+      // Driven off the loop corridor: the section (and its phenomenon) is not where the car is.
+      this.resetSection();
+      return null;
+    }
     let out: Insight | null = null;
     for (let i = 0; i < this.rules.length; i++) {
       const r = this.rules[i]!;

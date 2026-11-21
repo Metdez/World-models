@@ -3,6 +3,8 @@
  * and simulation events (rules.ts), at most one per 8 s, 6 s visible, announced politely to screen readers and
  * on the bus (`insight:shown`). On a suspension swap, after 1 s of settling, a delta chip compares the previous
  * suspension with the new one at the same place on the lap (lap-record.ts). Silent during attract mode.
+ * While the visitor drives there is no shared line: the swap caption says the comparison is made in Auto, with no
+ * numbers, and section captions wait until the car is on the loop corridor (rules.ts onSection).
  */
 import type { FeatureContext, FeatureModule, FrameInfo } from '../../contracts/app';
 import type { TelemetryFrame } from '../../contracts/telemetry';
@@ -82,13 +84,18 @@ function suspensionLabel(c: FeatureContext, id: string): string {
 function showDelta(s: State, t: TelemetryFrame, swap: Swap): boolean {
   const c = s.ctx;
   const p = phenomenonAt(c, t.sectionIndex);
+  const pair = `${suspensionLabel(c, swap.previous)} → ${suspensionLabel(c, c.sim.current.suspension.id)}`;
+  if (t.drive.mode !== 'auto') {
+    present(s, 'delta', pair, [h('span', { class: 'sl-insights-chip-label' }, 'Compared in Auto')], false);
+    return true;
+  }
   const d = computeDelta(s.rec, swap.previous, t, p, swap.section === t.sectionIndex ? swap.s : null);
   if (!d) return false;
   const f = formatDelta(d, d.corner < 0 ? '' : t.corners[d.corner]!.id.toUpperCase());
   present(
     s,
     'delta',
-    `${suspensionLabel(c, swap.previous)} → ${suspensionLabel(c, c.sim.current.suspension.id)}`,
+    pair,
     [
       h('span', { class: 'sl-insights-chip-label' }, f.label),
       h('span', { class: 'sl-insights-before' }, f.before),
@@ -152,6 +159,11 @@ const insights: FeatureModule = {
       s.engine.resetSection();
       s.lastSimTime = Number.NEGATIVE_INFINITY;
       if (s.swap) s.swap.section = -1; // the before-swap position is no longer "just before"
+    });
+    c.on('drive:mode', () => {
+      s.rec.break();
+      s.engine.resetSection();
+      if (s.swap) s.swap.section = -1; // a fallback "just before the swap" spot is no longer on the same run
     });
     c.on('sim:event', (e) => {
       if (s.quiet || e.kind === 'section' || e.kind === 'lap') return;

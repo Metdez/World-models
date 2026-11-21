@@ -3,7 +3,9 @@
  * --sl-hud-* from controls.css); never wider than the gap between the two columns. Tokens only.
  */
 .sl-insights {
-  --sl-insights-controls: var(--sl-hud-susp-h, 96px); /* the suspension control and its descriptor below */
+  /* the suspension control and its descriptor, the drive pill and hint (--sl-hud-drive-h, inside --sl-hud-susp-h) and
+     the drive action row when one is shown (it widens the pill-to-hint gap but is not part of --sl-hud-drive-h) */
+  --sl-insights-controls: calc(var(--sl-hud-susp-h, 96px) + var(--sl-drive-action-h, 0px));
   position: absolute;
   left: 50%;
   bottom: calc(var(--margin) + var(--sl-insights-controls));

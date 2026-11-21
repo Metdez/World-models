@@ -3,6 +3,8 @@
  * - `live`: rolling window of the last `slots` samples, every corner x metric, plus the track position `s`.
  * - lap records: one per suspension id, binned by track position. The ghost of a live slot is the PREVIOUS
  *   suspension's value at that slot's track position, so the A/B compares the same road, never different seconds.
+ *   Only Auto (the shared line and speed) is recorded or ghosted: a driven sample has no ghost (s = NaN) and is not
+ *   written into a lap record.
  */
 import type { CornerFrame, TelemetryFrame } from '../../contracts/telemetry';
 
@@ -68,8 +70,13 @@ export class History {
       const k = t.corners[c]!;
       for (let m = 0; m < METRICS.length; m++) this.live[base + c * METRICS.length + m] = metricValue(k, METRICS[m]!);
     }
-    this.liveS[this.head] = t.s;
-    this.writeRecord(t.s, base);
+    if (t.drive.mode === 'auto') {
+      this.liveS[this.head] = t.s;
+      this.writeRecord(t.s, base);
+    } else {
+      this.liveS[this.head] = Number.NaN;
+      this.lastBin = -1;
+    }
     this.head = (this.head + 1) % this.slots;
     if (this.count < this.slots) this.count++;
   }

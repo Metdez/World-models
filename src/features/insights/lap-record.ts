@@ -2,7 +2,8 @@
  * Delta chip data (pure). Per suspension id, TRUE camber/travel per corner and body pitch are binned by track
  * position. After a swap, the previous suspension's value at the car's CURRENT position is compared with the new
  * one, so the chip compares the same road. Only in a steady section (constant radius/speed) may it fall back to
- * the value just before the swap.
+ * the value just before the swap. Only Auto (the shared driving line and speed) is recorded or compared: a driven
+ * car is somewhere else on the road at another speed, so "the same track position" means nothing there.
  */
 import type { TelemetryFrame } from '../../contracts/telemetry';
 import type { Phenomenon } from '../../contracts/track';
@@ -52,6 +53,10 @@ export class LapRecord {
   }
 
   write(id: string, t: TelemetryFrame): void {
+    if (t.drive.mode !== 'auto') {
+      this.lastBin = -1;
+      return;
+    }
     let r = this.records.get(id);
     if (!r) {
       r = new Float32Array(this.bins * this.stride).fill(Number.NaN);
@@ -104,9 +109,11 @@ function current(t: TelemetryFrame, metric: DeltaMetric, corner: number): number
 /**
  * Previous suspension vs the live frame for the section's metric; per-corner metrics report the corner with the
  * largest difference. `fallbackS` (track position just before the swap) is used only when the same spot was never
- * driven by the previous suspension and the section is steady. Null when no honest comparison exists.
+ * driven by the previous suspension and the section is steady. Null when no honest comparison exists (always outside
+ * Auto).
  */
 export function computeDelta(rec: LapRecord, previous: string, t: TelemetryFrame, phenomenon: Phenomenon | undefined, fallbackS: number | null): Delta | null {
+  if (t.drive.mode !== 'auto') return null;
   const metric = deltaMetric(phenomenon, t.corners.every((c) => c.side === 0));
   const pick = (s: number, back: number): Delta | null => {
     if (metric === 'pitch') {

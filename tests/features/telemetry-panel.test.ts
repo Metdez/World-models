@@ -56,6 +56,22 @@ describe('History', () => {
     expect(Number.isNaN(h.ghostAt(0, 0, CAMBER))).toBe(true);
   });
 
+  it('Manual: driven samples have no ghost and never enter a lap record (no shared line)', () => {
+    const h = new History(4, 100, 'a', 10, 100);
+    for (let s = 0; s < 50; s++) h.push(frame(CAR, s, -0.01));
+    h.setSuspension('b', 'a');
+    const driven = frame(CAR, 20, -0.05);
+    driven.drive.mode = 'manual';
+    h.resetWindow();
+    h.push(driven);
+    expect(h.liveAt(0, 0, CAMBER)).toBeCloseTo(-0.05); // the live trace keeps drawing
+    expect(Number.isNaN(h.ghostAt(0, 0, CAMBER))).toBe(true);
+    // b's record at s = 20 stays empty: back in Auto as 'a', the ghost of b there is a gap, not the driven value
+    h.setSuspension('a', 'b');
+    h.push(frame(CAR, 20, -0.01));
+    expect(Number.isNaN(h.ghostAt(1, 0, CAMBER))).toBe(true);
+  });
+
   it('fills small bin gaps at speed and wraps s around the lap', () => {
     const h = new History(2, 100, 'a', 10, 100);
     h.push(frame(MOTO, 10, -0.02));
