@@ -27,12 +27,12 @@ import {
   type RideCornerParams,
   type RideModel,
   type RideParams,
+  RIDE_STATE_LENGTH,
 } from '../ride/ride7dof';
 import { gripUse, peakMu } from '../ride/tyre';
-import type { SurfaceKind, GroundWorld } from '../../contracts/world';
-import { createPlant, SURFACE_KINDS, type CarCore, type VehiclePlant } from '../drive/plant';
-import { loopSurface } from '../world/ground';
-import { buildGroundWorld } from '../world/ground';
+import type { GroundWorld } from '../../contracts/world';
+import { createPlant, SURFACE_KINDS, type CarCore, type PlantTyreOut, type VehiclePlant } from '../drive/plant';
+import { buildGroundWorld, loopSurface } from '../world/ground';
 
 const LAYOUT: readonly CornerLayout[] = [
   { id: 'fl', axle: 'front', side: 1 },
@@ -128,17 +128,6 @@ export function prepareCarSuspension(vehicle: CarDefinition, suspension: CarSusp
 function asCar(def: VehicleDefinition | SuspensionDefinition): void {
   const cls = 'class' in def ? def.class : def.vehicleClass;
   if (cls !== 'car') throw new Error(`"${def.id}" is a ${cls} definition, not a car one`);
-}
-
-/** Per-corner tyre values the plant hands to derive (wheel frame). */
-export interface PlantTyreOut {
-  readonly fx: Float64Array;
-  readonly fy: Float64Array;
-  readonly capacity: Float64Array;
-  readonly omega: Float64Array;
-  readonly slipAngle: Float64Array;
-  readonly slipRatio: Float64Array;
-  readonly surface: Uint8Array;
 }
 
 export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: SuspensionDefinition, track: BuiltTrack, world?: GroundWorld) {
@@ -310,8 +299,12 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
     input.rcHeight.rear = tables[1].rollCentreHeight(t[2]!, t[3]!);
   }
 
-  /** TRUE per-corner values of the current ride state into `cur`; fires events. */
-  function derive(path: PathState, dt: number, events: SimEvent[] | undefined): void {
+  /**
+   * TRUE per-corner values of the current ride state into `cur`; fires events. Auto (`tyre` absent): the M1
+   * arithmetic for every M1 slot, plus the demand behind gripUse as fx/fy and the kinematic wheel spin. Plant
+   * (`tyre` given): the plant's tyre forces, capacity, slips and spin rate; gripUse = |F| / capacity.
+   */
+  function derive(path: PathState | null, dt: number, events: SimEvent[] | undefined, tyre?: PlantTyreOut): void {
     const st = ride.state;
     cur[HEAVE] = st.heave;
     cur[ROLL] = st.roll;
@@ -329,6 +322,7 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
     const driven = (fr.driven ? 1 : 0) + (rr.driven ? 1 : 0);
     for (let i = 0; i < 4; i++) {
       const o = BODY + i * STRIDE;
+      const t = TYRE + i * TYRE_STRIDE;
       const s = spec(i);
       const table = tables[i >> 1]!;
       const curves = (i < 2 ? sol.front : sol.rear).kinematics.curves;
@@ -336,9 +330,6 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
       const c = table.sample(travel, side[i]! * (i < 2 ? scalar[0]! : 0), corner(i));
       const bumpToe = interp1(curves.travel, curves.toe, travel);
       const load = st.load[i]!;
-      const axleLoad = load + st.load[i ^ 1]!;
-      const share = axleLoad > 0 ? load / axleLoad : 0;
-      const fxAxle = fx < 0 ? fx * s.brakeShare : s.driven ? fx / driven : 0;
       const camberToRoad = c.camber - side[i]! * st.roll;
       cur[o + TRAVEL] = travel;
       cur[o + RATE] = st.travelRate[i]!;
@@ -352,8 +343,33 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
       // Toe-in on the left wheel points it right (negative steer); the right wheel is the mirror.
       cur[o + STEER] = -side[i]! * (c.toe - bumpToe);
       cur[o + MR] = c.motionRatio;
-      cur[o + GRIP] = Math.min(GRIP_MAX, gripUse(load, (i < 2 ? fyFront : fyRear) * share, fxAxle * share, camberToRoad, s.tyre));
-      cur[o + SPIN] = wrap(prev[o + SPIN]! + (dt * path.v * (1 - path.curvature * cy[i]!)) / s.tyre.radius, TAU);
+      if (tyre) {
+        const f = Math.sqrt(tyre.fx[i]! * tyre.fx[i]! + tyre.fy[i]! * tyre.fy[i]!);
+        const cap = tyre.capacity[i]!;
+        cur[o + GRIP] = f === 0 ? 0 : cap > 0 ? Math.min(GRIP_MAX, f / cap) : GRIP_MAX;
+        cur[o + SPIN] = wrap(prev[o + SPIN]! + dt * tyre.omega[i]!, TAU);
+        cur[t + FX] = tyre.fx[i]!;
+        cur[t + FY] = tyre.fy[i]!;
+        cur[t + CAP] = cap;
+        cur[t + OMEGA] = tyre.omega[i]!;
+        cur[t + SLIP_A] = tyre.slipAngle[i]!;
+        cur[t + SLIP_R] = tyre.slipRatio[i]!;
+        surf[i] = tyre.surface[i]!;
+      } else {
+        const p = path!;
+        const axleLoad = load + st.load[i ^ 1]!;
+        const share = axleLoad > 0 ? load / axleLoad : 0;
+        const fxAxle = fx < 0 ? fx * s.brakeShare : s.driven ? fx / driven : 0;
+        const fyDemand = (i < 2 ? fyFront : fyRear) * share;
+        cur[o + GRIP] = Math.min(GRIP_MAX, gripUse(load, fyDemand, fxAxle * share, camberToRoad, s.tyre));
+        cur[o + SPIN] = wrap(prev[o + SPIN]! + (dt * p.v * (1 - p.curvature * cy[i]!)) / s.tyre.radius, TAU);
+        cur[t + FX] = fxAxle * share;
+        cur[t + FY] = fyDemand;
+        cur[t + CAP] = load > 0 ? peakMu(load, camberToRoad, s.tyre) * load : 0;
+        cur[t + OMEGA] = (p.v * (1 - p.curvature * cy[i]!)) / s.tyre.radius;
+        cur[t + SLIP_A] = 0;
+        cur[t + SLIP_R] = 0;
+      }
       cur[o + WCX] = c.wheelCentre.x - wcx0[i >> 1]!;
       if (events) {
         scalar[1] = dt;
@@ -429,10 +445,165 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
     out.z = w3[2]!;
   }
 
+  /**
+   * Per-corner TRUE + POSE writes from the interpolated record `smp`, with the body pose already in `body` / `pose`
+   * (shared by Auto and the plant, ARCH-M2 §7.3 (1)). `roll` is the reported body roll (camber to road).
+   */
+  function writeCorners(out: TelemetryFrame, alpha: number, amp: number, roll: number): void {
+    let steerSum = 0;
+    let wbF = 0;
+    let wbR = 0;
+    for (let i = 0; i < 4; i++) {
+      const o = BODY + i * STRIDE;
+      const fc = out.corners[i]!;
+      const table = tables[i >> 1]!;
+      const sd = side[i]!;
+      fc.pointOrder = table.pointOrder;
+      fc.travel = smp[o + TRAVEL]!;
+      fc.travelRate = smp[o + RATE]!;
+      fc.camberBody = smp[o + CAMBER]!;
+      fc.camber = fc.camberBody - sd * roll;
+      fc.toe = smp[o + TOE]!;
+      fc.steer = smp[o + STEER]!;
+      fc.load = smp[o + LOAD]!;
+      fc.springForce = smp[o + SPRING]!;
+      fc.damperForce = smp[o + DAMPER]!;
+      fc.motionRatio = smp[o + MR]!;
+      fc.gripUse = smp[o + GRIP]!;
+      fc.stop = Math.min(1, Math.abs(smp[o + STOP]!));
+      const t = TYRE + i * TYRE_STRIDE;
+      fc.fx = smp[t + FX]!;
+      fc.fy = smp[t + FY]!;
+      fc.capacity = smp[t + CAP]!;
+      fc.omega = smp[t + OMEGA]!;
+      fc.slipAngle = smp[t + SLIP_A]!;
+      fc.slipRatio = smp[t + SLIP_R]!;
+      fc.surface = SURFACE_KINDS[surf[i]!]!;
+      const spin0 = prev[o + SPIN]!;
+      let dSpin = cur[o + SPIN]! - spin0;
+      if (dSpin < -Math.PI) dSpin += TAU;
+      else if (dSpin > Math.PI) dSpin -= TAU;
+      const spin = spin0 + dSpin * alpha;
+      fc.spin = spin < 0 ? spin + TAU : spin >= TAU ? spin - TAU : spin;
+      if (i < 2) steerSum += fc.steer;
+      if (i < 2) wbF += smp[o + WCX]! / 2;
+      else wbR += smp[o + WCX]! / 2;
+
+      // POSE: table at the amplified travel (clamped to the table range by sample()).
+      const c = table.sample(fc.travel * amp, sd * (i < 2 ? scalar[0]! : 0), corner(i));
+      pointToWorld(i, c.wheelCentre, fc.wheelPosition);
+      // Contact patch on the loaded tyre: lift the unloaded-radius patch by the tyre deflection.
+      pointToWorld(i, c.contactPatch, fc.contactPatch);
+      fc.contactPatch.z += fc.load / spec(i).tyre.verticalStiffness;
+      pointToWorld(i, c.instantCentre, fc.instantCentre);
+      xform(i, c.points, c.points.length / 3, fc.points);
+      fc.springLength = c.springLength;
+      // Wheel attitude: yaw (toe incl. steer) then camber tilt; left toe-in yaws right, camber < 0 tilts the top in.
+      ang[0] = -sd * c.camber;
+      ang[1] = 0;
+      ang[2] = -sd * c.toe;
+      rpy(qb);
+      q.toXYZW(q.multiply(qa, body, qb), fc.wheelRotation);
+      // Front-view IC line (contact patch -> IC) per side, vehicle frame (y, z), for the posed roll centre.
+      const r = (i & 1) * 4;
+      rcLine[r] = sd * c.contactPatch.y;
+      rcLine[r + 1] = c.contactPatch.z;
+      rcLine[r + 2] = sd * (c.instantCentre.y - c.contactPatch.y);
+      rcLine[r + 3] = c.instantCentre.z - c.contactPatch.z;
+      if (i & 1) {
+        const axle = out.axles[i >> 1]!;
+        axle.rollCentreHeight = smp[RC + (i >> 1)]!;
+        axle.antiPitch = smp[ANTI + (i >> 1)]!;
+        const det = -rcLine[2]! * rcLine[7]! + rcLine[6]! * rcLine[3]!;
+        let y = 0;
+        let z = (rcLine[1]! + rcLine[5]!) / 2;
+        if (Math.abs(det) > 1e-12) {
+          const u = ((rcLine[4]! - rcLine[0]!) * -rcLine[7]! + rcLine[6]! * (rcLine[5]! - rcLine[1]!)) / det;
+          y = rcLine[0]! + u * rcLine[2]!;
+          z = rcLine[1]! + u * rcLine[3]!;
+        }
+        // Roll centre on the axle's centre plane (written as a left-side point at x = 0 of this axle).
+        rcPoint.x = 0;
+        rcPoint.y = clamp(y, -5, 5);
+        rcPoint.z = clamp(z, -5, 5);
+        pointToWorld(i - 1, rcPoint, axle.rollCentre);
+      }
+    }
+    out.steer = steerSum / 2;
+    out.wheelbase = L + wbF - wbR;
+    // shortcut: design-point trail of the steered axle (the table has no live steer-axis metrics).
+    out.trail = sol.kinematics.front.summary.trail;
+  }
+
+  /** smp = prev + (cur - prev) * alpha. */
+  function interpolate(alpha: number): void {
+    for (let k = 0; k < RECORD; k++) smp[k] = prev[k]! + (cur[k]! - prev[k]!) * alpha;
+  }
+
+  // ---- Manual Drive plant (ARCH-M2 §7.3 (5)): built on first use for cars with handling data.
+  let plant: VehiclePlant | undefined;
+  const core: CarCore | null = vehicle.handling
+    ? {
+        vehicle,
+        handling: vehicle.handling,
+        track,
+        get world() {
+          return (world ??= buildGroundWorld(track, null));
+        },
+        cx,
+        cy,
+        unsprung,
+        tables: () => tables,
+        corner,
+        ride: () => ride,
+        input,
+        roadPrev,
+        scalar,
+        staticDeflectionMean: () => staticDeflectionMean,
+        linkInputs(): void {
+          input.antiPitch.front = input.ax < 0 ? tables[0].antiPitch : 0;
+          input.antiPitch.rear = input.ax >= 0 ? tables[1].antiPitch : 0;
+          rcInputs();
+        },
+        beginStep: () => prev.set(cur),
+        holdRecord: () => prev.set(cur),
+        derive: (dt, events, tyre) => derive(null, dt, events, tyre),
+        resetEventHysteresis: () => quiet.fill(HYSTERESIS),
+        interpolate(alpha, out): void {
+          interpolate(alpha);
+          out[0] = smp[HEAVE]!;
+          out[1] = smp[ROLL]!;
+          out[2] = smp[PITCH]!;
+        },
+        writeBody(out, planeRoll, planePitch, yaw, relRoll, relPitch, x, y, z): void {
+          ang[0] = planeRoll;
+          ang[1] = planePitch;
+          ang[2] = yaw;
+          rpy(qa);
+          ang[0] = relRoll;
+          ang[1] = relPitch;
+          ang[2] = 0;
+          rpy(qb);
+          q.multiply(body, qa, qb);
+          pose[0] = x;
+          pose[1] = y;
+          pose[2] = z;
+          q.toXYZW(body, out.bodyRotation);
+          out.bodyPosition.x = x;
+          out.bodyPosition.y = y;
+          out.bodyPosition.z = z;
+        },
+        writeCorners,
+      }
+    : null;
+
   return {
     corners: LAYOUT,
     get kinematics(): VehicleKinematics {
       return sol.kinematics;
+    },
+    get plant(): VehiclePlant | undefined {
+      return core ? (plant ??= createPlant(core)) : undefined;
     },
     setSuspension,
 
@@ -479,7 +650,7 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
     },
 
     sample(alpha: number, amplification: number, path: PathState, out: TelemetryFrame): void {
-      for (let k = 0; k < RECORD; k++) smp[k] = prev[k]! + (cur[k]! - prev[k]!) * alpha;
+      interpolate(alpha);
       const amp = amplification;
       // Vertical-curve road plane under the axles (crest/dip): heave/pitch are reported relative to it.
       vcPlane(path.s);
@@ -512,81 +683,7 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
       out.bodyPosition.y = pose[1];
       out.bodyPosition.z = pose[2];
 
-      let steerSum = 0;
-      let wbF = 0;
-      let wbR = 0;
-      for (let i = 0; i < 4; i++) {
-        const o = BODY + i * STRIDE;
-        const fc = out.corners[i]!;
-        const table = tables[i >> 1]!;
-        const sd = side[i]!;
-        fc.pointOrder = table.pointOrder;
-        fc.travel = smp[o + TRAVEL]!;
-        fc.travelRate = smp[o + RATE]!;
-        fc.camberBody = smp[o + CAMBER]!;
-        fc.camber = fc.camberBody - sd * roll;
-        fc.toe = smp[o + TOE]!;
-        fc.steer = smp[o + STEER]!;
-        fc.load = smp[o + LOAD]!;
-        fc.springForce = smp[o + SPRING]!;
-        fc.damperForce = smp[o + DAMPER]!;
-        fc.motionRatio = smp[o + MR]!;
-        fc.gripUse = smp[o + GRIP]!;
-        fc.stop = Math.min(1, Math.abs(smp[o + STOP]!));
-        const spin0 = prev[o + SPIN]!;
-        let dSpin = cur[o + SPIN]! - spin0;
-        if (dSpin < -Math.PI) dSpin += TAU;
-        else if (dSpin > Math.PI) dSpin -= TAU;
-        const spin = spin0 + dSpin * alpha;
-        fc.spin = spin < 0 ? spin + TAU : spin >= TAU ? spin - TAU : spin;
-        if (i < 2) steerSum += fc.steer;
-        if (i < 2) wbF += smp[o + WCX]! / 2;
-        else wbR += smp[o + WCX]! / 2;
-
-        // POSE: table at the amplified travel (clamped to the table range by sample()).
-        const c = table.sample(fc.travel * amp, sd * (i < 2 ? scalar[0]! : 0), corner(i));
-        pointToWorld(i, c.wheelCentre, fc.wheelPosition);
-        // Contact patch on the loaded tyre: lift the unloaded-radius patch by the tyre deflection.
-        pointToWorld(i, c.contactPatch, fc.contactPatch);
-        fc.contactPatch.z += fc.load / spec(i).tyre.verticalStiffness;
-        pointToWorld(i, c.instantCentre, fc.instantCentre);
-        xform(i, c.points, c.points.length / 3, fc.points);
-        fc.springLength = c.springLength;
-        // Wheel attitude: yaw (toe incl. steer) then camber tilt; left toe-in yaws right, camber < 0 tilts the top in.
-        ang[0] = -sd * c.camber;
-        ang[1] = 0;
-        ang[2] = -sd * c.toe;
-        rpy(qb);
-        q.toXYZW(q.multiply(qa, body, qb), fc.wheelRotation);
-        // Front-view IC line (contact patch -> IC) per side, vehicle frame (y, z), for the posed roll centre.
-        const r = (i & 1) * 4;
-        rcLine[r] = sd * c.contactPatch.y;
-        rcLine[r + 1] = c.contactPatch.z;
-        rcLine[r + 2] = sd * (c.instantCentre.y - c.contactPatch.y);
-        rcLine[r + 3] = c.instantCentre.z - c.contactPatch.z;
-        if (i & 1) {
-          const axle = out.axles[i >> 1]!;
-          axle.rollCentreHeight = smp[RC + (i >> 1)]!;
-          axle.antiPitch = smp[ANTI + (i >> 1)]!;
-          const det = -rcLine[2]! * rcLine[7]! + rcLine[6]! * rcLine[3]!;
-          let y = 0;
-          let z = (rcLine[1]! + rcLine[5]!) / 2;
-          if (Math.abs(det) > 1e-12) {
-            const u = ((rcLine[4]! - rcLine[0]!) * -rcLine[7]! + rcLine[6]! * (rcLine[5]! - rcLine[1]!)) / det;
-            y = rcLine[0]! + u * rcLine[2]!;
-            z = rcLine[1]! + u * rcLine[3]!;
-          }
-          // Roll centre on the axle's centre plane (written as a left-side point at x = 0 of this axle).
-          rcPoint.x = 0;
-          rcPoint.y = clamp(y, -5, 5);
-          rcPoint.z = clamp(z, -5, 5);
-          pointToWorld(i - 1, rcPoint, axle.rollCentre);
-        }
-      }
-      out.steer = steerSum / 2;
-      out.wheelbase = L + wbF - wbR;
-      // shortcut: design-point trail of the steered axle (the table has no live steer-axis metrics).
-      out.trail = sol.kinematics.front.summary.trail;
+      writeCorners(out, alpha, amp, roll);
     },
 
     restPose(cornerIndex: number, _path: PathState, out: Float64Array): Float64Array {
