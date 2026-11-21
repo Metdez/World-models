@@ -1,6 +1,8 @@
 /** Deterministic kernels vs the engine's Math.* (ARCHITECTURE-M2 §7.12, D1): <= 1 ulp on 10^5-point grids + edge cases. */
 import { describe, expect, it } from 'vitest';
-import { dacos, dasin, datan, datan2, dcos, dexp, dhypot, dlog, dpow, dsin, dtan, dtanh, dwrapPi } from '../../src/sim-core/math/det';
+import { dacos, dasin, datan, datan2, dcos, dexp, dhypot, dlog, dpow, dsin, dsincos, dtan, dtanh, dwrapPi, SINCOS } from '../../src/sim-core/math/det';
+import { provingLoop } from '../../src/sim-core/content/proving-loop';
+import { buildTrack, planPoseOf } from '../../src/sim-core/track/build';
 import { createRng } from '../../src/sim-core/math/rng';
 
 const f64 = new Float64Array(1);
@@ -99,3 +101,32 @@ describe('det kernels', () => {
     expect(dwrapPi(-Math.PI)).toBe(Math.PI);
   });
 });
+
+describe('allocation-free variants are the same bits (13-01)', () => {
+  it('dsincos(x) = [dsin(x), dcos(x)] bit for bit, incl. zeros, tiny, reduced and non-finite arguments', () => {
+    const rng = createRng(1301);
+    const xs = [0, -0, 1e-300, -1e-12, 0.785398163, 0.7853981634, 2.356, 1e5, -1e6, Infinity, -Infinity, NaN];
+    for (let i = 0; i < 200_000; i++) xs.push((rng.next() - 0.5) * (i % 4 === 0 ? 20 : i % 4 === 1 ? 2000 : i % 4 === 2 ? 2e6 : 2));
+    let bad = 0;
+    for (const x of xs) {
+      dsincos(x);
+      if (!Object.is(SINCOS[0], dsin(x)) || !Object.is(SINCOS[1], dcos(x))) bad++;
+    }
+    expect(bad).toBe(0);
+  });
+  it('planPoseOf(track) = track.sample x, y, heading, curvature bit for bit', () => {
+    const track = buildTrack(provingLoop);
+    const plan = planPoseOf(track)!;
+    const a = { s: 0, x: 0, y: 0, z: 0, heading: 0, curvature: 0, bank: 0, grade: 0 };
+    const b = { ...a };
+    let bad = 0;
+    for (let i = 0; i < 20_000; i++) {
+      const s = (i * 0.1371) % (track.length * 1.3) - 50;
+      track.sample(s, a);
+      plan(s, b);
+      if (!Object.is(a.x, b.x) || !Object.is(a.y, b.y) || !Object.is(a.heading, b.heading) || !Object.is(a.curvature, b.curvature)) bad++;
+    }
+    expect(bad).toBe(0);
+  });
+});
+

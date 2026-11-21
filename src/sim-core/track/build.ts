@@ -10,7 +10,7 @@
 import type { BuiltSection, BuiltTrack, TrackDefinition, TrackProp, TrackSample } from '../../contracts/track';
 import { findInterval, wrap, wrapAngle } from '../math/interp';
 import { knotOffset } from '../path/path';
-import { advancePose, integratePlan, primitiveLength, solveClosure } from './closure';
+import { advancePoseAt, integratePlan, primitiveLength, solveClosure } from './closure';
 import { createSurface } from './surface';
 import { dcos, dsin } from '../math/det';
 
@@ -55,9 +55,9 @@ export function buildTrack(def: TrackDefinition): BuiltTrack {
       const s = wrap(sIn, length);
       const i = findInterval(plan.s, s);
       const u = s - plan.s[i]!;
+      advancePoseAt(plan, i, u, pose);
       const k = plan.k[i]!;
       const dk = plan.dk[i]!;
-      advancePose(plan.x[i]!, plan.y[i]!, plan.psi[i]!, k, dk, u, pose);
       const sec = findInterval(bounds, s);
       out.s = s;
       out.x = pose.x;
@@ -90,9 +90,9 @@ export function buildTrack(def: TrackDefinition): BuiltTrack {
     const s = wrap(sIn, length);
     const i = findInterval(plan.s, s);
     const u = s - plan.s[i]!;
+    advancePoseAt(plan, i, u, pose);
     const k = plan.k[i]!;
     const dk = plan.dk[i]!;
-    advancePose(plan.x[i]!, plan.y[i]!, plan.psi[i]!, k, dk, u, pose);
     out.x = pose.x;
     out.y = pose.y;
     out.heading = wrapAngle(pose.psi);

@@ -54,6 +54,28 @@ export function advancePose(x: number, y: number, psi: number, k: number, dk: nu
   out.psi = p1;
 }
 
+/**
+ * advancePose from plan node i (same arithmetic, same bits): only u is passed as a double, so a call V8 does not
+ * inline boxes one argument instead of six (track sampling runs this many times per fixed step).
+ */
+export function advancePoseAt(plan: PlanNodes, i: number, u: number, out: { x: number; y: number; psi: number }): void {
+  const psi = plan.psi[i]!;
+  const k = plan.k[i]!;
+  const dk = plan.dk[i]!;
+  const pm = psi + 0.5 * k * u + 0.125 * dk * u * u;
+  const p1 = psi + k * u + 0.5 * dk * u * u;
+  dsincos(psi);
+  const s0 = SINCOS[0]!;
+  const c0 = SINCOS[1]!;
+  dsincos(pm);
+  const sm = SINCOS[0]!;
+  const cm = SINCOS[1]!;
+  dsincos(p1);
+  out.x = plan.x[i]! + (u / 6) * (c0 + 4 * cm + SINCOS[1]!);
+  out.y = plan.y[i]! + (u / 6) * (s0 + 4 * sm + SINCOS[0]!);
+  out.psi = p1;
+}
+
 /** Integrates all segments' primitives from the origin, heading +X. */
 export function integratePlan(segments: readonly TrackSegmentDefinition[]): PlanNodes {
   const s: number[] = [];
