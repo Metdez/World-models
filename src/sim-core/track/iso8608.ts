@@ -7,6 +7,7 @@
  */
 import type { RoughnessClass } from '../../contracts/track';
 import { createRng } from '../math/rng';
+import { dcos, dexp, dpow, dsin } from '../math/det';
 
 /** Gd(n0) geometric-mean class values, m^3 (ISO 8608). */
 export const ISO_GD0: Readonly<Record<RoughnessClass, number>> = { A: 16e-6, B: 64e-6, C: 256e-6, D: 1024e-6 };
@@ -36,8 +37,8 @@ export function createRoughness(length: number, seed: number): Roughness {
   const cosT = new Float64Array(n);
   const sinT = new Float64Array(n);
   for (let m = 0; m < n; m++) {
-    cosT[m] = Math.cos((2 * Math.PI * m) / n);
-    sinT[m] = Math.sin((2 * Math.PI * m) / n);
+    cosT[m] = dcos((2 * Math.PI * m) / n);
+    sinT[m] = dsin((2 * Math.PI * m) / n);
   }
   const rails = [new Float64Array(n + 1), new Float64Array(n + 1), new Float64Array(n + 1)] as const;
   const rng = createRng(seed);
@@ -45,20 +46,21 @@ export function createRoughness(length: number, seed: number): Roughness {
   let prevK = 0;
   const ratio = N_MAX / N_MIN;
   for (let b = 0; b < BINS; b++) {
-    const e0 = N_MIN * ratio ** (b / BINS);
-    const e1 = N_MIN * ratio ** ((b + 1) / BINS);
+    const e0 = N_MIN * dpow(ratio, b / BINS);
+    const e1 = N_MIN * dpow(ratio, (b + 1) / BINS);
     const k = Math.max(prevK + 1, Math.round(Math.sqrt(e0 * e1) * length));
     if (k >= n / 2) break; // never alias above the LUT Nyquist frequency
     prevK = k;
     const nk = k / length;
-    const amp = Math.sqrt(2 * UNIT_GD0 * (nk / N0) ** -2 * (e1 - e0));
+    const r = nk / N0;
+    const amp = Math.sqrt((2 * UNIT_GD0 * (e1 - e0)) / (r * r));
     variance += 0.5 * amp * amp;
     const common = rng.uniform(0, 2 * Math.PI);
-    const spread = Math.PI * (1 - Math.exp(-Math.PI * nk * COHERENCE_DISTANCE));
+    const spread = Math.PI * (1 - dexp(-Math.PI * nk * COHERENCE_DISTANCE));
     for (const rail of rails) {
       const phase = common + spread * rng.uniform(-1, 1);
-      const re = amp * Math.cos(phase);
-      const im = amp * Math.sin(phase);
+      const re = amp * dcos(phase);
+      const im = amp * dsin(phase);
       for (let m = 0; m < n; m++) {
         const idx = (k * m) % n; // exact phase index: periodic to the last bit
         rail[m] = rail[m]! + re * cosT[idx]! - im * sinT[idx]!;

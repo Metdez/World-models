@@ -11,6 +11,7 @@
  */
 import { DEG_TO_RAD } from '../../contracts/units';
 import { smoothstep } from '../math/interp';
+import { dasin, datan, dcos, dsin } from '../math/det';
 
 const ZETA = 0.9;
 const OMEGA = 6;
@@ -28,7 +29,7 @@ export interface LeanParams {
 
 /** Closed-form steady frame lean for a CG-line lean γ (research 08 §5.1). */
 export function frameLean(gamma: number, cgHeight: number, crown: number): number {
-  return gamma + Math.asin((crown / (cgHeight - crown)) * Math.sin(gamma));
+  return gamma + dasin((crown / (cgHeight - crown)) * dsin(gamma));
 }
 
 export interface Lean {
@@ -46,13 +47,13 @@ export const STEER = 4;
 
 export function createLean(p: LeanParams): Lean {
   const st = new Float64Array(5);
-  const target = (ay: number, g: number, bank: number): number => Math.atan(ay / g) + bank;
+  const target = (ay: number, g: number, bank: number): number => datan(ay / g) + bank;
   function finish(ay: number, v: number, curvature: number): void {
     st[PHI] = frameLean(st[GAMMA]!, p.cgHeight, p.crown);
     const L = p.wheelbase;
     const dynamic = v > 0.1 ? (L / (v * v)) * (ay - p.cgHeight * st[GAMMA_ACC]!) : 0;
     const blend = smoothstep(LOW_SPEED[0], LOW_SPEED[1], v);
-    const d = (blend * dynamic + (1 - blend) * L * curvature) / Math.cos(p.rake);
+    const d = (blend * dynamic + (1 - blend) * L * curvature) / dcos(p.rake);
     st[STEER] = d > STEER_MAX ? STEER_MAX : d < -STEER_MAX ? -STEER_MAX : d;
   }
   return {

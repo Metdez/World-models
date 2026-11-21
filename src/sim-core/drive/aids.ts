@@ -2,9 +2,9 @@
  * Driver aids (ARCHITECTURE-M2 §7.8; research m2/06 §5). Every aid is "Assist: simplified model" — a few lines of
  * textbook logic, never a manufacturer's system — individually switchable through DriveAids and reported every step
  * through the DriveFrame flags (absActive, tractionActive, stabilityActive).
- * - ABS: per-wheel pressure factor that drops while the wheel's slip ratio is beyond the brake peak, recovers otherwise
- *   (the pulse idea of Godot-Easy-Vehicle-Physics' wheel.gd, MIT, (c) 2024 David Shoemaker, (c) 2021 Dechode;
- *   re-expressed as a smooth factor, no code copied).
+ * - ABS: per-wheel pressure factor driven by the wheel's slip ratio (plus a short slip-rate lead) toward a target just
+ *   below the tyre's peak; fast release, slower re-apply (the pressure-release idea of Godot-Easy-Vehicle-Physics'
+ *   wheel.gd, MIT, (c) 2024 David Shoemaker, (c) 2021 Dechode; re-expressed as a smooth factor, no code copied).
  * - Traction: the engine-torque scale target on the driven wheels' slip speed (applied, low-passed, in powertrain.ts;
  *   GEVP's slip cut made smooth).
  * - Stability: yaw-rate error against a bicycle-model target; corrects by SELECTIVE BRAKING only (oversteer: the outer
@@ -54,13 +54,17 @@ export const createAidsIo = (): AidsIo => ({
   stabilityActive: false,
 });
 
-// ---- ABS (§7.8)
-const ABS_SLIP = -0.12;
-const ABS_RELEASE = 0.04; // s from full pressure to none
-const ABS_APPLY = 0.12; // s from none back to full
+// ---- ABS (§7.8, pressure law tuned in 09-02: §7.8's on/off rule at -0.12 cycled so deeply that a fake wheel with the
+// 09-01 tyre curve stopped LONGER than with locked wheels — 36.6 vs 32.1 m from 25 m/s — and overshot to -0.22)
+const ABS_SLIP = -0.1; // target slip ratio (09-01 tyre peak about 0.14-0.17)
+const ABS_GAIN = 200; // pressure factor per s per unit slip error
+const ABS_LEAD = 0.03; // s: acts on the slip predicted this far ahead (wheel deceleration), as real ABS does
+const ABS_RELEASE = 0.02; // s from full pressure to none (fastest)
+const ABS_APPLY = 0.12; // s from none back to full (fastest)
 const ABS_FLOOR = 0.1;
-/** Brake torque below this (N m) counts as "not braking". */
+/** Brake torque below this (N m) counts as "not braking"; below ABS_SPEED (m/s) the wheels may lock (stop and hold). */
 const ABS_MIN_TORQUE = 1;
+const ABS_SPEED = 2;
 
 // ---- Stability (§7.8)
 const K_REF = 0.0018; // rad s^2/m: mild understeer reference
@@ -73,10 +77,11 @@ const ESC_THROTTLE = 0.5;
 /** The flag and the throttle cut stay on this long after the last trigger (no 1/0.5 throttle chatter, readable lamp). */
 const ESC_HOLD = 0.25;
 
-/** Persistent state (snapshot-friendly): ABS pressure factors (4), stability hold timer. */
+/** Persistent state (snapshot-friendly): ABS pressure factors (4), previous slip ratios (4), stability hold timer. */
 const P = 0;
-const HOLD = 4;
-export const AIDS_STATE_LENGTH = 5;
+const KPREV = 4;
+const HOLD = 8;
+export const AIDS_STATE_LENGTH = 9;
 
 export function createAids(vehicle: CarDefinition, frontTrack: number, rearTrack: number): Aids & { readonly state: Float64Array } {
   const st = new Float64Array(AIDS_STATE_LENGTH);
@@ -86,6 +91,7 @@ export function createAids(vehicle: CarDefinition, frontTrack: number, rearTrack
   const kRear = (ESC_GAIN * iz * vehicle.rear.tyre.radius) / (rearTrack / 2);
   const reset = (): void => {
     st.fill(1, P, P + 4);
+    st.fill(0, KPREV, KPREV + 4);
     st[HOLD] = 0;
   };
   reset();
@@ -110,7 +116,8 @@ export function createAids(vehicle: CarDefinition, frontTrack: number, rearTrack
           // Oversteer (yawing beyond the target along r) -> front wheel; understeer -> rear wheel.
           const over = io.r * e > 0;
           const t = Math.min(ESC_MAX_TORQUE, (over ? kFront : kRear) * (ae - ESC_DEADBAND));
-          bt[(over ? 0 : 2) + (e > 0 ? 1 : 0)] += t;
+          const w = (over ? 0 : 2) + (e > 0 ? 1 : 0);
+          bt[w] = bt[w]! + t;
         }
       } else st[HOLD] = 0;
       io.stabilityActive = st[HOLD]! > 0;
@@ -119,9 +126,14 @@ export function createAids(vehicle: CarDefinition, frontTrack: number, rearTrack
       let abs = false;
       for (let i = 0; i < 4; i++) {
         let p = st[P + i]!;
+        const k = io.slipRatio[i]!;
+        const kp = k + (ABS_LEAD * (k - st[KPREV + i]!)) / dt;
+        st[KPREV + i] = k;
         if (!aids.abs || (i >= 2 && io.handbrake > 0.05)) p = 1;
         else {
-          p += io.slipRatio[i]! < ABS_SLIP && bt[i]! > ABS_MIN_TORQUE ? -dt / ABS_RELEASE : dt / ABS_APPLY;
+          let rate = bt[i]! > ABS_MIN_TORQUE && au > ABS_SPEED ? ABS_GAIN * (kp - ABS_SLIP) : 1 / ABS_APPLY;
+          rate = rate < -1 / ABS_RELEASE ? -1 / ABS_RELEASE : rate > 1 / ABS_APPLY ? 1 / ABS_APPLY : rate;
+          p += rate * dt;
           p = p < ABS_FLOOR ? ABS_FLOOR : p > 1 ? 1 : p;
         }
         st[P + i] = p;

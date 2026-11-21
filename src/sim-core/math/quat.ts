@@ -4,6 +4,7 @@
  */
 import type { Vec3, XYZW } from '../../contracts/units';
 import type { V3 } from './vec3';
+import { dacos, dasin, datan2, dcos, dsin } from './det';
 
 export type Quat = [x: number, y: number, z: number, w: number];
 export type QuatLike = readonly [x: number, y: number, z: number, w: number];
@@ -43,8 +44,8 @@ export function multiply(out: Quat, a: QuatLike, b: QuatLike): Quat {
 
 /** `axis` must be unit length. */
 export function fromAxisAngle(out: Quat, axis: Vec3, angle: number): Quat {
-  const s = Math.sin(angle / 2);
-  return set(out, axis[0] * s, axis[1] * s, axis[2] * s, Math.cos(angle / 2));
+  const s = dsin(angle / 2);
+  return set(out, axis[0] * s, axis[1] * s, axis[2] * s, dcos(angle / 2));
 }
 
 /** Exponential map: rotation by |w| about w/|w| (series near zero). */
@@ -57,8 +58,8 @@ export function fromRotationVector(out: Quat, w: Vec3): Quat {
     c = 1 - t2 / 8;
   } else {
     const t = Math.sqrt(t2);
-    k = Math.sin(t / 2) / t;
-    c = Math.cos(t / 2);
+    k = dsin(t / 2) / t;
+    c = dcos(t / 2);
   }
   return set(out, w[0] * k, w[1] * k, w[2] * k, c);
 }
@@ -70,7 +71,7 @@ export function toRotationVector(out: V3, q: QuatLike): V3 {
   const y = q[1] * sign;
   const z = q[2] * sign;
   const s = Math.sqrt(x * x + y * y + z * z);
-  const k = s < 1e-8 ? 2 : (2 * Math.atan2(s, q[3] * sign)) / s;
+  const k = s < 1e-8 ? 2 : (2 * datan2(s, q[3] * sign)) / s;
   out[0] = x * k;
   out[1] = y * k;
   out[2] = z * k;
@@ -100,21 +101,21 @@ function rotateRaw(out: V3, qx: number, qy: number, qz: number, qw: number, v: V
  * q = Rz(yaw) * Ry(pitch) * Rx(roll), i.e. intrinsic yaw -> pitch -> roll (ISO 8855 / Tait-Bryan z-y'-x'').
  */
 export function fromRollPitchYaw(out: Quat, roll: number, pitch: number, yaw: number): Quat {
-  const cr = Math.cos(roll / 2);
-  const sr = Math.sin(roll / 2);
-  const cp = Math.cos(pitch / 2);
-  const sp = Math.sin(pitch / 2);
-  const cy = Math.cos(yaw / 2);
-  const sy = Math.sin(yaw / 2);
+  const cr = dcos(roll / 2);
+  const sr = dsin(roll / 2);
+  const cp = dcos(pitch / 2);
+  const sp = dsin(pitch / 2);
+  const cy = dcos(yaw / 2);
+  const sy = dsin(yaw / 2);
   return set(out, sr * cp * cy - cr * sp * sy, cr * sp * cy + sr * cp * sy, cr * cp * sy - sr * sp * cy, cr * cp * cy + sr * sp * sy);
 }
 
 /** Inverse of fromRollPitchYaw: out = [roll, pitch, yaw] (pitch in [-pi/2, pi/2]). */
 export function toRollPitchYaw(out: V3, q: QuatLike): V3 {
   const [x, y, z, w] = q;
-  out[0] = Math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y));
-  out[1] = Math.asin(Math.max(-1, Math.min(1, 2 * (w * y - z * x))));
-  out[2] = Math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z));
+  out[0] = datan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y));
+  out[1] = dasin(Math.max(-1, Math.min(1, 2 * (w * y - z * x))));
+  out[2] = datan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z));
   return out;
 }
 
@@ -129,17 +130,17 @@ export function slerp(out: Quat, a: QuatLike, b: QuatLike, t: number): Quat {
     ka = 1 - t;
     kb = t * sign;
   } else {
-    const theta = Math.acos(cos);
-    const sin = Math.sin(theta);
-    ka = Math.sin((1 - t) * theta) / sin;
-    kb = (Math.sin(t * theta) / sin) * sign;
+    const theta = dacos(cos);
+    const sin = dsin(theta);
+    ka = dsin((1 - t) * theta) / sin;
+    kb = (dsin(t * theta) / sin) * sign;
   }
   set(out, ka * a[0] + kb * b[0], ka * a[1] + kb * b[1], ka * a[2] + kb * b[2], ka * a[3] + kb * b[3]);
   return normalize(out, out);
 }
 
 /** Angle of the rotation taking a to b, rad in [0, pi]. */
-export const angleBetween = (a: QuatLike, b: QuatLike): number => 2 * Math.acos(Math.min(1, Math.abs(dot(a, b))));
+export const angleBetween = (a: QuatLike, b: QuatLike): number => 2 * dacos(Math.min(1, Math.abs(dot(a, b))));
 
 export const fromXYZW = (out: Quat, q: Readonly<XYZW>): Quat => set(out, q.x, q.y, q.z, q.w);
 export function toXYZW(q: QuatLike, out: XYZW): XYZW {

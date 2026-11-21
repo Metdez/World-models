@@ -8,8 +8,9 @@
  */
 import type { AxleLinkage } from '../../contracts/suspension';
 import * as m3 from '../math/mat';
-import type { V3 } from '../math/vec3';
+import { hypot3, type V3 } from '../math/vec3';
 import type { ResidualFn } from './lm';
+import { datan2, dcos, dsin } from '../math/det';
 
 /** Derived point appended to every point order: the spring/damper lower mount, wherever it is attached. */
 export const SPRING_LOWER = 'springLower';
@@ -59,7 +60,7 @@ const sub3 = (a: Float64Array | V3, i: number, b: Float64Array | V3, j: number, 
 };
 
 function unit(out: V3, x: number, y: number, z: number): V3 {
-  const l = Math.hypot(x, y, z);
+  const l = hypot3(x, y, z);
   out[0] = x / l;
   out[1] = y / l;
   out[2] = z / l;
@@ -68,8 +69,8 @@ function unit(out: V3, x: number, y: number, z: number): V3 {
 
 /** Rotates v (3 at vi) by angle about unit axis n (Rodrigues), writes at oi. */
 function rotateAbout(n: V3, angle: number, v: V3, out: Float64Array, oi: number): void {
-  const c = Math.cos(angle);
-  const s = Math.sin(angle);
+  const c = dcos(angle);
+  const s = dsin(angle);
   const d = (n[0] * v[0] + n[1] * v[1] + n[2] * v[2]) * (1 - c);
   out[oi] = v[0] * c + (n[1] * v[2] - n[2] * v[1]) * s + n[0] * d;
   out[oi + 1] = v[1] * c + (n[2] * v[0] - n[0] * v[2]) * s + n[1] * d;
@@ -190,12 +191,12 @@ export function compileLinkage(axle: AxleLinkage, tyreRadius: number): Spatial {
 
   const wc0: V3 = [p0[wcIdx * 3]!, p0[wcIdx * 3 + 1]!, p0[wcIdx * 3 + 2]!];
   const { camber, toe } = axle.alignment;
-  const axle0: V3 = [Math.sin(toe) * Math.cos(camber), Math.cos(toe) * Math.cos(camber), -Math.sin(camber)];
+  const axle0: V3 = [dsin(toe) * dcos(camber), dcos(toe) * dcos(camber), -dsin(camber)];
   // Lowest point of the tyre circle at design.
   const ux = -(-axle0[2]) * axle0[0];
   const uy = -(-axle0[2]) * axle0[1];
   const uz = -1 + axle0[2] * axle0[2];
-  const groundZ = wc0[2] + (tyreRadius * uz) / Math.hypot(ux, uy, uz);
+  const groundZ = wc0[2] + (tyreRadius * uz) / hypot3(ux, uy, uz);
 
   // Scratch (allocation-free residuals / placement).
   const R = m3.create();
@@ -297,7 +298,7 @@ export function compileLinkage(axle: AxleLinkage, tyreRadius: number): Spatial {
           const cx = q0[1] * q[2] - q0[2] * q[1];
           const cy = q0[2] * q[0] - q0[0] * q[2];
           const cz = q0[0] * q[1] - q0[1] * q[0];
-          angle = Math.atan2(n[0] * cx + n[1] * cy + n[2] * cz, q0[0] * q[0] + q0[1] * q[1] + q0[2] * q[2]);
+          angle = datan2(n[0] * cx + n[1] * cy + n[2] * cz, q0[0] * q[0] + q0[1] * q[1] + q0[2] * q[2]);
         } else {
           // Swing: rotate the rod from its design direction to the current one about its chassis end.
           sub3(p0, u, p0, a, q0);
@@ -305,8 +306,8 @@ export function compileLinkage(axle: AxleLinkage, tyreRadius: number): Spatial {
           const cx = q0[1] * q[2] - q0[2] * q[1];
           const cy = q0[2] * q[0] - q0[0] * q[2];
           const cz = q0[0] * q[1] - q0[1] * q[0];
-          const s = Math.hypot(cx, cy, cz);
-          angle = Math.atan2(s, q0[0] * q[0] + q0[1] * q[1] + q0[2] * q[2]);
+          const s = hypot3(cx, cy, cz);
+          angle = datan2(s, q0[0] * q[0] + q0[1] * q[1] + q0[2] * q[2]);
           if (s < 1e-15) n[0] = n[1] = n[2] = 0;
           else unit(n, cx, cy, cz);
         }

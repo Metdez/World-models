@@ -5,9 +5,10 @@
  */
 import * as m3 from '../math/mat';
 import { solveInPlace } from '../math/linsolve';
-import type { V3 } from '../math/vec3';
+import { hypot2, hypot3, type V3 } from '../math/vec3';
 import type { LmSolver } from './lm';
 import type { Spatial } from './spatial';
+import { dasin, datan2 } from '../math/det';
 
 /** Parameter a tangent is taken with respect to. 'toe' shifts the steer/toe-link inner point in Y. */
 export type TangentParam = 'travel' | 'rack' | 'toe';
@@ -39,8 +40,8 @@ export function wheelState(sp: Spatial, x: Float64Array, out: WheelState): Wheel
   a[0] = R[0] * a0x + R[1] * a0y + R[2] * a0z;
   a[1] = R[3] * a0x + R[4] * a0y + R[5] * a0z;
   a[2] = R[6] * a0x + R[7] * a0y + R[8] * a0z;
-  out.camber = -Math.asin(a[2]);
-  out.toe = Math.atan2(a[0], a[1]);
+  out.camber = -dasin(a[2]);
+  out.toe = datan2(a[0], a[1]);
   const wc = out.wc;
   wc[0] = sp.wc0[0] + x[0]!;
   wc[1] = sp.wc0[1] + x[1]!;
@@ -48,7 +49,7 @@ export function wheelState(sp: Spatial, x: Float64Array, out: WheelState): Wheel
   const ux = a[2] * a[0];
   const uy = a[2] * a[1];
   const uz = -1 + a[2] * a[2];
-  const k = sp.tyreRadius / Math.hypot(ux, uy, uz);
+  const k = sp.tyreRadius / hypot3(ux, uy, uz);
   out.cp[0] = wc[0] + ux * k;
   out.cp[1] = wc[1] + uy * k;
   out.cp[2] = wc[2] + uz * k;
@@ -156,8 +157,8 @@ export function steerAxisMetrics(tw: Twist, ws: WheelState, groundZ: number): St
   const gx = p[0] + t * k[0];
   const gy = p[1] + t * k[1];
   return {
-    kpi: Math.atan2(-k[1], k[2]),
-    caster: Math.atan2(-k[0], k[2]),
+    kpi: datan2(-k[1], k[2]),
+    caster: datan2(-k[0], k[2]),
     scrub: ws.cp[1] - gy,
     trail: gx - ws.cp[0],
   };
@@ -172,7 +173,7 @@ export const IC_FAR = 1000;
  * the patch velocity, so it stays defined for parallel arms (IC at infinity, clamped to IC_FAR).
  */
 export function instantCentre(vcp: V3, wx: number, cp: V3, ic: V3, dir: V3): void {
-  const l = Math.hypot(vcp[2], vcp[1]);
+  const l = hypot2(vcp[2], vcp[1]);
   const s = wx < 0 ? -1 : 1;
   dir[0] = (-vcp[2] / l) * s;
   dir[1] = (vcp[1] / l) * s;

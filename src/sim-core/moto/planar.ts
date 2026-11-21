@@ -22,6 +22,8 @@ import type { LinkageRear, MotorcycleSuspensionDefinition, SwingarmRear, Telelev
 import type { Vec3 } from '../../contracts/units';
 import type { MotorcycleDefinition } from '../../contracts/vehicle';
 import { findInterval } from '../math/interp';
+import { dasin, datan2, dcos, dsin } from '../math/det';
+import { hypot2 } from '../math/vec3';
 
 /** Distance from the axle to the sliding joint along the fork leg, m (drawing convention, not physics). */
 export const SLIDER = 0.34;
@@ -98,8 +100,8 @@ function put(out: Float64Array, k: number, x: number, z: number): void {
 }
 
 function telescopic(f: TelescopicFront, axle: readonly [number, number], radius: number): Mechanism {
-  const sn = Math.sin(f.rake);
-  const cs = Math.cos(f.rake);
+  const sn = dsin(f.rake);
+  const cs = dcos(f.rake);
   const [ax, az] = axle;
   const h = f.steeringHead;
   const crownX = h[0] + f.offset * cs;
@@ -123,7 +125,7 @@ function telescopic(f: TelescopicFront, axle: readonly [number, number], radius:
       out[DZ] = cs;
       const bx = wx - SLIDER * sn;
       const bz = wz + SLIDER * cs;
-      out[LEN] = Math.hypot(crownX - bx, crownZ - bz);
+      out[LEN] = hypot2(crownX - bx, crownZ - bz);
       put(out, 0, h[0], h[2]);
       put(out, 1, crownX, crownZ);
       put(out, 2, bx, bz);
@@ -140,10 +142,10 @@ function telelever(f: TeleleverFront, axle: readonly [number, number], radius: n
   const [sx0, , sz0] = f.shockArm;
   const [tx, , tz] = f.shockTop;
   const [ax, az] = axle;
-  const alpha0 = Math.atan2(hz - jz0, hx - jx0);
+  const alpha0 = datan2(hz - jz0, hx - jx0);
   // Lower fork body points relative to the joint at design: wheel centre, tyre bottom, sliding joint of the leg.
-  const d0x = Math.cos(alpha0);
-  const d0z = Math.sin(alpha0);
+  const d0x = dcos(alpha0);
+  const d0z = dsin(alpha0);
   const rel = [ax - jx0, az - jz0, ax - jx0, az - radius - jz0, ax + SLIDER * d0x - jx0, az + SLIDER * d0z - jz0];
   return {
     order: POINT_ORDER.telelever,
@@ -154,26 +156,26 @@ function telelever(f: TeleleverFront, axle: readonly [number, number], radius: n
     qMax: 0.8,
     armRate: 0,
     pose(q, out) {
-      const c = Math.cos(q);
-      const s = Math.sin(q);
+      const c = dcos(q);
+      const s = dsin(q);
       const jx = px + rotX(jx0 - px, jz0 - pz, c, s);
       const jz = pz + rotZ(jx0 - px, jz0 - pz, c, s);
-      const alpha = Math.atan2(hz - jz, hx - jx);
-      const dc = Math.cos(alpha - alpha0);
-      const ds = Math.sin(alpha - alpha0);
+      const alpha = datan2(hz - jz, hx - jx);
+      const dc = dcos(alpha - alpha0);
+      const ds = dsin(alpha - alpha0);
       const wx = jx + rotX(rel[0]!, rel[1]!, dc, ds);
       const wz = jz + rotZ(rel[0]!, rel[1]!, dc, ds);
       out[WX] = wx;
       out[WZ] = wz;
       out[PX] = jx + rotX(rel[2]!, rel[3]!, dc, ds);
       out[PZ] = jz + rotZ(rel[2]!, rel[3]!, dc, ds);
-      const dx = Math.cos(alpha);
-      const dz = Math.sin(alpha);
+      const dx = dcos(alpha);
+      const dz = dsin(alpha);
       out[DX] = dx;
       out[DZ] = dz;
       const sax = px + rotX(sx0 - px, sz0 - pz, c, s);
       const saz = pz + rotZ(sx0 - px, sz0 - pz, c, s);
-      out[LEN] = Math.hypot(tx - sax, tz - saz);
+      out[LEN] = hypot2(tx - sax, tz - saz);
       put(out, 0, hx, hz);
       put(out, 1, hx + f.offset * dz, hz - f.offset * dx);
       put(out, 2, jx + rotX(rel[4]!, rel[5]!, dc, ds), jz + rotZ(rel[4]!, rel[5]!, dc, ds));
@@ -203,8 +205,8 @@ function swingarm(r: SwingarmRear, radius: number): Mechanism {
     armRate: -1,
     pivot: r.pivot,
     pose(q, out) {
-      const c = Math.cos(-q);
-      const s = Math.sin(-q);
+      const c = dcos(-q);
+      const s = dsin(-q);
       const wx = px + rotX(ax0 - px, az0 - pz, c, s);
       const wz = pz + rotZ(ax0 - px, az0 - pz, c, s);
       out[WX] = wx;
@@ -213,7 +215,7 @@ function swingarm(r: SwingarmRear, radius: number): Mechanism {
       out[PZ] = pz + rotZ(ax0 - px, az0 - radius - pz, c, s);
       const lx = px + rotX(lx0 - px, lz0 - pz, c, s);
       const lz = pz + rotZ(lx0 - px, lz0 - pz, c, s);
-      out[LEN] = Math.hypot(tx - lx, tz - lz);
+      out[LEN] = hypot2(tx - lx, tz - lz);
       put(out, 0, px, pz);
       put(out, 1, wx, wz);
       put(out, 2, tx, tz);
@@ -231,9 +233,9 @@ function linkage(r: LinkageRear, radius: number): Mechanism {
   const [qx0, , qz0] = r.rockerLink;
   const [cx0, , cz0] = r.rockerShock;
   const [tx, , tz] = r.shockTop;
-  const rq = Math.hypot(qx0 - bx, qz0 - bz);
-  const link = Math.hypot(qx0 - sx0, qz0 - sz0);
-  const beta0 = Math.atan2(qz0 - bz, qx0 - bx);
+  const rq = hypot2(qx0 - bx, qz0 - bz);
+  const link = hypot2(qx0 - sx0, qz0 - sz0);
+  const beta0 = datan2(qz0 - bz, qx0 - bx);
   // Assembly branch: the side of line B->S the rocker point lies on in the drawn design.
   const branch = Math.sign((sx0 - bx) * (qz0 - bz) - (sz0 - bz) * (qx0 - bx)) || 1;
   return {
@@ -246,8 +248,8 @@ function linkage(r: LinkageRear, radius: number): Mechanism {
     armRate: -1,
     pivot: r.pivot,
     pose(q, out) {
-      const c = Math.cos(-q);
-      const s = Math.sin(-q);
+      const c = dcos(-q);
+      const s = dsin(-q);
       const wx = px + rotX(ax0 - px, az0 - pz, c, s);
       const wz = pz + rotZ(ax0 - px, az0 - pz, c, s);
       out[WX] = wx;
@@ -259,17 +261,17 @@ function linkage(r: LinkageRear, radius: number): Mechanism {
       // Circle (B, rq) ∩ circle (S, link).
       const ex = sx - bx;
       const ez = sz - bz;
-      const d = Math.hypot(ex, ez);
+      const d = hypot2(ex, ez);
       const a = (rq * rq - link * link + d * d) / (2 * d);
       const hh = Math.sqrt(Math.max(0, rq * rq - a * a));
       const qx = bx + (a * ex - branch * hh * ez) / d;
       const qz = bz + (a * ez + branch * hh * ex) / d;
-      const db = Math.atan2(qz - bz, qx - bx) - beta0;
-      const rc = Math.cos(db);
-      const rs = Math.sin(db);
+      const db = datan2(qz - bz, qx - bx) - beta0;
+      const rc = dcos(db);
+      const rs = dsin(db);
       const kx = bx + rotX(cx0 - bx, cz0 - bz, rc, rs);
       const kz = bz + rotZ(cx0 - bx, cz0 - bz, rc, rs);
-      out[LEN] = Math.hypot(tx - kx, tz - kz);
+      out[LEN] = hypot2(tx - kx, tz - kz);
       put(out, 0, px, pz);
       put(out, 1, wx, wz);
       put(out, 2, bx, bz);
@@ -286,10 +288,10 @@ function linkage(r: LinkageRear, radius: number): Mechanism {
 function chainTopRun(ax: number, az: number, ex: number, ez: number, rr: number, rf: number, out: Float64Array): void {
   const dx = ex - ax;
   const dz = ez - az;
-  const dist = Math.hypot(dx, dz);
-  const th = Math.atan2(dz, dx) - Math.asin((rr - rf) / dist);
-  out[0] = Math.cos(th);
-  out[1] = Math.sin(th);
+  const dist = hypot2(dx, dz);
+  const th = datan2(dz, dx) - dasin((rr - rf) / dist);
+  out[0] = dcos(th);
+  out[1] = dsin(th);
   // Upward normal of the run.
   out[2] = ax - rr * out[1];
   out[3] = az + rr * out[0];
@@ -316,7 +318,7 @@ function clampIc(row: Float64Array, cx: number, cz: number, fx: number, fz: numb
     dx = fx;
     dz = fz;
   }
-  const d = Math.hypot(dx, dz);
+  const d = hypot2(dx, dz);
   // An IC at infinity (parallel links, telescopic fork) sits at IC_MAX so overlays read it as "far", not near.
   const k = atInfinity || d > IC_MAX ? IC_MAX / d : 1;
   row[ICX] = cx + dx * k;

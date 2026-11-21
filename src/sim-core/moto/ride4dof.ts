@@ -16,6 +16,7 @@
  */
 import type { DamperSpec, SpringSpec } from '../../contracts/suspension';
 import { LEN, MR, KX, CHI, type EndTable } from './planar';
+import { dtanh } from '../math/det';
 
 const SUBSTEPS = 4;
 /** Fork/shock stiction regularisation speed (tanh), m/s at the wheel. */
@@ -124,7 +125,7 @@ export function suspensionForce(p: EndParams, w: number, wd: number, out: Float6
   const fs = springForce(p.spring, x, p.xMax);
   const v = mr * wd;
   const fd = (v > 0 ? p.damper.bump : p.damper.rebound) * v;
-  let s = n * (fs + fd) * mr + p.stiction * mr * Math.tanh(wd / STICTION_V);
+  let s = n * (fs + fd) * mr + p.stiction * mr * dtanh(wd / STICTION_V);
   let stop = 0;
   const eb = w - p.bump;
   if (eb > 0) {

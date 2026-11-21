@@ -11,6 +11,7 @@ import type { PathState } from '../../contracts/sim';
 import type { BuiltTrack, TrackSample } from '../../contracts/track';
 import type { DrivingLimits } from '../../contracts/vehicle';
 import { findInterval, lerp, lowPassAlpha, wrap } from '../math/interp';
+import { datan, dcos, dsin, dtan } from '../math/det';
 
 export interface SpeedProfile {
   readonly lapDuration: number;
@@ -44,7 +45,7 @@ export function buildSpeedProfile(track: BuiltTrack, limits: DrivingLimits, drag
     const l0 = track.lineOffset(s);
     const lp = track.lineOffset(s + LINE_H);
     kappa[i] = track.sample(s, tmp).curvature + (lp - 2 * l0 + lm) / (LINE_H * LINE_H);
-    dHeading[i] = Math.atan((lp - lm) / (2 * LINE_H));
+    dHeading[i] = datan((lp - lm) / (2 * LINE_H));
     // A node also takes the caps of its neighbours' sections, so no interpolated point near a boundary exceeds them.
     const target = Math.min(targetSpeed(s - ds), targetSpeed(s), targetSpeed(s + ds));
     vLim[i] = Math.min(limits.vMax, target, Math.sqrt(limits.lateral / Math.max(Math.abs(kappa[i]!), 1e-9)));
@@ -123,8 +124,8 @@ export function buildSpeedProfile(track: BuiltTrack, limits: DrivingLimits, drag
       const s = (i + f) * ds;
       const l = track.lineOffset(s);
       track.sample(s, sample);
-      const c = Math.cos(sample.heading);
-      const sn = Math.sin(sample.heading);
+      const c = dcos(sample.heading);
+      const sn = dsin(sample.heading);
       out.lapTime = t;
       out.s = s;
       out.l = l;
@@ -135,7 +136,7 @@ export function buildSpeedProfile(track: BuiltTrack, limits: DrivingLimits, drag
       out.heading = sample.heading + lerp(dHeading[i]!, dHeading[i + 1]!, f);
       out.x = sample.x - sn * l;
       out.y = sample.y + c * l;
-      out.z = sample.z + l * Math.tan(sample.bank);
+      out.z = sample.z + l * dtan(sample.bank);
       out.bank = sample.bank;
       out.grade = sample.grade;
       out.sectionIndex = track.sectionIndexAt(s);

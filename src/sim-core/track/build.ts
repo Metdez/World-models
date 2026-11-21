@@ -12,6 +12,7 @@ import { findInterval, wrap, wrapAngle } from '../math/interp';
 import { knotOffset } from '../path/path';
 import { advancePose, integratePlan, primitiveLength, solveClosure } from './closure';
 import { createSurface } from './surface';
+import { dcos, dsin } from '../math/det';
 
 export function buildTrack(def: TrackDefinition): BuiltTrack {
   const segments = solveClosure(def);
@@ -69,8 +70,8 @@ export function buildTrack(def: TrackDefinition): BuiltTrack {
     },
     toWorld(s, l, out) {
       track.sample(s, scratch);
-      out.x = scratch.x - Math.sin(scratch.heading) * l;
-      out.y = scratch.y + Math.cos(scratch.heading) * l;
+      out.x = scratch.x - dsin(scratch.heading) * l;
+      out.y = scratch.y + dcos(scratch.heading) * l;
       out.z = track.roadHeight(s, l);
       return out;
     },

@@ -23,6 +23,7 @@ import * as quat from '../math/quat';
 import { createLean, GAMMA, PHI, STEER, type Lean } from './lean';
 import { buildMotoTables, axlePositions, CHI, DX, DZ, ICX, ICZ, KX, LEN, MR, POINTS, WX, WZ, type EndTable, type MotoTables } from './planar';
 import { createRide4, prepareEnd, TH, Z, type EndParams, type Ride4, type Ride4Input } from './ride4dof';
+import { datan, datan2, dcos, dsin, dtan } from '../math/det';
 
 const LAYOUT: readonly CornerLayout[] = [
   { id: 'f', axle: 'front', side: 0 },
@@ -72,8 +73,8 @@ const solved = new WeakMap<MotorcycleSuspensionDefinition, WeakMap<MotorcycleDef
 
 /** Trail (m, + when the steering axis meets the ground ahead of the contact) of a posed front table row. */
 export function trailOf(row: Float64Array, head: readonly [number, number], pitch: number, heave: number, groundZ: number): number {
-  const c = Math.cos(pitch);
-  const s = Math.sin(pitch);
+  const c = dcos(pitch);
+  const s = dsin(pitch);
   // Nose-down pitch: x' = x cos + z sin, z' = −x sin + z cos.
   const hx = head[0] * c + head[1] * s;
   const hz = -head[0] * s + head[1] * c + heave;
@@ -162,7 +163,7 @@ export function prepareMotoSuspension(vehicle: MotorcycleDefinition, s: Motorcyc
       rollCentreHeight: NaN,
       rollCentreMigration: NaN,
       kingpinInclination: NaN,
-      caster: end === 'front' ? Math.atan2(-row[DX]!, row[DZ]!) : NaN,
+      caster: end === 'front' ? datan2(-row[DX]!, row[DZ]!) : NaN,
       scrubRadius: NaN,
       trail: end === 'front' ? trailOf(row, head, 0, 0, front.tyreDeflection) : NaN,
       antiPitch: anti,
@@ -252,14 +253,14 @@ export function createMotoModel(vehicleDef: VehicleDefinition, suspensionDef: Su
   function roadInputs(path: PathState): void {
     track.sample(path.s, ts);
     const dpsi = wrapAngle(path.heading - ts.heading);
-    const c = Math.cos(dpsi);
-    const sn = Math.sin(dpsi);
-    const zc = ts.z + path.l * Math.tan(ts.bank);
+    const c = dcos(dpsi);
+    const sn = dsin(dpsi);
+    const zc = ts.z + path.l * dtan(ts.bank);
     for (let i = 0; i < 2; i++) {
       const si = path.s + xs[i]! * c;
       const li = path.l + xs[i]! * sn;
       track.sample(si, ts);
-      const smooth = ts.z + li * Math.tan(ts.bank);
+      const smooth = ts.z + li * dtan(ts.bank);
       plane[i] = smooth;
       const r = (track.roadHeight(si - ENVELOPE, li) + track.roadHeight(si, li) + track.roadHeight(si + ENVELOPE, li)) / 3;
       input.road[i] = r - smooth;
@@ -298,14 +299,14 @@ export function createMotoModel(vehicleDef: VehicleDefinition, suspensionDef: Su
     head2[1] = head[1]!;
     const defF = ride.load[0]! / tyres[0].verticalStiffness;
     cur[TRAIL] = trailOf(r0, head2, q[TH]!, q[Z]!, rowGround(r0, q[TH]!, q[Z]!, defF, 0));
-    const c = Math.cos(q[TH]!);
-    const s = Math.sin(q[TH]!);
+    const c = dcos(q[TH]!);
+    const s = dsin(q[TH]!);
     cur[WB] = r0[WX]! * c + r0[WZ]! * s - (r1[WX]! * c + r1[WZ]! * s);
     cur[ANTI] = (share[0] * r0[KX]! * L) / h;
     cur[ANTI + 1] = (-(r1[KX]! + sol.sprocketRatio * r1[CHI]!) * L) / h;
     const gamma = ls[GAMMA]!;
-    const cosG = Math.cos(gamma);
-    const sinG = Math.sin(gamma);
+    const cosG = dcos(gamma);
+    const sinG = dsin(gamma);
     for (let i = 0; i < 2; i++) {
       const o = ENDS + i * STRIDE;
       const r = ride.rows[i]!;
@@ -338,7 +339,7 @@ export function createMotoModel(vehicleDef: VehicleDefinition, suspensionDef: Su
 
   /** Ground height (plane coordinates) under a posed wheel row: wheel-centre height minus the loaded radius. */
   function rowGround(r: Float64Array, pitch: number, heave: number, deflection: number, end: number): number {
-    const wz = -r[WX]! * Math.sin(pitch) + r[WZ]! * Math.cos(pitch) + heave;
+    const wz = -r[WX]! * dsin(pitch) + r[WZ]! * dcos(pitch) + heave;
     return wz - (tyres[end]!.radius - deflection);
   }
 
@@ -355,7 +356,7 @@ export function createMotoModel(vehicleDef: VehicleDefinition, suspensionDef: Su
   /** Body pose (world) for a path state, relative pitch/heave and lean; fills `body`, `origin`, `nRoad`. */
   function poseBody(path: PathState, pitch: number, heave: number, roll: number): void {
     roadInputs(path);
-    const pitchPlane = -Math.atan((plane[0]! - plane[1]!) / L);
+    const pitchPlane = -datan((plane[0]! - plane[1]!) / L);
     quat.fromRollPitchYaw(qa, 0, pitchPlane, path.heading);
     quat.fromRollPitchYaw(qb, path.bank, 0, 0);
     quat.multiply(qa, qa, qb);

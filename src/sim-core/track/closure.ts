@@ -4,6 +4,7 @@
  * Simpson's rule per node step, which is accurate to ~1e-10 m per step at <= 0.25 m spacing.
  */
 import type { TrackDefinition, TrackPrimitive, TrackSegmentDefinition } from '../../contracts/track';
+import { dcos, dsin } from '../math/det';
 
 /** Maximum node spacing along the centreline, m. */
 export const NODE_DS = 0.25;
@@ -40,8 +41,8 @@ export function primitiveTurn(p: TrackPrimitive): number {
 export function advancePose(x: number, y: number, psi: number, k: number, dk: number, u: number, out: { x: number; y: number; psi: number }): void {
   const pm = psi + 0.5 * k * u + 0.125 * dk * u * u;
   const p1 = psi + k * u + 0.5 * dk * u * u;
-  out.x = x + (u / 6) * (Math.cos(psi) + 4 * Math.cos(pm) + Math.cos(p1));
-  out.y = y + (u / 6) * (Math.sin(psi) + 4 * Math.sin(pm) + Math.sin(p1));
+  out.x = x + (u / 6) * (dcos(psi) + 4 * dcos(pm) + dcos(p1));
+  out.y = y + (u / 6) * (dsin(psi) + 4 * dsin(pm) + dsin(p1));
   out.psi = p1;
 }
 
@@ -124,10 +125,10 @@ export function solveClosure(def: TrackDefinition): TrackSegmentDefinition[] {
   const ha = headingBefore(ia);
   const hb = headingBefore(ib);
   // La * (cos ha, sin ha) + Lb * (cos hb, sin hb) = -(ex, ey)
-  const det = Math.cos(ha) * Math.sin(hb) - Math.sin(ha) * Math.cos(hb);
+  const det = dcos(ha) * dsin(hb) - dsin(ha) * dcos(hb);
   if (Math.abs(det) < 1e-6) throw new Error('closure lines are parallel; pick two non-parallel straights');
-  const la = (-ex * Math.sin(hb) + ey * Math.cos(hb)) / det;
-  const lb = (-ey * Math.cos(ha) + ex * Math.sin(ha)) / det;
+  const la = (-ex * dsin(hb) + ey * dcos(hb)) / det;
+  const lb = (-ey * dcos(ha) + ex * dsin(ha)) / det;
   if (!(la > 0 && lb > 0)) throw new Error(`closure solve gave non-positive lengths ${la}, ${lb}`);
   return def.segments.map((seg, i) => (i === ia || i === ib ? { ...seg, primitives: [{ kind: 'line', length: i === ia ? la : lb }] } : seg));
 }

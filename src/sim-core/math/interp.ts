@@ -1,4 +1,5 @@
 /** Scalar helpers, angle wrapping, lookup tables and filters. Pure, allocation-free. */
+import { dcos, dexp } from './det';
 
 const TAU = 2 * Math.PI;
 
@@ -11,7 +12,7 @@ export function smoothstep(e0: number, e1: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 /** Raised-cosine blend from a (t = 0) to b (t = 1), zero slope at both ends. */
-export const cosineBlend = (a: number, b: number, t: number): number => a + ((b - a) * (1 - Math.cos(Math.PI * clamp(t, 0, 1)))) / 2;
+export const cosineBlend = (a: number, b: number, t: number): number => a + ((b - a) * (1 - dcos(Math.PI * clamp(t, 0, 1)))) / 2;
 
 /** x modulo period into [0, period) (also for negative x). */
 export function wrap(x: number, period: number): number {
@@ -79,4 +80,4 @@ export function cumulativeTrapezoid(xs: Float64Array, ys: Float64Array, out: Flo
  * Gain of a first-order low-pass sampled every dt: y += alpha * (x - y). Exact discretisation of
  * 1 / (1 + s / (2 pi f)), so the result does not depend on the step size beyond sampling.
  */
-export const lowPassAlpha = (dt: number, cutoffHz: number): number => 1 - Math.exp(-TAU * cutoffHz * dt);
+export const lowPassAlpha = (dt: number, cutoffHz: number): number => 1 - dexp(-TAU * cutoffHz * dt);

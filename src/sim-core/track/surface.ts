@@ -9,6 +9,7 @@ import { lerp } from '../math/interp';
 import { primitiveLength } from './closure';
 import { featureHeight, verticalCurveGrade, verticalCurveZ, type RoadEdges } from './features';
 import { classScale, createRoughness } from './iso8608';
+import { dcos, dsin, dtan } from '../math/det';
 
 /** Half-length of the linear roughness-class blend around each section boundary, m. */
 const CLASS_BLEND = 5;
@@ -44,14 +45,14 @@ export function createSurface(def: TrackDefinition, sections: readonly BuiltSect
 
   const surface: Surface = {
     elevation(s, i) {
-      let z = def.swell.amplitude * Math.sin(swellK * s);
+      let z = def.swell.amplitude * dsin(swellK * s);
       const x = s - sections[i]!.s0;
       const c = curves[i]!;
       for (let j = 0; j < c.length; j++) z += verticalCurveZ(c[j]!, x);
       return z;
     },
     grade(s, i) {
-      let g = def.swell.amplitude * swellK * Math.cos(swellK * s);
+      let g = def.swell.amplitude * swellK * dcos(swellK * s);
       const x = s - sections[i]!.s0;
       const c = curves[i]!;
       for (let j = 0; j < c.length; j++) g += verticalCurveGrade(c[j]!, x);
@@ -74,7 +75,7 @@ export function createSurface(def: TrackDefinition, sections: readonly BuiltSect
       let k = scale[i]!;
       if (x < CLASS_BLEND) k = lerp(scale[(i + n - 1) % n]!, k, 0.5 + x / (2 * CLASS_BLEND));
       else if (sec.s1 - s < CLASS_BLEND) k = lerp(k, scale[(i + 1) % n]!, 0.5 - (sec.s1 - s) / (2 * CLASS_BLEND));
-      let h = surface.elevation(s, i) + l * Math.tan(surface.bank(s, i)) + k * roughness.at(s, l);
+      let h = surface.elevation(s, i) + l * dtan(surface.bank(s, i)) + k * roughness.at(s, l);
       const b = bumps[i]!;
       for (let j = 0; j < b.length; j++) h += featureHeight(b[j]!, x, l, edges);
       return h;

@@ -5,7 +5,8 @@
  *
  * Lifted code (verify at lift time: done 2026-11-21 from the npm tarballs):
  * - dsin/dcos/dtan kernels and the medium (Cody–Waite) argument reduction: stdlib-js
- *   `@stdlib/math-base-special-{kernel-sin,kernel-cos,kernel-tan,rempio2}`,
+ *   `@stdlib/math-base-special-{kernel-sin,kernel-cos,kernel-tan,rempio2}`; kernelSin/kernelCos use the original
+ *   fdlibm 5.3 k_sin.c/k_cos.c evaluation (as V8 does), so dsin/dcos equal V8's Math.sin/cos bit for bit (09-03);
  *   https://github.com/stdlib-js/stdlib, Copyright (c) 2018 The Stdlib Authors, SPDX-License-Identifier: Apache-2.0.
  * - dlog: stdlib-js `@stdlib/math-base-special-ln` (Apache-2.0); dexp: `@stdlib/math-base-special-exp` (Apache-2.0,
  *   from Go's math/exp.go, Copyright (c) 2009 The Go Authors, BSD-3-Clause); expm1 (inside dtanh):
@@ -17,7 +18,7 @@
  *   Permission to use, copy, modify, and distribute this software is freely granted, provided that this notice
  *   is preserved.
  *
- * dpow is NOT a correctly rounded pow: integer |y| <= 16 by repeated squaring, otherwise dexp(y * dlog x) (x > 0).
+ * dpow (x > 0): integer |y| <= 16 by repeated squaring, otherwise the fdlibm pow core.
  * Arguments of dsin/dcos/dtan must satisfy |x| < 2^20 * pi/2 (the medium reduction; the plant never passes more).
  */
 
@@ -57,21 +58,22 @@ const S5 = -2.50507602534068634195e-8;
 const S6 = 1.58969099521155010221e-10;
 function kernelSin(x: number, y: number): number {
   const z = x * x;
-  const w = z * z;
-  const r = S2 + z * (S3 + z * S4) + z * w * (S5 + z * S6);
+  const r = S2 + z * (S3 + z * (S4 + z * (S5 + z * S6)));
   const v = z * x;
   if (y === 0) return x + v * (S1 + z * r);
   return x - (z * (0.5 * y - v * r) - y - v * S1);
 }
 
 function kernelCos(x: number, y: number): number {
+  const ix = highWord(x) & 0x7fffffff;
+  if (ix < 0x3e400000) return 1;
   const z = x * x;
-  let w = z * z;
-  let r = z * (0.0416666666666666 + z * (-0.001388888888887411 + z * 0.00002480158728947673));
-  r += w * w * (-2.7557314351390663e-7 + z * (2.087572321298175e-9 + z * -1.1359647557788195e-11));
-  const hz = 0.5 * z;
-  w = 1 - hz;
-  return w + (1 - w - hz + (z * r - x * y));
+  const r = z * (0.0416666666666666 + z * (-0.001388888888887411 + z * (0.00002480158728947673 + z * (-2.7557314351390663e-7 + z * (2.087572321298175e-9 + z * -1.1359647557788195e-11)))));
+  if (ix < 0x3fd33333) return 1 - (0.5 * z - (z * r - x * y));
+  // |x| >= 0.3: subtract qx (about x/4, exact in its high word) first so 1 - z/2 keeps its low bits.
+  const qx = ix > 0x3fe90000 ? 0.28125 : fromWords(ix - 0x00200000, 0);
+  const hz = 0.5 * z - qx;
+  return 1 - qx - (hz - (z * r - x * y));
 }
 
 const PIO4 = 7.85398163397448278999e-1;
@@ -497,7 +499,124 @@ export function dtanh(x: number): number {
   return jx >= 0 ? z : -z;
 }
 
-/** x^y for x > 0: integer |y| <= 16 by repeated squaring, otherwise dexp(y * dlog x). */
+// ---- pow core for x > 0 (fdlibm e_pow.c; via stdlib-js `@stdlib/math-base-special-pow` 0.3.1, Apache-2.0, without its
+// y = 3 / y = 4 shortcuts so it matches fdlibm bit for bit): log2(x) in extra precision, times y, then 2^(hp + lp).
+const POW_L = [0.5999999999999946, 0.4285714285785502, 0.33333332981837743, 0.272728123808534, 0.23066074577556175, 0.20697501780033842] as const;
+const CP = 9.61796693925975554329e-1;
+const CP_HI = 9.61796700954437255859e-1;
+const CP_LO = -7.02846165095275826516e-9;
+const DP_HI1 = 5.84962487220764160156e-1;
+const DP_LO1 = 1.35003920212974897128e-8;
+const INV_LN2 = 1.442695040888963387;
+const INV_LN2_HI = 1.44269502162933349609;
+const INV_LN2_LO = 1.92596299112661746887e-8;
+const LN2 = 6.93147180559945286227e-1;
+const POW_LN2_HI = 6.93147182464599609375e-1;
+const POW_LN2_LO = -1.90465429995776804525e-9;
+const OVT = 8.0085662595372944372e-17;
+const TWO53 = 9007199254740992;
+function withHighWord(x: number, hi: number): number {
+  F64[0] = x;
+  U32[HI] = hi >>> 0;
+  return F64[0]!;
+}
+function powPositive(xIn: number, y: number): number {
+  if (xIn === 1) return 1;
+  if (y === 0.5) return Math.sqrt(xIn);
+  let ax = xIn;
+  let ahx = highWord(ax);
+  const ahy = highWord(y) & 0x7fffffff;
+  let t1: number;
+  let t2: number;
+  if (ahy > 0x41e00000) {
+    // |y| > 2^31: over/underflow unless x is within 2^-20 of 1, where log x ~ t - t^2/2 + t^3/3 - t^4/4.
+    if (ahy > 0x43f00000 || ahx < 0x3fefffff || ahx > 0x3ff00000) return (ahx < 0x3ff00000) === y < 0 ? Infinity : 0;
+    const t = ax - 1;
+    const w = t * t * (0.5 - t * (0.3333333333333333 - t * 0.25));
+    const u = INV_LN2_HI * t;
+    const v = t * INV_LN2_LO - w * INV_LN2;
+    t1 = withLowWord(u + v, 0);
+    t2 = v - (t1 - u);
+  } else {
+    let n = 0;
+    if (ahx < 0x00100000) {
+      ax *= TWO53;
+      n -= 53;
+      ahx = highWord(ax);
+    }
+    n += (ahx >> 20) - 0x3ff;
+    const j = ahx & 0x000fffff;
+    ahx = j | 0x3ff00000;
+    let k = 0;
+    if (j <= 0x3988e) k = 0;
+    else if (j < 0xbb67a) k = 1;
+    else {
+      n += 1;
+      ahx -= 0x00100000;
+    }
+    ax = withHighWord(ax, ahx);
+    const bp = k === 0 ? 1 : 1.5;
+    let u = ax - bp;
+    let v = 1 / (ax + bp);
+    const ss = u * v;
+    const hs = withLowWord(ss, 0);
+    let ht = fromWords(((ahx >> 1) | 0x20000000) + 0x00080000 + (k << 18), 0);
+    let lt = ax - (ht - bp);
+    const ls = v * (u - hs * ht - hs * lt);
+    let s2 = ss * ss;
+    let r = s2 * s2 * (POW_L[0] + s2 * (POW_L[1] + s2 * (POW_L[2] + s2 * (POW_L[3] + s2 * (POW_L[4] + s2 * POW_L[5])))));
+    r += ls * (hs + ss);
+    s2 = hs * hs;
+    ht = withLowWord(3 + s2 + r, 0);
+    lt = r - (ht - 3 - s2);
+    u = hs * ht;
+    v = ls * ht + lt * ss;
+    const hp = withLowWord(u + v, 0);
+    const lp = v - (hp - u);
+    const hz = CP_HI * hp;
+    const dpHi = k === 0 ? 0 : DP_HI1;
+    const lz = CP_LO * hp + lp * CP + (k === 0 ? 0 : DP_LO1);
+    t1 = withLowWord(hz + lz + dpHi + n, 0);
+    t2 = lz - (t1 - n - dpHi - hz);
+  }
+  // (y1 + y2) * (t1 + t2), y1 = y with a zero low word
+  const y1 = withLowWord(y, 0);
+  const lp = (y - y1) * t1 + y * t2;
+  let hp = y1 * t1;
+  let z = lp + hp;
+  let j = highWord(z);
+  const i = lowWord(z) | 0;
+  if (j >= 0x40900000) {
+    if (((j - 0x40900000) | i) !== 0 || lp + OVT > z - hp) return Infinity;
+  } else if ((j & 0x7fffffff) >= 0x4090cc00) {
+    if (((j - (0xc090cc00 | 0)) | i) !== 0 || lp <= z - hp) return 0;
+  }
+  // 2^(hp + lp)
+  const ia = j & 0x7fffffff;
+  let k = (ia >> 20) - 0x3ff;
+  let n = 0;
+  if (ia > 0x3fe00000) {
+    n = j + (0x00100000 >> (k + 1));
+    k = ((n & 0x7fffffff) >> 20) - 0x3ff;
+    const t = fromWords(n & ~(0x000fffff >> k), 0);
+    n = ((n & 0x000fffff) | 0x00100000) >> (20 - k);
+    if (j < 0) n = -n;
+    hp -= t;
+  }
+  const t = withLowWord(lp + hp, 0);
+  const u = t * POW_LN2_HI;
+  const v = (lp - (t - hp)) * LN2 + t * POW_LN2_LO;
+  z = u + v;
+  const w = v - (z - u);
+  const tt = z * z;
+  const c = z - tt * (0.16666666666666602 + tt * (-0.0027777777777015593 + tt * (0.00006613756321437934 + tt * (-0.0000016533902205465252 + tt * 4.1381367970572385e-8))));
+  const r = (z * c) / (c - 2) - (w + z * w);
+  z = 1 - (r - z);
+  j = highWord(z) + (n << 20);
+  return j >> 20 <= 0 ? ldexp(z, n) : withHighWord(z, j);
+}
+
+/** x^y for x > 0: integer |y| <= 16 by repeated squaring, otherwise fdlibm's pow (within 1 ulp of V8's Math.pow). */
 export function dpow(x: number, y: number): number {
   if (y === Math.trunc(y) && Math.abs(y) <= 16) {
     let n = Math.abs(y);
@@ -510,7 +629,7 @@ export function dpow(x: number, y: number): number {
     }
     return y < 0 ? 1 / r : r;
   }
-  return dexp(y * dlog(x));
+  return powPositive(x, y);
 }
 
 export const dhypot = (x: number, y: number): number => Math.sqrt(x * x + y * y);

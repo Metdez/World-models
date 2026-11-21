@@ -5,6 +5,7 @@
 import type { RoadFeature } from '../../contracts/track';
 import { hashFloat } from '../math/rng';
 import { smoothstep } from '../math/interp';
+import { dcos, dlog, dsin } from '../math/det';
 
 /** Soft lateral edge of a one-sided bump, inside its [l0, l1] band (m). */
 const BUMP_EDGE = 0.15;
@@ -20,7 +21,7 @@ const PAVE_TAPER = 0.3;
 const TAU = 2 * Math.PI;
 
 /** Raised cosine 0 -> h -> 0 over [0, len]. */
-const raisedCosine = (u: number, len: number, h: number): number => (u <= 0 || u >= len ? 0 : 0.5 * h * (1 - Math.cos((TAU * u) / len)));
+const raisedCosine = (u: number, len: number, h: number): number => (u <= 0 || u >= len ? 0 : 0.5 * h * (1 - dcos((TAU * u) / len)));
 
 export interface RoadEdges {
   /** Half asphalt width and kerb width, m. */
@@ -61,8 +62,8 @@ export function featureHeight(f: RoadFeature, x: number, l: number, edges: RoadE
       const w0 = f.wavelength[0];
       const w1 = f.wavelength[1];
       // Linear wavelength chirp: phase = 2 pi * integral(du / lambda(u)).
-      const phase = w1 === w0 ? (TAU * u) / w0 : ((TAU * f.length) / (w1 - w0)) * Math.log((w0 + ((w1 - w0) * u) / f.length) / w0);
-      return f.amplitude * Math.sin(phase) * smoothstep(0, WASHBOARD_TAPER, u) * smoothstep(0, WASHBOARD_TAPER, f.length - u);
+      const phase = w1 === w0 ? (TAU * u) / w0 : ((TAU * f.length) / (w1 - w0)) * dlog((w0 + ((w1 - w0) * u) / f.length) / w0);
+      return f.amplitude * dsin(phase) * smoothstep(0, WASHBOARD_TAPER, u) * smoothstep(0, WASHBOARD_TAPER, f.length - u);
     }
     case 'pave': {
       const u = x - f.s;
@@ -90,5 +91,5 @@ export function featureHeight(f: RoadFeature, x: number, l: number, edges: RoadE
 export const verticalCurveZ = (f: Extract<RoadFeature, { kind: 'vertical-curve' }>, x: number): number => raisedCosine(x - f.s, f.length, f.height);
 export function verticalCurveGrade(f: Extract<RoadFeature, { kind: 'vertical-curve' }>, x: number): number {
   const u = x - f.s;
-  return u <= 0 || u >= f.length ? 0 : ((f.height * Math.PI) / f.length) * Math.sin((TAU * u) / f.length);
+  return u <= 0 || u >= f.length ? 0 : ((f.height * Math.PI) / f.length) * dsin((TAU * u) / f.length);
 }

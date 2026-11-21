@@ -29,6 +29,34 @@ export const dot = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2
 export const cross = (out: V3, a: Vec3, b: Vec3): V3 =>
   set(out, a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]);
 
+/**
+ * Math.hypot's algorithm (normalise by the largest magnitude, Kahan-sum the squares; V8's builtin) written with exact
+ * operations only: deterministic everywhere and bit-identical to V8's Math.hypot for finite inputs (ARCH-M2 §7.12).
+ */
+export function hypot2(x: number, y: number): number {
+  const ax = Math.abs(x);
+  const ay = Math.abs(y);
+  const m = Math.max(ax, ay);
+  if (!(m > 0 && m < Infinity)) return ax === Infinity || ay === Infinity ? Infinity : m;
+  const a = ax / m;
+  const b = ay / m;
+  return Math.sqrt(a * a + b * b) * m;
+}
+export function hypot3(x: number, y: number, z: number): number {
+  const ax = Math.abs(x);
+  const ay = Math.abs(y);
+  const az = Math.abs(z);
+  const m = Math.max(ax, ay, az);
+  if (!(m > 0 && m < Infinity)) return ax === Infinity || ay === Infinity || az === Infinity ? Infinity : m;
+  const a = ax / m;
+  const b = ay / m;
+  const c = az / m;
+  const sum = a * a;
+  const s = b * b;
+  const p = sum + s;
+  const comp = p - sum - s; // Kahan compensation of the second addition (the first is exact)
+  return Math.sqrt(p + (c * c - comp)) * m;
+}
 export const lengthSq = (a: Vec3): number => a[0] * a[0] + a[1] * a[1] + a[2] * a[2];
 export const length = (a: Vec3): number => Math.sqrt(lengthSq(a));
 export function distanceSq(a: Vec3, b: Vec3): number {

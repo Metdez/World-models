@@ -2,6 +2,7 @@
  * Deterministic pseudo-random numbers (identical on every device for the same seed).
  * mulberry32 by Tommy Ettinger (public domain); hash32 is a lowbias32-style integer mix (C. Wellons, public domain).
  */
+import { dcos, dlog, dsin } from './det';
 
 export interface Rng {
   /** Uniform in [0, 1). */
@@ -35,10 +36,10 @@ export function createRng(seed: number): Rng {
         return v;
       }
       const u = 1 - next(); // (0, 1]: log is finite
-      const r = Math.sqrt(-2 * Math.log(u));
+      const r = Math.sqrt(-2 * dlog(u));
       const phi = 2 * Math.PI * next();
-      spare = r * Math.sin(phi);
-      return r * Math.cos(phi);
+      spare = r * dsin(phi);
+      return r * dcos(phi);
     },
   };
 }

@@ -9,7 +9,7 @@ import type { AxleKinematics, AxleKinematicsSummary, AxleLinkage, KinematicsCurv
 import * as m3 from '../math/mat';
 import type { Quat } from '../math/quat';
 import { interp1 } from '../math/interp';
-import type { V3 } from '../math/vec3';
+import { hypot3, type V3 } from '../math/vec3';
 import { createLmSolver } from './lm';
 import {
   createTangentTools,
@@ -22,6 +22,7 @@ import {
   type TangentParam,
 } from './metrics';
 import { compileLinkage, type Spatial } from './spatial';
+import { dtan } from '../math/det';
 
 export interface CornerSolution {
   travel: number;
@@ -196,7 +197,7 @@ export function solveAxleKinematics(axle: AxleLinkage, opts: SolveOptions): { ta
   const rcDz = new Float64Array(nt);
   const su = sp.springUpperIdx * 3;
   const sl = sp.springLowerIdx * 3;
-  const springLen = (p: Float64Array): number => Math.hypot(p[su]! - p[sl]!, p[su + 1]! - p[sl + 1]!, p[su + 2]! - p[sl + 2]!);
+  const springLen = (p: Float64Array): number => hypot3(p[su]! - p[sl]!, p[su + 1]! - p[sl + 1]!, p[su + 2]! - p[sl + 2]!);
   const tangent = (xi: Float64Array, param: TangentParam): void => {
     if (!tools.tangent(xi, param, dx)) throw new Error(`kinematics: singular linkage at travel ${sp.travel} m, rack ${sp.rack} m`);
   };
@@ -407,11 +408,11 @@ export function solveAxleKinematics(axle: AxleLinkage, opts: SolveOptions): { ta
   // Outer wheel of a body rolled by phi goes into bump by halfTrack*tan(phi); roll tilts it outward by phi.
   const phi1 = Math.PI / 180;
   const xr = new Float64Array(6);
-  const bump1 = halfTrack * Math.tan(phi1);
+  const bump1 = halfTrack * dtan(phi1);
   solver.move(xr, 0, 0, bump1, 0);
   const rollCamber = (wheelState(sp, xr, createWheelState()).camber - ws.camber + phi1) / phi1;
   const phi2 = 2 * phi1;
-  const migration = Math.abs(rollCentre(-halfTrack * Math.tan(phi2), halfTrack * Math.tan(phi2))[0]!);
+  const migration = Math.abs(rollCentre(-halfTrack * dtan(phi2), halfTrack * dtan(phi2))[0]!);
   const axis = steerAxisMetrics(design(steered ? 'rack' : 'toe'), wheelState(sp, xd, createWheelState()), groundZ);
   sp.travel = 0;
   sp.rack = 0;

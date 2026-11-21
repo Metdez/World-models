@@ -8,6 +8,7 @@
  */
 import { DEG_TO_RAD, type Vec3 } from '../../contracts/units';
 import type { MotorcycleDefinition } from '../../contracts/vehicle';
+import { dcos, dsin } from '../math/det';
 
 const WHEELBASE = 1.415;
 const CG_TO_FRONT = 0.7;
@@ -15,7 +16,7 @@ const FRONT_RADIUS = 0.3;
 const REAR_RADIUS = 0.312;
 /** 525 chain (pitch 15.875 mm), 17 / 41 teeth: pitch radius = p / (2 sin(pi / N)). */
 const PITCH = 0.015875;
-const sprocket = (teeth: number): number => PITCH / (2 * Math.sin(Math.PI / teeth));
+const sprocket = (teeth: number): number => PITCH / (2 * dsin(Math.PI / teeth));
 
 /** Static wheel centres (vehicle frame x, z). */
 export const FRONT_AXLE = [CG_TO_FRONT, FRONT_RADIUS] as const;
@@ -28,11 +29,11 @@ export const REAR_AXLE = [CG_TO_FRONT - WHEELBASE, REAR_RADIUS] as const;
  */
 export function steeringPoints(rake: number, offset: number, headAbove: number, along = 0): { head: Vec3; onAxis: Vec3 } {
   const [ax, az] = FRONT_AXLE;
-  const footX = ax - offset * Math.cos(rake);
-  const footZ = az - offset * Math.sin(rake);
+  const footX = ax - offset * dcos(rake);
+  const footZ = az - offset * dsin(rake);
   return {
-    head: [footX - headAbove * Math.sin(rake), 0, footZ + headAbove * Math.cos(rake)],
-    onAxis: [footX - along * Math.sin(rake), 0, footZ + along * Math.cos(rake)],
+    head: [footX - headAbove * dsin(rake), 0, footZ + headAbove * dcos(rake)],
+    onAxis: [footX - along * dsin(rake), 0, footZ + along * dcos(rake)],
   };
 }
 

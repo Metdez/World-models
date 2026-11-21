@@ -5,6 +5,7 @@
 import type { Vec3 } from '../../contracts/units';
 import type { V3 } from './vec3';
 import type { Quat, QuatLike } from './quat';
+import { dcos, dsin } from './det';
 
 export type Mat3 = [number, number, number, number, number, number, number, number, number];
 export type Mat3Like = Readonly<Mat3>;
@@ -81,8 +82,8 @@ export function fromRotationVector(out: Mat3, w: Vec3): Mat3 {
     b = 0.5 - t2 / 24 + (t2 * t2) / 720;
   } else {
     const t = Math.sqrt(t2);
-    a = Math.sin(t) / t;
-    b = (1 - Math.cos(t)) / t2;
+    a = dsin(t) / t;
+    b = (1 - dcos(t)) / t2;
   }
   return set(
     out,
