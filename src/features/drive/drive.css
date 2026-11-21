@@ -243,9 +243,9 @@
 .sl-drive-lamp {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  height: 28px;
-  padding: 0 var(--sp-2) 0 6px;
+  gap: var(--sp-1);
+  height: 26px;
+  padding: 0 var(--sp-2) 0 5px;
   border: 1px solid var(--warn);
   border-radius: var(--radius-pill);
   font-size: 12px;
@@ -263,15 +263,16 @@
   border-style: dashed;
 }
 
-/* Assists button and popover */
+/* Assists button (icon, plus an OFF tag when an aid is off; the popover carries the words) and popover */
 .sl-drive-aids-btn {
   display: none;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   height: 36px;
-  min-width: 44px;
+  min-width: 36px;
   margin: 0 0 0 var(--sp-1);
-  padding: 0 var(--sp-3);
+  padding: 0 10px;
   border: 0;
   border-radius: var(--radius-pill);
   background: none;
@@ -506,6 +507,9 @@
   .sl-drive-aids-btn {
     height: 44px;
   }
+  .sl-drive-aids-btn {
+    min-width: 44px;
+  }
   .sl-drive-aid {
     min-height: 52px;
   }
@@ -520,10 +524,6 @@
     gap: var(--sp-3);
   }
   .sl-drive-hint-or {
-    display: none;
-  }
-  /* narrow: the Assists button keeps its icon (its accessible name still says Assists) */
-  .sl-drive-aids-text {
     display: none;
   }
   .sl-drive-aids-panel {

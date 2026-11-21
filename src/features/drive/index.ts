@@ -89,9 +89,8 @@ export default {
     const aidsTag = h('span', { class: 'sl-drive-aids-tag' });
     const aidsBtn = h(
       'button',
-      { type: 'button', class: 'sl-drive-aids-btn', 'aria-expanded': 'false', 'aria-controls': 'sl-drive-aids-panel' },
+      { type: 'button', class: 'sl-drive-aids-btn', title: 'Assists', 'aria-expanded': 'false', 'aria-controls': 'sl-drive-aids-panel' },
       icon('assists'),
-      h('span', { class: 'sl-drive-aids-text' }, 'Assists'),
       aidsTag,
     );
     const switches = AID_KEYS.map((key) =>
