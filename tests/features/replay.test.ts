@@ -11,7 +11,7 @@ import { isReplayId, loadSaved, ridOf, saveData, savedUrl, saveErrorOf, saveRepl
 import { SITE_KEY, siteKeyFor, TEST_SITE_KEYS } from '../../src/features/replay/turnstile';
 import type { ReplayStatus } from '../../src/sim-core/drive/control';
 import { encodeReplay } from '../../src/sim-core/replay/format';
-import { manualSim, scriptedDriver } from '../fixtures/11-03-replay';
+import { host, manualSim, scriptedDriver } from '../fixtures/11-03-replay';
 
 const run = (() => {
   const sim = manualSim(10);
@@ -194,7 +194,7 @@ describe('saved runs (12-05)', () => {
     const long = (() => {
       const sim = manualSim(10);
       scriptedDriver(5, false)(sim, 130);
-      return sim.drive!;
+      return host(sim);
     })();
     const whole = await saveSpan(long);
     expect(whole!.minutes).toBeNull();
