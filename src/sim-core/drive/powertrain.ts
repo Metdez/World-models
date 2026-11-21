@@ -1,13 +1,16 @@
 /**
- * Powertrain and gearbox (ARCHITECTURE-M2 §7.7; research m2/06 §2–§4). v0 (08-02); 09-02 owns the full version.
+ * Powertrain, gearbox and brakes (ARCHITECTURE-M2 §7.7; research m2/06 §2–§4). Full version (09-02).
  * Engine torque from the full-throttle curve at an rpm floored by a converter-like stall speed in 1st/reverse (launch
- * without creep at zero throttle), closed-throttle engine braking a + b*rpm, rev limiter; automatic gearbox whose
- * shift state machine (cut, ramp back, lockout; up/down/kick-down thresholds) follows the shape of Jolt Physics'
- * VehicleTransmission (MIT, Jorrit Rouwe; ideas re-expressed, no code copied); limited-slip split with the Jolt
- * differential's speed-ratio formula; traction scale (aids.traction) on the driven wheels' slip speed.
+ * without creep at zero throttle), closed-throttle engine braking a + b*rpm, rev limiter; automatic gearbox (the user
+ * never shifts) whose shift state machine (torque cut, ramp back, lockout; up/down/kick-down thresholds) follows the
+ * shape of Jolt Physics' VehicleTransmission; limited-slip split with the Jolt VehicleDifferential speed-ratio formula
+ * (Jolt Physics, MIT, Copyright 2021 Jorrit Rouwe; ideas and formulas re-expressed in TypeScript); traction scale
+ * (aids.traction, curve in aids.ts) on the driven wheels' slip speed. Brakes: pedal x maxTorque x the axle's existing
+ * brakeShare (the value Auto's anti-dive uses), handbrake on the rear wheels.
  */
 import type { DriveAids } from '../../contracts/drive';
-import type { CarPowertrain } from '../../contracts/vehicle';
+import type { CarBrakes, CarPowertrain } from '../../contracts/vehicle';
+import { tractionTarget } from './aids';
 
 export interface PowertrainIo {
   throttle: number;
@@ -19,7 +22,7 @@ export interface PowertrainIo {
   omegaR: number;
   /** Max slip ratio of the driven wheels (previous step). */
   driveSlip: number;
-  /** Max slip SPEED R*omega - vx of the driven wheels, m/s (traction aid; v0 addition to the §7.1 shape). */
+  /** Max slip SPEED R*omega - vx of the driven wheels, m/s, signed with the direction (traction aid; addition to §7.1). */
   slipSpeed: number;
   /** Out: N m at each driven wheel (+ drives forward). */
   torqueL: number;
@@ -53,7 +56,14 @@ export const createPowertrainIo = (): PowertrainIo => ({
 });
 
 /** Converter-like launch: the torque lookup rpm is floored at idle + (STALL - idle) * throttle in 1st and reverse. */
-const STALL_RPM = 2200;
+export const STALL_RPM = 2200;
+/** Kick-down (throttle > KICK_THROTTLE) to the lowest gear whose road-speed rpm stays below KICK_FRACTION x the
+ * current upshift rpm. Below the upshift rpm on purpose: §7.7's 0.92 x redline (6440) lies ABOVE the full-throttle
+ * upshift (6400), so every full-throttle upshift would be followed by a kick-down (hunting). */
+const KICK_THROTTLE = 0.9;
+const KICK_FRACTION = 0.92;
+/** Reverse speed cap: the torque fades to 0 over the last REVERSE_TAPER m/s below the cap (no on/off chatter). */
+const REVERSE_TAPER = 1;
 const RAD_S_TO_RPM = 60 / (2 * Math.PI);
 const TCS_TAU = 0.06;
 
@@ -66,6 +76,8 @@ const LOCK = 4;
 const RPM = 5;
 const TCS = 6;
 export const POWERTRAIN_STATE_LENGTH = 7;
+
+const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
 
 export function createPowertrain(p: CarPowertrain, radius: number, wheelInertia: number): Powertrain & { readonly state: Float64Array } {
   const n = p.gears.length;
@@ -84,8 +96,9 @@ export function createPowertrain(p: CarPowertrain, radius: number, wheelInertia:
     }
     return ys[ys.length - 1]!;
   }
-  /** Engine rpm the gear g would run at road speed u (no slip). */
+  /** Engine rpm the gear g would run at road speed u (no slip: the "ideal" rpm, so a spinning tyre never shifts). */
   const rpmIdeal = (u: number, g: number): number => (Math.abs(u) / radius) * ratio(g) * RAD_S_TO_RPM;
+  const upshiftAt = (throttle: number): number => p.upshiftRpm[0] + (p.upshiftRpm[1] - p.upshiftRpm[0]) * clamp01(throttle);
 
   function shift(to: number): void {
     st[GEAR] = to;
@@ -124,12 +137,16 @@ export function createPowertrain(p: CarPowertrain, radius: number, wheelInertia:
       } else st[CLUTCH] = 1;
       if (st[LOCK]! > 0) st[LOCK] = Math.max(0, st[LOCK]! - dt);
 
-      // Automatic gearbox (forward gears only).
+      // Automatic gearbox (forward gears only). Up one gear at a time; down (and kick-down) straight to the target.
       if (g > 0 && st[LOCK] === 0) {
-        const up = p.upshiftRpm[0] + (p.upshiftRpm[1] - p.upshiftRpm[0]) * Math.min(1, Math.max(0, io.throttle));
-        const rpmNow = rpmIdeal(io.speed, g);
-        if (g < n && rpmNow > up && io.driveSlip < 0.1) shift(g + 1);
-        else if (g > 1 && (rpmNow < p.downshiftRpm || (io.throttle > 0.9 && rpmIdeal(io.speed, g - 1) < 0.92 * p.redlineRpm))) shift(g - 1);
+        const up = upshiftAt(io.throttle);
+        if (g < n && rpmIdeal(io.speed, g) > up && io.driveSlip < 0.1) shift(g + 1);
+        else {
+          let to = g;
+          while (to > 1 && rpmIdeal(io.speed, to) < p.downshiftRpm) to--;
+          if (io.throttle > KICK_THROTTLE) while (to > 1 && rpmIdeal(io.speed, to - 1) < KICK_FRACTION * up) to--;
+          if (to !== g) shift(to);
+        }
         g = st[GEAR]!;
       }
 
@@ -140,11 +157,8 @@ export function createPowertrain(p: CarPowertrain, radius: number, wheelInertia:
       const rpm = Math.max(p.idleRpm, rpmWheel);
       st[RPM] = rpm;
 
-      // Traction scale (aids.traction), first-order 0.06 s. v0: the threshold and range scale with speed (slip ratio
-      // about 0.03-0.05) because the v0 tyre saturates at a slip ratio near 0.05; §7.7's fixed 1.5 / 2.5 m/s (09-02)
-      // suits the 09-01 curve whose peak sits at a larger slip.
-      const au = Math.abs(io.speed);
-      const target = aids.traction ? Math.min(1, Math.max(0.15, 1 - (io.slipSpeed - (0.3 + 0.03 * au)) / (0.5 + 0.02 * au))) : 1;
+      // Traction scale (aids.traction), first-order TCS_TAU; off -> relaxes to 1.
+      const target = aids.traction ? tractionTarget(io.slipSpeed, io.speed) : 1;
       st[TCS] = st[TCS]! + (target - st[TCS]!) * Math.min(1, dt / TCS_TAU);
       const tcs = st[TCS]!;
 
@@ -153,14 +167,14 @@ export function createPowertrain(p: CarPowertrain, radius: number, wheelInertia:
       if (io.throttle >= 0.05) {
         const launch = g === 1 || g < 0 ? p.idleRpm + (STALL_RPM - p.idleRpm) * io.throttle : 0;
         te = torqueAt(Math.max(rpm, launch)) * throttle * tcs * clutch;
+        if (g < 0) te *= clamp01((p.reverseSpeedCap + io.speed) / REVERSE_TAPER);
       } else {
-        // Engine braking above idle + 200 rpm, faded in over 100-300 rpm above idle (v0: a step at idle + 200 would
+        // Engine braking above idle + 200 rpm, faded in over 100-300 rpm above idle (a step at idle + 200 would
         // release the tyres' stored deflection as a small forward jolt).
-        const fade = Math.min(1, Math.max(0, (rpmWheel - p.idleRpm - 100) / 200));
+        const fade = clamp01((rpmWheel - p.idleRpm - 100) / 200);
         if (fade > 0) te = -(p.frictionTorque[0] + p.frictionTorque[1] * rpmWheel) * clutch * fade;
       }
       if (rpm >= p.redlineRpm) te = Math.min(te, 0);
-      if (g < 0 && -io.speed >= p.reverseSpeedCap) te = Math.min(te, 0);
 
       const axle = dir * te * r * p.efficiency;
       // Limited slip (Jolt form): alpha = min((w_max / w_min - 1) / (LSR - 1), 1); the slower wheel gets more.
@@ -178,4 +192,18 @@ export function createPowertrain(p: CarPowertrain, radius: number, wheelInertia:
       io.tractionActive = tcs < 0.98;
     },
   };
+}
+
+/**
+ * Per-wheel brake torque (N m, >= 0; wheel order FL, FR, RL, RR): pedal x maxTorque x the axle's brakeShare / 2,
+ * plus handbrake x handbrakeTorque / 2 on each rear wheel. ABS and stability (aids.ts) modulate the result.
+ */
+export function brakeTorques(b: CarBrakes, frontShare: number, rearShare: number, brake: number, handbrake: number, out: Float64Array): Float64Array {
+  const f = (clamp01(brake) * b.maxTorque * frontShare) / 2;
+  const r = (clamp01(brake) * b.maxTorque * rearShare) / 2 + (clamp01(handbrake) * b.handbrakeTorque) / 2;
+  out[0] = f;
+  out[1] = f;
+  out[2] = r;
+  out[3] = r;
+  return out;
 }
