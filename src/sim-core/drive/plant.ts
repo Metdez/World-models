@@ -9,10 +9,12 @@
  * and brakes -> tyres + implicit spin (two evaluations per wheel) -> chassis (semi-implicit Euler, sleep before the
  * position update) -> ride coupling (8 Hz low-passed tyre specific forces) -> derive -> CG projection, zone and
  * bounds -> finite check (restore the newest good snapshot) and hard clamps.
- * 09-04 adds compliance, jacking, aids (ABS/stability) and the full safety/sleep set; 09-01 the full tyre body.
+ * 09-04: brakes -> aids (stability, ABS, throttle scale) -> powertrain; compliance toe/camber from the previous step's
+ * tyre forces (§7.5 runtime: filtered, clamped); jacking / geometric transfer along each wheel's front-view IC line
+ * (§7.6, RideInput.linkVertical); the full tyre body is 09-01's.
  *
  * Snapshot layout (PLANT_SNAPSHOT_LENGTH doubles): [0, STATE) plant state (offsets below), then roadPrev (4),
- * ride ax/ay low-pass (2), the ride model's q and v (14), the powertrain state (7).
+ * ride ax/ay low-pass (2), the ride model's q and v (14), the powertrain state (7), the aids state (9).
  * Determinism: + - * / sqrt and det kernels only; TRUE drive fields are computed here (POSE trig is car-model's).
  */
 import type { DriveAids, DriveEvent, DriveFrame } from '../../contracts/drive';
@@ -20,15 +22,18 @@ import type { PathState, SimEvent } from '../../contracts/sim';
 import type { TelemetryFrame } from '../../contracts/telemetry';
 import type { BuiltTrack, TrackSample } from '../../contracts/track';
 import { G, SIM_DT } from '../../contracts/units';
-import type { CarDefinition, CarHandling } from '../../contracts/vehicle';
+import type { CarDefinition, CarHandling, TyreParams } from '../../contracts/vehicle';
 import { SURFACES, type Frenet, type GroundHit, type GroundWorld, type SurfaceKind } from '../../contracts/world';
+import type { AxleLinkage } from '../../contracts/suspension';
 import type { CornerSolution, KinematicsTable } from '../kinematics/table';
 import { datan, datan2, dcos, dexp, dsin, dwrapPi } from '../math/det';
 import { RIDE_STATE_LENGTH, type RideInput, type RideModel } from '../ride/ride7dof';
 import { LOOP_CORRIDOR, OUT_OF_BOUNDS } from '../world/ground';
+import { AIDS_STATE_LENGTH, createAids, createAidsIo, peakSlipRatio } from './aids';
+import { deriveCompliance } from './compliance';
 import { faultEvent, outOfBoundsEvent, zoneEvent } from './events';
-import { createPowertrain, createPowertrainIo, POWERTRAIN_STATE_LENGTH } from './powertrain';
-import { createTyreIo, evaluateTyre, limitDeflection, stiffnessAt, tyreCoefficients, type TyreIo } from './tyre';
+import { brakeTorques, createPowertrain, createPowertrainIo, POWERTRAIN_STATE_LENGTH } from './powertrain';
+import { createTyreIo, evaluateTyre, limitDeflection, stiffnessAt, tyreCoefficients, type TyreCoefficients, type TyreIo } from './tyre';
 import type { DriveCommand, PlantView } from './types';
 
 /** Surface kinds by index (car-model stores the index per wheel). */
@@ -55,7 +60,11 @@ export interface CarCore {
   readonly cx: Float64Array;
   readonly cy: Float64Array;
   readonly unsprung: Float64Array;
+  /** Wheel rates of the installed suspension's ride corners, N/m. */
+  readonly wheelRates: Float64Array;
   tables(): readonly [KinematicsTable, KinematicsTable];
+  /** Linkages of the installed suspension (compliance derivation). */
+  linkages(): readonly [AxleLinkage, AxleLinkage];
   corner(i: number): CornerSolution;
   ride(): RideModel;
   readonly input: RideInput;
@@ -75,6 +84,16 @@ export interface CarCore {
   /** Body pose = Rz(yaw) Ry(planePitch) Rx(planeRoll) * Rx(relRoll) Ry(relPitch) at (x, y, z); writes out.body*. */
   writeBody(out: TelemetryFrame, planeRoll: number, planePitch: number, yaw: number, relRoll: number, relPitch: number, x: number, y: number, z: number): void;
   writeCorners(out: TelemetryFrame, alpha: number, amp: number, roll: number): void;
+}
+
+/** Test-only simplifications for the closed-form validation (§11 T1/T2); the app never sets them. */
+export interface PlantOptions {
+  /** Linear tyre (f(s) = s): Fx = C_kappa(N) kappa, Fy = -C_alpha(N) tan(alpha); no saturation, camber thrust or
+   *  low-speed damping. */
+  readonly linearTyre?: boolean;
+  /** Tyre loads at the static corner loads and corner kinematics at the design state (no load transfer, roll steer
+   *  or roll camber reach the tyres; the ride model still runs). */
+  readonly rigidLoads?: boolean;
 }
 
 export interface VehiclePlant {
@@ -98,6 +117,8 @@ export interface VehiclePlant {
   readonly gear: number;
   readonly engineRpm: number;
   readonly tractionActive: boolean;
+  readonly absActive: boolean;
+  readonly stabilityActive: boolean;
   readonly approximate: boolean;
   /** Applied (post-conditioning) command of the last step. */
   readonly command: Readonly<DriveCommand>;
@@ -121,8 +142,11 @@ const HINT = 25; // 4: wheel loop s hints
 const CG_S = 29; // CG loop s hint
 const OUT_T = 30;
 const OUT_D = 31;
-const STATE = 32;
-const EXTRA = 4 + 2 + RIDE_STATE_LENGTH + POWERTRAIN_STATE_LENGTH;
+const TOEC = 32; // 4: compliance toe (filtered), rad, + toe-in
+const CAMC = 36; // 4: compliance camber (filtered), rad, + top outboard
+const FYLP = 40; // 4: vehicle-frame lateral tyre force per wheel, 8 Hz low-pass (jacking)
+const STATE = 44;
+const EXTRA = 4 + 2 + RIDE_STATE_LENGTH + POWERTRAIN_STATE_LENGTH + AIDS_STATE_LENGTH;
 export const PLANT_SNAPSHOT_LENGTH = STATE + EXTRA;
 
 // ---- interpolation record
@@ -162,10 +186,12 @@ const MAX_DEFLECTION = 0.5;
 const SLEEP_V = 0.05;
 const SLEEP_R = 0.02;
 const SLEEP_SLOPE = 0.005;
+/** |IC line slope| clamp for the jacking term (IC near the patch), §7.6. */
+const MAX_JACK_SLOPE = 1.5;
 
 const clamp = (x: number, lo: number, hi: number): number => (x < lo ? lo : x > hi ? hi : x);
 
-export function createPlant(core: CarCore): VehiclePlant {
+export function createPlant(core: CarCore, options: PlantOptions = {}): VehiclePlant {
   const vehicle = core.vehicle;
   const handling = core.handling;
   const track = core.track;
@@ -177,9 +203,19 @@ export function createPlant(core: CarCore): VehiclePlant {
   const radius = Float64Array.from([0, 1, 2, 3], (i) => axle(i).tyre.radius);
   const wheelInertia = Float64Array.from([0, 1, 2, 3], (i) => (i < 2 ? handling.tyres.front : handling.tyres.rear).wheelInertia);
   const coeff = [tyreCoefficients(vehicle.front.tyre, handling.tyres.front), tyreCoefficients(vehicle.rear.tyre, handling.tyres.rear)] as const;
-  const brakeTorque = Float64Array.from([0, 1, 2, 3], (i) => (handling.brakes.maxTorque * axle(i).brakeShare) / 2);
-  const powertrain = createPowertrain(handling.powertrain, radius[drivenFirst]!, wheelInertia[drivenFirst]!);
+  const drivenTyre = drivenFirst === 2 ? 'rear' : 'front';
+  const powertrain = createPowertrain(handling.powertrain, radius[drivenFirst]!, wheelInertia[drivenFirst]!, peakSlipRatio(vehicle[drivenTyre].tyre, handling.tyres[drivenTyre]));
   const pio = createPowertrainIo();
+  const aidsModel = createAids(vehicle, core.cy[0]! - core.cy[1]!, core.cy[2]! - core.cy[3]!);
+  const aio = createAidsIo();
+  const linearTyre = options.linearTyre === true;
+  const rigidLoads = options.rigidLoads === true;
+  // ---- compliance (§7.5 runtime): coefficients derived once per installed suspension (tables identity)
+  const maxAngle = handling.compliance.maxAngle;
+  const complianceOn = maxAngle > 0;
+  const complianceTau = handling.compliance.filter;
+  const comp = new Float64Array(8); // per axle: fyToe, fyCamber, fxToeBrake, fxToeDrive
+  const compKey: (KinematicsTable | null)[] = [null, null];
   const lateralLimit = 0.9 * vehicle.front.tyre.mu * G;
   const lag = handling.steering.lag;
   const rate = handling.steering.rate;
@@ -216,7 +252,21 @@ export function createPlant(core: CarCore): VehiclePlant {
   const cmdOut: DriveCommand = { steer: 0, throttle: 0, brake: 0, handbrake: 0, direction: 1 };
   const ring = Array.from({ length: RING }, () => new Float64Array(PLANT_SNAPSHOT_LENGTH));
   const ringState = new Int32Array(3); // [count, next, steps]
-  const flags = new Uint8Array(3); // [tractionActive, approximate, out-of-bounds fired]
+  const flags = new Uint8Array(5); // [tractionActive, approximate, out-of-bounds fired, absActive, stabilityActive]
+  const jackSlope = new Float64Array(4); // front-view IC line slope per wheel (jacking), right corners mirrored
+  const fyvW = new Float64Array(4); // this step's vehicle-frame lateral tyre force per wheel
+  const linkVertical = new Float64Array(4);
+  const stiffL = new Float64Array(3);
+  // The plant's own ride input: the car model's arrays plus linkVertical (the Auto input object never carries it).
+  const pinput: RideInput = {
+    ax: 0,
+    ay: 0,
+    road: core.input.road,
+    roadRate: core.input.roadRate,
+    rcHeight: core.input.rcHeight,
+    antiPitch: core.input.antiPitch,
+    linkVertical,
+  };
   const scal = new Float64Array(6); // [loopS, loopL, faults, ax, ay, beta]
   const swellA = track.def.swell.amplitude;
   const swellK = (2 * Math.PI * track.def.swell.cycles) / track.length;
@@ -390,21 +440,99 @@ export function createPlant(core: CarCore): VehiclePlant {
     scal[5] = Math.abs(u) < 1 && Math.abs(st[V]!) < 1 ? 0 : datan2(st[V]!, Math.abs(u));
   }
 
-  /** Corner kinematics at the current travel and actuator (step 2-3 tail): wheel steer and inclination. */
+  /**
+   * Corner kinematics at the current travel and actuator (step 2-3 tail): wheel steer and inclination incl. the
+   * compliance angles (§7.5), and each wheel's front-view IC line slope for the jacking term (§7.6).
+   */
   function corners(): void {
     const tables = core.tables();
     const rack = tables[0].rackForSteer(st[DELTA]!);
     core.scalar[0] = rack;
     const ride = core.ride().state;
     for (let i = 0; i < 4; i++) {
-      const cs = tables[i >> 1]!.sample(ride.travel[i]!, side[i]! * (i < 2 ? rack : 0), core.corner(i));
-      const d = -side[i]! * cs.toe;
+      const cs = tables[i >> 1]!.sample(rigidLoads ? 0 : ride.travel[i]!, side[i]! * (i < 2 ? rack : 0), core.corner(i));
+      // Compliance off (maxAngle 0) keeps the kinematics-only arithmetic exactly.
+      const d = -side[i]! * (complianceOn ? cs.toe + st[TOEC + i]! : cs.toe);
       delta[i] = d;
       cosD[i] = dcos(d);
       sinD[i] = dsin(d);
-      const gamma = cs.camber - side[i]! * ride.roll;
+      let gamma = cs.camber - side[i]! * (rigidLoads ? 0 : ride.roll);
+      if (complianceOn) gamma += st[CAMC + i]!;
       tio[i]!.camberToRoad = gamma;
       tio[i]!.inclination = side[i]! * gamma;
+      // slope of the line contact patch -> IC (AXLE frame, left side); a right corner's own sample mirrored
+      let k = (cs.instantCentre.z - cs.contactPatch.z) / (cs.instantCentre.y - cs.contactPatch.y);
+      k = k === k ? clamp(k, -MAX_JACK_SLOPE, MAX_JACK_SLOPE) : 0;
+      jackSlope[i] = side[i]! * k;
+    }
+  }
+
+  /** Compliance coefficients of the installed suspension (derived when the tables change: a suspension swap). */
+  function deriveComplianceIfNeeded(): void {
+    const tables = core.tables();
+    if (compKey[0] === tables[0] && compKey[1] === tables[1]) return;
+    const links = core.linkages();
+    for (let a = 0; a < 2; a++) {
+      const c = deriveCompliance(links[a]!, tables[a]!, handling.compliance.bushingRates, core.wheelRates[2 * a]!);
+      comp[4 * a] = c.fyToe;
+      comp[4 * a + 1] = c.fyCamber;
+      comp[4 * a + 2] = c.fxToeBrake;
+      comp[4 * a + 3] = c.fxToeDrive;
+      compKey[a] = tables[a]!;
+    }
+  }
+
+  /**
+   * Compliance angles from the previous step's tyre forces (§7.5 runtime): toe = fyToe Fy_in + (Fx < 0 ? fxToeBrake :
+   * fxToeDrive) Fx, camber = fyCamber Fy_in, each clamped to +-maxAngle and through a first-order filter (backward
+   * Euler). Fy_in = the wheel-frame lateral force signed toward the car centre (the left-corner coefficients serve both).
+   */
+  function updateCompliance(dt: number): void {
+    if (!complianceOn) return;
+    deriveComplianceIfNeeded();
+    const k = dt / (complianceTau + dt);
+    for (let i = 0; i < 4; i++) {
+      const o = (i >> 1) * 4;
+      const fyIn = -side[i]! * tyre.fy[i]!;
+      const fx = tyre.fx[i]!;
+      const toe = clamp(comp[o]! * fyIn + (fx < 0 ? comp[o + 2]! : comp[o + 3]!) * fx, -maxAngle, maxAngle);
+      const camber = clamp(comp[o + 1]! * fyIn, -maxAngle, maxAngle);
+      st[TOEC + i] = st[TOEC + i]! + (toe - st[TOEC + i]!) * k;
+      st[CAMC + i] = st[CAMC + i]! + (camber - st[CAMC + i]!) * k;
+    }
+  }
+
+  /** Test-only linear tyre (PlantOptions.linearTyre). */
+  function linearTyreEval(tp: TyreParams, c: TyreCoefficients, io: TyreIo): void {
+    stiffnessAt(tp, c, io.load, stiffL);
+    const kap = io.ux / c.sigmaX;
+    const tanA = io.uy / c.sigmaY;
+    io.fx = stiffL[1]! * kap;
+    io.fy = -stiffL[0]! * tanA;
+    io.capacity = stiffL[2]!;
+    io.slipAngle = tanA;
+    io.slipRatio = kap;
+    io.slopeX = stiffL[1]! / c.sigmaX;
+    io.dampX = 0;
+  }
+
+  /** Static corner load (lever rule, sprung + unsprung), N: PlantOptions.rigidLoads. */
+  function staticLoad(i: number): number {
+    const xF = (core.cx[0]! + core.cx[1]!) / 2;
+    const xR = (core.cx[2]! + core.cx[3]!) / 2;
+    return ((vehicle.sprungMass * (i < 2 ? -xR : xF)) / (xF - xR) / 2 + core.unsprung[i]!) * G;
+  }
+
+  /** Seed of the jacking low-pass at an engage: the Auto's lateral specific force split by axle and corner load. */
+  function seedLateral(): void {
+    const cx = core.cx;
+    const load = core.ride().state.load;
+    const xF = (cx[0]! + cx[1]!) / 2;
+    const xR = (cx[2]! + cx[3]!) / 2;
+    const f = mass() * core.input.ay;
+    for (let i = 0; i < 4; i++) {
+      const axleLoad = load[i]! + load[i ^ 1]!;
+      st[FYLP + i] = (f * (i < 2 ? -xR : xF)) / (xF - xR) * (axleLoad > 0 ? load[i]! / axleLoad : 0.5);
     }
   }
 
@@ -427,6 +555,7 @@ export function createPlant(core: CarCore): VehiclePlant {
     out[STATE + 5] = core.input.ay;
     core.ride().exportState(out, STATE + 6);
     out.set(powertrain.state, STATE + 6 + RIDE_STATE_LENGTH);
+    out.set(aidsModel.state, STATE + 6 + RIDE_STATE_LENGTH + POWERTRAIN_STATE_LENGTH);
     return out;
   }
   function restore(src: Float64Array): void {
@@ -435,6 +564,7 @@ export function createPlant(core: CarCore): VehiclePlant {
     core.input.ax = src[STATE + 4]!;
     core.input.ay = src[STATE + 5]!;
     for (let k = 0; k < POWERTRAIN_STATE_LENGTH; k++) powertrain.state[k] = src[STATE + 6 + RIDE_STATE_LENGTH + k]!;
+    for (let k = 0; k < AIDS_STATE_LENGTH; k++) aidsModel.state[k] = src[STATE + 6 + RIDE_STATE_LENGTH + POWERTRAIN_STATE_LENGTH + k]!;
     corners();
     ground();
     applyOffsets(0);
@@ -590,6 +720,12 @@ export function createPlant(core: CarCore): VehiclePlant {
     get tractionActive() {
       return flags[0] === 1;
     },
+    get absActive() {
+      return flags[3] === 1;
+    },
+    get stabilityActive() {
+      return flags[4] === 1;
+    },
     get approximate() {
       return flags[1] === 1;
     },
@@ -611,6 +747,10 @@ export function createPlant(core: CarCore): VehiclePlant {
         st[UY + i] = 0;
         st[HINT + i] = path.s;
       }
+      for (let i = 0; i < 4; i++) {
+        st[TOEC + i] = 0;
+        st[CAMC + i] = 0;
+      }
       if (path.v > 1) seedSteadyState();
       st[CG_S] = path.s;
       st[OUT_T] = 0;
@@ -625,7 +765,11 @@ export function createPlant(core: CarCore): VehiclePlant {
       ground();
       for (let i = 0; i < 4; i++) st[OFF + i] = core.input.road[i]! - st[OFF + i]!;
       applyOffsets(0);
+      seedLateral();
       powertrain.reset(st[U]!, 1);
+      aidsModel.reset();
+      flags[3] = 0;
+      flags[4] = 0;
       cmdOut.steer = st[DELTA]!;
       cmdOut.throttle = path.ax > 0 ? Math.min(1, path.ax / vehicle.limits.accel) : 0;
       cmdOut.brake = path.ax < 0 ? Math.min(1, -path.ax / vehicle.limits.brake) : 0;
@@ -650,6 +794,9 @@ export function createPlant(core: CarCore): VehiclePlant {
       for (let i = 0; i < 4; i++) {
         st[HINT + i] = NaN;
         st[OFF + i] = 0;
+        st[TOEC + i] = 0;
+        st[CAMC + i] = 0;
+        st[FYLP + i] = 0;
       }
       st[CG_S] = NaN;
       st[FADE] = 0;
@@ -676,6 +823,9 @@ export function createPlant(core: CarCore): VehiclePlant {
       }
       core.roadPrev.set(core.input.road);
       powertrain.reset(0, 1);
+      aidsModel.reset();
+      flags[3] = 0;
+      flags[4] = 0;
       cmdOut.steer = 0;
       cmdOut.throttle = 0;
       cmdOut.brake = 0;
@@ -702,7 +852,8 @@ export function createPlant(core: CarCore): VehiclePlant {
       // 2. steering actuator (first-order lag + rate limit)
       const lim = rate * dt;
       st[DELTA] = st[DELTA]! + clamp(((cmd.steer - st[DELTA]!) * dt) / lag, -lim, lim);
-      // 3. corner kinematics from the current ride state
+      // 3. corner kinematics from the current ride state (compliance angles from the previous step's forces)
+      updateCompliance(dt);
       corners();
       // 4. (moved after the chassis update, see there): this step's tyres and gravity use the ground of the last one.
 
@@ -716,15 +867,25 @@ export function createPlant(core: CarCore): VehiclePlant {
         vwx[i] = vx * cosD[i]! + vy * sinD[i]!;
         vwy[i] = -vx * sinD[i]! + vy * cosD[i]!;
         const io = tio[i]!;
-        io.load = ride.state.load[i]!;
+        io.load = rigidLoads ? staticLoad(i) : ride.state.load[i]!;
         io.vx = vwx[i]!;
         io.vy = vwy[i]!;
         io.muScale = SURFACES[SURFACE_KINDS[tyre.surface[i]!]!].muScale;
       }
 
-      // 7. powertrain and brakes (slips from the previous step)
+      // 7. brakes, aids (stability then ABS, on the previous step's slips), powertrain
+      const bt = brakeTorques(handling.brakes, vehicle.front.brakeShare, vehicle.rear.brakeShare, cmd.brake, cmd.handbrake, aio.brakeTorque);
+      for (let i = 0; i < 4; i++) aio.slipRatio[i] = tyre.slipRatio[i]!;
+      aio.steerAct = st[DELTA]!;
+      aio.u = u0;
+      aio.r = r0;
+      aio.beta = scal[5]!;
+      aio.handbrake = cmd.handbrake;
+      aidsModel.step(dt, aio, aids, view);
+      flags[3] = aio.absActive ? 1 : 0;
+      flags[4] = aio.stabilityActive ? 1 : 0;
       const dl = drivenFirst;
-      pio.throttle = cmd.throttle;
+      pio.throttle = cmd.throttle * aio.throttleScale;
       pio.direction = cmd.direction;
       pio.speed = u0;
       pio.omegaL = st[OMEGA + dl]!;
@@ -747,7 +908,7 @@ export function createPlant(core: CarCore): VehiclePlant {
         const driven = i === dl || i === dl + 1;
         const inertia = driven ? pio.inertia : wheelInertia[i]!;
         const td = i === dl ? pio.torqueL : i === dl + 1 ? pio.torqueR : 0;
-        const tb = cmd.brake * brakeTorque[i]! + (i >= 2 ? (cmd.handbrake * handling.brakes.handbrakeTorque) / 2 : 0);
+        const tb = bt[i]!;
         const k = Math.abs(vwx[i]!);
         const denX = 1 + (dt * k) / c.sigmaX;
         const denY = 1 + (dt * k) / c.sigmaY;
@@ -760,7 +921,8 @@ export function createPlant(core: CarCore): VehiclePlant {
           io.uy = (uy0 + dt * vwy[i]!) / denY;
           io.slipVx = Rw * w - vwx[i]!;
           // b. first evaluation
-          evaluateTyre(tp, c, io);
+          if (linearTyre) linearTyreEval(tp, c, io);
+          else evaluateTyre(tp, c, io);
           // c-d. implicit spin with the secant slope, then the brake (never reverses the spin)
           const dFdw = (io.slopeX * dt * Rw) / denX + io.dampX * Rw;
           const ieff = inertia + dt * Rw * dFdw;
@@ -770,10 +932,11 @@ export function createPlant(core: CarCore): VehiclePlant {
           // e. final deflections and forces with the new spin
           io.ux = (ux0 + dt * (Rw * w - vwx[i]!)) / denX;
           io.slipVx = Rw * w - vwx[i]!;
-          evaluateTyre(tp, c, io);
+          if (linearTyre) linearTyreEval(tp, c, io);
+          else evaluateTyre(tp, c, io);
           tyre.slipAngle[i] = io.slipAngle;
           tyre.slipRatio[i] = io.slipRatio;
-          limitDeflection(tp, c, io);
+          if (!linearTyre) limitDeflection(tp, c, io);
           rolling += SURFACES[SURFACE_KINDS[tyre.surface[i]!]!].rollingResistance * io.load;
         } else {
           // airborne: free spin under drive and brake torque, deflections relax
@@ -800,6 +963,7 @@ export function createPlant(core: CarCore): VehiclePlant {
         sumFx += fxv;
         sumFy += fyv;
         sumMz += cx[i]! * fyv - cy[i]! * fxv;
+        fyvW[i] = fyv;
       }
 
       // 9. chassis (semi-implicit Euler)
@@ -861,9 +1025,18 @@ export function createPlant(core: CarCore): VehiclePlant {
       scal[3] = (sumFx - drag - rr) / m;
       scal[4] = ay;
       core.linkInputs();
+      // jacking / geometric transfer (§7.6): each wheel's (low-passed, sprung share of the) lateral force along its
+      // front-view IC line; with equal left/right forces and lines through the RC it is the M1 roll-centre pair.
+      const sprung = vehicle.sprungMass / m;
+      for (let i = 0; i < 4; i++) {
+        st[FYLP + i] = st[FYLP + i]! + (fyvW[i]! - st[FYLP + i]!) * LP_ALPHA;
+        linkVertical[i] = -jackSlope[i]! * st[FYLP + i]! * sprung;
+      }
+      pinput.ax = input.ax;
+      pinput.ay = input.ay;
       let ok = true;
       try {
-        ride.step(dt, input);
+        ride.step(dt, pinput);
       } catch {
         ok = false;
       }
@@ -930,9 +1103,9 @@ export function createPlant(core: CarCore): VehiclePlant {
       d.handbrake = cmdOut.handbrake;
       d.gear = pio.gear;
       d.engineRpm = pio.engineRpm;
-      d.absActive = false;
+      d.absActive = flags[3] === 1;
       d.tractionActive = flags[0] === 1;
-      d.stabilityActive = false;
+      d.stabilityActive = flags[4] === 1;
       d.zone = zone;
       const s = scal[0]!;
       if (s === s) {

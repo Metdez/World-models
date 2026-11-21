@@ -5,11 +5,11 @@
  * adapter). Steering limit (aids.steering): the road-wheel angle is capped near the speed-dependent grip limit
  * except when countersteering. Reverse is selected by holding the brake at standstill (never on the sign of u alone).
  * Bumpless engage: the output blends from the command in force to the conditioned command over 0.3 s.
- * Countersteer help is 09-04's (not here).
+ * Steering limit and countersteer help: aids.ts assistedSteer (§7.9).
  */
 import { DRIVE_SOURCES, INTENT_QUANT, type DriveAids, type DriveSource } from '../../contracts/drive';
 import type { CarDefinition } from '../../contracts/vehicle';
-import { datan } from '../math/det';
+import { assistedSteer } from './aids';
 import type { DriveCommand, Driver, PlantView, QuantIntent } from './types';
 
 export interface HumanDriver extends Driver {
@@ -29,7 +29,6 @@ const THROTTLE_RISE = 2.5;
 const THROTTLE_FALL = 6;
 const BRAKE_RISE = 4;
 const BRAKE_FALL = 10;
-const ALPHA_PEAK = 0.12;
 const BLEND_S = 0.3;
 const NEUTRAL = 0.02;
 /** Reverse selection: brake > 0.3, throttle < 0.05, |u| < 0.5 m/s held 0.25 s; back: throttle > 0.3, u > -0.5 held 0.15 s. */
@@ -148,15 +147,9 @@ export function createHumanDriver(vehicle: CarDefinition): HumanDriver & { reado
       const throttle = reverse ? st[BRAKE]! : st[THROTTLE]!;
       const brake = reverse ? st[THROTTLE]! : st[BRAKE]!;
 
-      // Steering limit (aids.steering): near the grip limit at speed, full lock when countersteering.
-      const s = st[STEER]!;
-      let steer = s * view.maxSteer;
-      if (aids.steering) {
-        const V = Math.abs(u);
-        const lim = Math.min(view.maxSteer, datan((view.wheelbase * view.lateralLimit) / Math.max(V * V, 1)) + ALPHA_PEAK);
-        const countersteer = s * view.r < 0 && Math.abs(view.beta) > 0.05;
-        if (!countersteer) steer = s * lim;
-      }
+      // Steering limit near the grip limit at speed (full lock when countersteering) and countersteer help
+      // (aids.steering; aids off: s * maxSteer).
+      const steer = assistedSteer(st[STEER]!, view, aids.steering);
       st[DEMAND] = steer / view.maxSteer;
 
       // Bumpless engage: blend from the command in force over BLEND_S (a harder user brake applies at once).

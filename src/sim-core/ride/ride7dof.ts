@@ -66,6 +66,12 @@ export interface RideInput {
   rcHeight: { front: number; rear: number };
   /** Fraction of each axle's longitudinal load transfer carried by the links (anti-dive front / anti-lift-squat rear). */
   antiPitch: { front: number; rear: number };
+  /**
+   * Optional (Manual Drive plant, ARCHITECTURE-M2 §7.3/§7.6): per corner vertical link force from the tyre's lateral
+   * force along its front-view IC line (N, + up on the hub, - on the body). When present it replaces the lateral
+   * roll-centre pair side*ay*ms_axle*hRc/t; absent (Auto) the M1 arithmetic is unchanged.
+   */
+  linkVertical?: Float64Array;
 }
 
 export interface RideState {
@@ -213,11 +219,13 @@ export function createRideModel(params: RideParams): RideModel {
     const anti = input.antiPitch;
     const longLink = (ms * ax * h) / (2 * wheelbase);
     const longUnsprung = (ax * unsprungLong) / (2 * wheelbase);
+    const lv = input.linkVertical;
     for (let i = 0; i < 4; i++) {
       const j = i >> 1;
       const side = i & 1 ? -1 : 1; // left +, right -
       const rc = j === 0 ? input.rcHeight.front : input.rcHeight.rear;
-      linkForce[i] = (side * ay * msAxle[j]! * rc) / track[j]! + (j === 0 ? longLink * anti.front : -longLink * anti.rear);
+      const lateral = lv ? lv[i]! : (side * ay * msAxle[j]! * rc) / track[j]!;
+      linkForce[i] = lateral + (j === 0 ? longLink * anti.front : -longLink * anti.rear);
       unsprungForce[i] = (side * ay * unsprungLat[j]!) / track[j]! + (j === 0 ? longUnsprung : -longUnsprung);
     }
   }

@@ -32,7 +32,7 @@ import {
 } from '../ride/ride7dof';
 import { gripUse, peakMu } from '../ride/tyre';
 import type { GroundWorld } from '../../contracts/world';
-import { createPlant, SURFACE_KINDS, type CarCore, type PlantTyreOut, type VehiclePlant } from '../drive/plant';
+import { createPlant, SURFACE_KINDS, type CarCore, type PlantOptions, type PlantTyreOut, type VehiclePlant } from '../drive/plant';
 import { buildGroundWorld, loopSurface } from '../world/ground';
 
 const LAYOUT: readonly CornerLayout[] = [
@@ -131,7 +131,8 @@ function asCar(def: VehicleDefinition | SuspensionDefinition): void {
   if (cls !== 'car') throw new Error(`"${def.id}" is a ${cls} definition, not a car one`);
 }
 
-export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: SuspensionDefinition, track: BuiltTrack, world?: GroundWorld) {
+/** `plantOptions`: test-only plant simplifications (validation T1/T2); never set by the app. */
+export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: SuspensionDefinition, track: BuiltTrack, world?: GroundWorld, plantOptions?: PlantOptions) {
   asCar(vehicleDef);
   const vehicle = vehicleDef as CarDefinition;
   const L = vehicle.wheelbase;
@@ -157,12 +158,15 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
   let restSol!: CornerSolution;
 
   const unsprung = new Float64Array(4);
+  const wheelRates = new Float64Array(4);
+  let linkages!: readonly [AxleLinkage, AxleLinkage];
   const keep = new Float64Array(RIDE_STATE_LENGTH);
 
   function install(suspension: CarSuspensionDefinition, keepRideState = false): void {
     if (keepRideState) ride.exportState(keep);
     sol = prepareCarSuspension(vehicle, suspension);
     tables = [sol.front.table, sol.rear.table];
+    linkages = [suspension.axles.front, suspension.axles.rear];
     for (const t of tables) if (t.pointOrder.length > MAX_POINTS) throw new Error(`suspension "${suspension.id}" has more than ${MAX_POINTS} points`);
     cornerSols = [0, 1, 2, 3].map((i) => createCornerSolution(tables[i >> 1]!));
     restSol = createCornerSolution(tables[0].pointOrder.length >= tables[1].pointOrder.length ? tables[0] : tables[1]);
@@ -199,6 +203,7 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
       const k = wheelRateForRideFrequency(s.rideFrequency, m, s.tyre.verticalStiffness);
       const mu = s.unsprungMass + suspension.extras.unsprungMassDelta;
       unsprung[i] = mu;
+      wheelRates[i] = k;
       staticDeflection[i] = (m * G + mu * G) / s.tyre.verticalStiffness;
       return {
         x: cx[i]!,
@@ -554,7 +559,9 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
         cx,
         cy,
         unsprung,
+        wheelRates,
         tables: () => tables,
+        linkages: () => linkages,
         corner,
         ride: () => ride,
         input,
@@ -604,7 +611,7 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
       return sol.kinematics;
     },
     get plant(): VehiclePlant | undefined {
-      return core ? (plant ??= createPlant(core)) : undefined;
+      return core ? (plant ??= createPlant(core, plantOptions)) : undefined;
     },
     setSuspension,
 
