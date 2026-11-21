@@ -5,7 +5,7 @@
  * rocker carry their rest points onto the posed ones (so links keep their lengths); highlight is emissive-only per
  * corner; update allocates nothing.
  */
-import { Box3, Matrix4, Mesh, MeshStandardMaterial, Vector3, type Object3D } from 'three';
+import { Box3, Matrix4, Mesh, MeshStandardMaterial, Vector3, type Material, type Object3D } from 'three';
 import { describe, expect, it } from 'vitest';
 import type { MotorcycleSuspensionDefinition } from '../../src/contracts/suspension';
 import { simToThree } from '../../src/contracts/units';
@@ -208,6 +208,12 @@ describe('05-02 cafe racer + moto-planar visuals', () => {
     bike.setXray(1);
     const ghost = named(bike.root, 'xray-ghost');
     expect(ghost.visible).toBe(true);
+    // 07-01: x-ray ghosts the bodywork only; the frame, engine and exhausts stay solid (no dither on their material).
+    const machine = named(bike.root, 'body:palette') as Mesh;
+    const bodywork = named(bike.root, 'body:bodywork') as Mesh;
+    expect((machine.material as Material).customProgramCacheKey()).not.toBe((bodywork.material as Material).customProgramCacheKey());
+    expect(machine.castShadow).toBe(true);
+    expect(bodywork.castShadow).toBe(false);
     bike.setXray(0);
     expect(ghost.visible).toBe(false);
     const box = new Box3().setFromObject(bike.root);

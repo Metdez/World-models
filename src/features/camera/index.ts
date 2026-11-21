@@ -69,37 +69,37 @@ export default {
     const instant = () => ctx.store.get().reducedMotion;
 
     // A car's close-up switches x-ray on (and keeps it on: the eye sits at the bumper and looks through the body at
-    // the linkage); leaving restores it unless x-ray was already on before entering. A naked bike needs none: its
-    // close-up is a side view of the fork or the rear end, and x-ray would ghost the engine and frame away.
-    const needsXray = () => ctx.sim.current.vehicle.class !== 'motorcycle';
+    // the linkage); leaving restores it unless x-ray was already on before entering. A naked bike needs it only for
+    // the rear end, where the seat, side panels and battery box hide a monoshock (its x-ray ghosts that bodywork
+    // only); the fork close-up keeps the whole bike solid.
+    const needsXray = (c: CornerId | null) => ctx.sim.current.vehicle.class !== 'motorcycle' || c === 'r';
     let xrayAuto = false;
     let view = ctx.store.get().view;
     let corner = ctx.store.get().focusCorner;
+    const syncXray = () => {
+      const on = ctx.store.get().xray;
+      if (view === 'closeup' && needsXray(corner)) {
+        if (!on) {
+          xrayAuto = true;
+          ctx.store.setKey('xray', true);
+        }
+      } else if (xrayAuto) {
+        xrayAuto = false;
+        if (on) ctx.store.setKey('xray', false);
+      }
+    };
     rig.setView(view, corner, true);
-    if (view === 'closeup' && !ctx.store.get().xray && needsXray()) {
-      xrayAuto = true;
-      ctx.store.setKey('xray', true);
-    }
+    syncXray();
     ctx.watch((s) => {
       if (s.view !== view || (s.view === 'closeup' && s.focusCorner !== corner)) {
-        const entering = s.view === 'closeup' && view !== 'closeup';
-        const leaving = s.view !== 'closeup' && view === 'closeup';
         view = s.view;
         corner = s.focusCorner;
         controls.enabled = view === 'explore';
         if (view !== 'explore') exploreHeading = Number.NaN;
         rig.setView(view, corner, instant());
-        if (entering && !s.xray && needsXray()) {
-          xrayAuto = true;
-          ctx.store.setKey('xray', true);
-        } else if (leaving && xrayAuto) {
-          xrayAuto = false;
-          if (s.xray) ctx.store.setKey('xray', false);
-        }
-        return;
       }
       corner = s.focusCorner;
-      if (view === 'closeup' && !s.xray && needsXray()) ctx.store.setKey('xray', true);
+      syncXray();
     });
     controls.enabled = view === 'explore';
 
@@ -112,16 +112,7 @@ export default {
     ctx.on('sim:vehicle', () => {
       rig.layout(ctx.sim.frame);
       zoomRange();
-      if (view !== 'closeup') return;
-      // Swapped vehicle inside a close-up: x-ray follows the new vehicle's need (and stays the visitor's own choice).
-      const s = ctx.store.get();
-      if (needsXray() && !s.xray) {
-        xrayAuto = true;
-        ctx.store.setKey('xray', true);
-      } else if (!needsXray() && xrayAuto) {
-        xrayAuto = false;
-        if (s.xray) ctx.store.setKey('xray', false);
-      }
+      syncXray(); // a vehicle swap inside a close-up: x-ray follows the new vehicle's need
     });
 
     const service: CameraService = {

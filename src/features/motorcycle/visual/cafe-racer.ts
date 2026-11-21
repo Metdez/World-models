@@ -91,8 +91,12 @@ export function buildCafeRacer(vehicle: MotorcycleDefinition, options: CafeRacer
   const [sx, sy] = vehicle.chain.sprocketCentre;
 
   const palette: BufferGeometry[] = [];
+  // Bodywork (seat, hump pad, tail, battery box, badges): ghosted by x-ray with the paint. Frame, engine, exhausts
+  // stay solid, so a naked bike's x-ray only clears what hides the shock, never the machine itself.
+  const bodywork: BufferGeometry[] = [];
   const paintParts: BufferGeometry[] = [];
   const pal = (g: BufferGeometry, finish: MotoFinish) => palette.push(motoPaint(g.index ? g.toNonIndexed() : g, finish));
+  const bw = (g: BufferGeometry, finish: MotoFinish) => bodywork.push(motoPaint(g.index ? g.toNonIndexed() : g, finish));
   const both = (make: (side: 1 | -1) => void) => {
     make(1);
     make(-1);
@@ -240,10 +244,10 @@ export function buildCafeRacer(vehicle: MotorcycleDefinition, options: CafeRacer
   const capS = 0.3;
   const capTop = tTop(capS);
   const capX = tankF - (tankF - tankB) * capS;
-  pal(lathe([[0, 0.012], [0.04, 0.012], [0.046, 0.006], [0.046, 0], [0.03, -0.006]], 40).translate(capX, capTop + 0.002, 0), 'polished');
-  pal(rod(V(capX - 0.05, capTop + 0.004, -0.012), V(capX - 0.05, capTop + 0.004, 0.012), 0.006, 'polished'), 'polished');
+  bw(lathe([[0, 0.012], [0.04, 0.012], [0.046, 0.006], [0.046, 0], [0.03, -0.006]], 40).translate(capX, capTop + 0.002, 0), 'polished');
+  bw(rod(V(capX - 0.05, capTop + 0.004, -0.012), V(capX - 0.05, capTop + 0.004, 0.012), 0.006, 'polished'), 'polished');
   // Tank straps/mount rubber under the rear.
-  pal(rod(V(tankB + 0.03, 0.79, 0.07), V(tankB + 0.03, 0.79, -0.07), 0.012, 'black'), 'black');
+  bw(rod(V(tankB + 0.03, 0.79, 0.07), V(tankB + 0.03, 0.79, -0.07), 0.012, 'black'), 'black');
 
   // ------------------------------------------------------------------ seat (pleated leather) and hump
   const seatF = -0.17;
@@ -259,7 +263,7 @@ export function buildCafeRacer(vehicle: MotorcycleDefinition, options: CafeRacer
     const ey = se(sn, sn > 0 ? 3.2 : 8);
     out.set(seatF - (seatF - seatB) * s, (top + bot) / 2 + ((top - bot) / 2) * ey * e, sW(s) * se(c, 3.2) * e);
   };
-  palette.push(motoPaint(loft(40, 40, seatSurface).toNonIndexed(), 'leather'));
+  bodywork.push(motoPaint(loft(40, 40, seatSurface).toNonIndexed(), 'leather'));
   both((s) => {
     const pts: Vector3[] = [];
     for (let i = 0; i <= 16; i++) {
@@ -267,7 +271,7 @@ export function buildCafeRacer(vehicle: MotorcycleDefinition, options: CafeRacer
       seatSurface(0.04 + (0.92 * i) / 16, s > 0 ? -0.42 : Math.PI + 0.42, p);
       pts.push(p);
     }
-    pal(bentTube(pts, 0.0035, 48, 6), 'piping');
+    bw(bentTube(pts, 0.0035, 48, 6), 'piping');
   });
   for (let k = 0; k < 7; k++) {
     const sk = 0.22 + k * 0.085;
@@ -277,7 +281,7 @@ export function buildCafeRacer(vehicle: MotorcycleDefinition, options: CafeRacer
       seatSurface(sk, Math.PI * (0.15 + (0.7 * i) / 10), p);
       pts.push(p.setY(p.y + 0.0015));
     }
-    pal(bentTube(pts, 0.0026, 20, 5), 'leather');
+    bw(bentTube(pts, 0.0026, 20, 5), 'leather');
   }
   const humpF = -0.555;
   const humpB = -0.86;
@@ -295,24 +299,25 @@ export function buildCafeRacer(vehicle: MotorcycleDefinition, options: CafeRacer
     }),
   );
   // Leather back pad on the hump's front face.
-  pal(slab(roundedRect(0.2, 0.075, 0.03), 0.022, 0.009, new Matrix4().makeRotationY(Math.PI / 2).setPosition(humpF - 0.002, 0.835, 0), 'leather', 'piping'), 'leather');
+  bw(slab(roundedRect(0.2, 0.075, 0.03), 0.022, 0.009, new Matrix4().makeRotationY(Math.PI / 2).setPosition(humpF - 0.002, 0.835, 0), 'leather', 'piping'), 'leather');
   // Tail light under the hump, plate hanger.
-  pal(slab(ellipse(0.034, 0.019), 0.02, 0.006, new Matrix4().makeRotationY(Math.PI / 2).setPosition(humpB + 0.015, 0.772, 0), 'tail', 'black'), 'tail');
-  pal(bentTube([V(-0.83, 0.75, 0), V(-0.89, 0.7, 0), V(-0.93, 0.62, 0)], 0.012, 16, 10), 'black');
+  bw(slab(ellipse(0.034, 0.019), 0.02, 0.006, new Matrix4().makeRotationY(Math.PI / 2).setPosition(humpB + 0.015, 0.772, 0), 'tail', 'black'), 'tail');
+  bw(bentTube([V(-0.83, 0.75, 0), V(-0.89, 0.7, 0), V(-0.93, 0.62, 0)], 0.012, 16, 10), 'black');
 
   // ------------------------------------------------------------------ side panels, battery box
   both((s) => {
     const panel = roundedPoly([[-0.195, 0.735], [-0.445, 0.735], [-0.36, 0.53], [-0.235, 0.53]], 0.035);
     paintParts.push(stripUv(slab(panel, 0.016, 0.006, new Matrix4().makeTranslation(0, 0, s * 0.122), 'frame')));
-    pal(slab(ellipse(0.018, 0.018), 0.006, 0.002, new Matrix4().makeTranslation(-0.3, 0.68, s * 0.131), 'polished'), 'polished');
+    bw(slab(ellipse(0.018, 0.018), 0.006, 0.002, new Matrix4().makeTranslation(-0.3, 0.68, s * 0.131), 'polished'), 'polished');
   });
-  pal(slab(roundedRect(0.15, 0.17, 0.04), 0.15, 0.02, new Matrix4().makeTranslation(-0.27, 0.645, 0), 'black'), 'black');
+  bw(slab(roundedRect(0.15, 0.17, 0.04), 0.15, 0.02, new Matrix4().makeTranslation(-0.27, 0.645, 0), 'black'), 'black');
 
   // ------------------------------------------------------------------ meshes
   const xray = { uXray: { value: 0 } };
   const paintMat = createPaintMaterial(options.paint ?? DEFAULT_PAINT, xray);
   const bodyMat = createMotoPalette('moto-body');
-  addDither(bodyMat, xray, 'moto-body');
+  const bodyworkMat = createMotoPalette('moto-bodywork');
+  addDither(bodyworkMat, xray, 'moto-bodywork');
   const wheelMat = createMotoPalette('moto-wheels');
   const ghostMat = createGhostMaterial(xray);
   const materials: Material[] = [paintMat, ghostMat];
@@ -337,10 +342,11 @@ export function buildCafeRacer(vehicle: MotorcycleDefinition, options: CafeRacer
   const paintGeometry = mergeParts(paintParts.map((g) => (g.index ? g.toNonIndexed() : g)).map((g) => stripUv(g)));
   const paintMesh = add(body, paintGeometry, paintMat, 'body:paint');
   const bodyMesh = add(body, mergeParts(palette), bodyMat, 'body:palette');
+  const bodyworkMesh = add(body, mergeParts(bodywork), bodyworkMat, 'body:bodywork');
   const ghost = add(body, paintGeometry, ghostMat, 'xray-ghost', false);
   ghost.renderOrder = 10;
   ghost.visible = false;
-  const shadowCasters = [paintMesh, bodyMesh];
+  const shadowCasters = [paintMesh, bodyworkMesh];
 
   const wheel = (id: 'f' | 'r', tyre: MotorcycleDefinition['front']['tyre'], spokes: number, hubHalf: number, sprocket: boolean) => {
     const hub = new Group();
@@ -423,7 +429,7 @@ export function buildCafeRacer(vehicle: MotorcycleDefinition, options: CafeRacer
       root.removeFromParent();
       for (const g of geometries) g.dispose();
       for (const m of materials) m.dispose();
-      for (const m of [bodyMat, wheelMat] as MeshStandardMaterial[]) disposeMotoPalette(m);
+      for (const m of [bodyMat, bodyworkMat, wheelMat] as MeshStandardMaterial[]) disposeMotoPalette(m);
     },
   };
 }

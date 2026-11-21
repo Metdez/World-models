@@ -107,10 +107,12 @@ test('car <-> motorcycle: presets, lean sign, fork dive, bike framings and scree
     expect(f.ax).toBeLessThan(-0.6 * G);
     travel[id] = f.corners[0]!.travel;
     console.log('[05-03] brake', id, JSON.stringify({ ax: f.ax, pitch: f.pitch, front: f.corners[0]!.travel, rear: f.corners[1]!.travel }));
+    // 07-01: the fork close-up keeps the bike solid; the rear one ghosts only the bodywork over the shock.
     await view(page, 'closeup', 'f');
-    expect((await state(page)).xray).toBe(true);
-    await shot(page, `${label.toLowerCase()}-fork-xray`);
+    expect((await state(page)).xray).toBe(false);
+    await shot(page, `${label.toLowerCase()}-fork`);
     await view(page, 'closeup', 'r');
+    expect((await state(page)).xray).toBe(true);
     await shot(page, `${label.toLowerCase()}-rear-xray`);
   }
   expect(travel['moto-classic']!).toBeGreaterThan(travel['moto-telelever']! + 0.02);
