@@ -29,6 +29,8 @@ const pause = (page: Page) => page.evaluate(() => globalThis.__app!.set('paused'
 const intent = (page: Page, i: Record<string, number> | null) => page.evaluate((x) => globalThis.__app!.driveIntent(x), i);
 const data = (page: Page, sel: string, key: string) => page.evaluate(([s, k]) => (document.querySelector(s!) as HTMLElement | null)?.dataset[k!] ?? null, [sel, key]);
 const panel = (page: Page) => page.locator('.sl-replay-share');
+/** The widget's frame (Turnstile renders it inside a closed shadow root, so it is found by frame URL). */
+const widgetFrames = (page: Page) => page.frames().filter((f) => f.url().includes(TURNSTILE)).length;
 
 /** Errors that are not the answers this spec provokes (mocked 4xx/5xx, the 404 of an unknown id, the widget's own logs). */
 const unexpected = (errors: readonly string[]) => errors.filter((e) => !e.includes('/api/replays') && !e.includes(TURNSTILE) && !e.includes('Failed to load resource'));
@@ -101,7 +103,7 @@ test.describe('12-05 saved runs', () => {
     await saveBtn.click();
     await expect(page.locator('.sl-replay-privacy')).toBeVisible();
     await expect(page.locator('.sl-replay-privacy')).toContainText('only your inputs and the start state');
-    await expect(page.locator('.sl-replay-turnstile iframe')).toBeAttached({ timeout: 30_000 });
+    await expect.poll(() => widgetFrames(page), { timeout: 30_000 }).toBeGreaterThan(0);
     await page.waitForTimeout(800);
     await page.screenshot({ path: join(SHOTS, '12-05-save-challenge.png') });
     expect(thirdParty.length).toBeGreaterThan(0);
@@ -111,7 +113,7 @@ test.describe('12-05 saved runs', () => {
     const link = await input.inputValue();
     const url = new URL(link);
     expect(url.search).toBe('');
-    expect(url.hash).toMatch(/^#rid=[A-HJ-NP-Z2-9]{12}$/);
+    expect(url.hash).toMatch(/^#rid=[A-HJKMNP-Z2-9]{12}$/);
     const id = url.hash.slice(5);
     await expect(panel(page)).toContainText('Saved: this short link plays the whole run');
     await expect(page.locator('.sl-replay-turnstile')).toBeHidden();
@@ -151,8 +153,8 @@ test.describe('12-05 saved runs', () => {
     const older = deflateRawSync(encodeReplay({ ...decoded.replay, header: { ...decoded.replay.header, simVersion: 'm2.0' } })).toString('base64url');
     await viewer.close();
     const v2 = await context.newPage();
-    await v2.route('**/api/replays/OLDERMODEL22', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: older, createdAt: 0, expiresAt: 0 }) }));
-    await open(v2, `${VIEWER}#rid=OLDERMODEL22`);
+    await v2.route('**/api/replays/PREVMQDEKS22', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: older, createdAt: 0, expiresAt: 0 }) }));
+    await open(v2, `${VIEWER}#rid=PREVMQDEKS22`);
     await expect.poll(() => mode(v2)).toBe('replay');
     await expect(v2.locator('.sl-replay-note')).toContainText('older model');
     await pause(v2);
@@ -214,10 +216,11 @@ test.describe('12-05 saved runs', () => {
     await page.screenshot({ path: join(SHOTS, '12-05-error-challenge.png') });
     // Escape closes the popover and removes the widget
     await page.locator('[data-action="save"]').click();
-    await expect(page.locator('.sl-replay-turnstile iframe')).toBeAttached({ timeout: 30_000 });
+    await expect.poll(() => widgetFrames(page), { timeout: 30_000 }).toBeGreaterThan(0);
     await page.keyboard.press('Escape');
     await expect(panel(page)).toBeHidden();
-    expect(await page.locator('.sl-replay-turnstile iframe').count()).toBe(0);
+    await expect.poll(() => widgetFrames(page)).toBe(0);
+    expect(await page.locator('.sl-replay-turnstile').evaluate((e) => e.childElementCount)).toBe(0);
     expect(unexpected(errors)).toEqual([]);
   });
 
