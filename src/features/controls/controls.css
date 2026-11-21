@@ -569,6 +569,10 @@ button.sl-controls-help-row:hover {
   .sl-controls-amp {
     top: calc(var(--margin) + var(--sl-hud-top-h) + var(--sl-hud-gap));
   }
+  /* ?debug=1 stats own that slot (debug.css: margin + 48 px, 48 px tall) */
+  #overlay:has(> .sl-debug-stats) > .sl-controls-amp {
+    top: calc(var(--margin) + 96px + var(--sl-hud-gap));
+  }
 }
 @media (max-width: 1200px) {
   .sl-controls-amp {
