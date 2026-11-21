@@ -253,3 +253,89 @@ export function rollGradient(res: RampResult): number {
   return degPerG(slope(x, y));
 }
 
+
+// ---- combined manoeuvres in a steady turn (T11-T13, the honesty report)
+export interface TurnResult {
+  readonly kappa0: number;
+  /** Path curvature r / u relative to the steady value at 0.5 s and 1.0 s after the event. */
+  readonly kappaRatio05: number;
+  readonly kappaRatio10: number;
+  /** Yaw angle gained over 1 s beyond the steady yaw rate, rad (+ = toward the turn). */
+  readonly yawDeviation: number;
+  readonly betaMax: number;
+  readonly yawRateChange: number;
+  readonly gripMax: number;
+  readonly decel: number;
+  /** Rear compliance toe (rad, + toe-in) of the outer / inner rear wheel: steady and 0.5 s into the event. */
+  readonly rearToeSteady: readonly [number, number];
+  readonly rearToeEvent: readonly [number, number];
+  /** Rear road-wheel angle (mean, rad, + toward the turn) steady and in the event (kinematic + compliance). */
+  readonly rearSteerSteady: number;
+  readonly rearSteerEvent: number;
+}
+
+/**
+ * Steady left turn on R at a_y (circle keeper, aids off unless given), then the steer is frozen and the event applied
+ * for 1 s: 'brake' (pedal), 'lift' (throttle to 0), 'power' (throttle to `pedal`).
+ */
+export function turnEvent(suspension: SuspensionId, kind: 'brake' | 'lift' | 'power', pedal: number, R = 100, ay = 0.45 * 9.80665, aids: Partial<DriveAids> = { abs: false, traction: false, stability: false, steering: false }): TurnResult {
+  const r = rig({ suspension, aids });
+  const u0 = Math.sqrt(ay * R);
+  r.launch(u0, 1 / R);
+  const keep = circleKeeper(R, 0, R, 1, r.vehicle.wheelbase);
+  const hold = speedHold(u0);
+  const wa = new Float64Array(12);
+  for (let k = 0; k < Math.round(10 / r.dt); k++) {
+    keep(r);
+    hold(r);
+    r.step();
+  }
+  const v = r.plant.view;
+  const kappa0 = v.r / v.u;
+  const r0 = v.r;
+  r.plant.wheelAngles(wa);
+  const rearToeSteady = [wa[4 + 3]!, wa[4 + 2]!] as const; // outer = right rear in a left turn
+  const rearSteerSteady = (wa[2]! + wa[3]!) / 2;
+  const steer = r.cmd.steer;
+  const throttle0 = r.cmd.throttle;
+  let yawDev = 0;
+  let betaMax = 0;
+  let gripMax = 0;
+  let k05 = 0;
+  let decel = 0;
+  let rearToeEvent: readonly [number, number] = [0, 0];
+  let rearSteerEvent = 0;
+  const n = Math.round(1 / r.dt);
+  for (let k = 0; k < n; k++) {
+    r.cmd.steer = steer;
+    if (kind === 'brake') {
+      r.cmd.throttle = 0;
+      r.cmd.brake = pedal;
+    } else r.cmd.throttle = kind === 'lift' ? 0 : Math.max(throttle0, pedal);
+    const f = r.step();
+    yawDev += (v.r - r0) * r.dt;
+    betaMax = Math.max(betaMax, Math.abs(v.beta));
+    for (const c of f.corners) gripMax = Math.max(gripMax, c.gripUse);
+    if (k === Math.round(n / 2) - 1) {
+      k05 = v.r / v.u;
+      r.plant.wheelAngles(wa);
+      rearToeEvent = [wa[4 + 3]!, wa[4 + 2]!];
+      rearSteerEvent = (wa[2]! + wa[3]!) / 2;
+      decel = -f.ax;
+    }
+  }
+  return {
+    kappa0,
+    kappaRatio05: k05 / kappa0,
+    kappaRatio10: v.r / v.u / kappa0,
+    yawDeviation: yawDev,
+    betaMax,
+    yawRateChange: v.r / r0 - 1,
+    gripMax,
+    decel,
+    rearToeSteady,
+    rearToeEvent,
+    rearSteerSteady,
+    rearSteerEvent,
+  };
+}
