@@ -122,6 +122,8 @@ export interface VehiclePlant {
   readonly approximate: boolean;
   /** Applied (post-conditioning) command of the last step. */
   readonly command: Readonly<DriveCommand>;
+  /** Compliance toe (4, rad, + toe-in) then camber (4, rad, + top outboard) currently applied (validation read-out). */
+  complianceAngles(out: Float64Array): Float64Array;
 }
 
 // ---- plant state offsets
@@ -727,6 +729,13 @@ export function createPlant(core: CarCore, options: PlantOptions = {}): VehicleP
       return flags[1] === 1;
     },
     command: cmdOut,
+    complianceAngles(out) {
+      for (let i = 0; i < 4; i++) {
+        out[i] = st[TOEC + i]!;
+        out[4 + i] = st[CAMC + i]!;
+      }
+      return out;
+    },
 
     engageFromPath(path, autoInputs) {
       const L = vehicle.wheelbase;
@@ -1017,8 +1026,9 @@ export function createPlant(core: CarCore, options: PlantOptions = {}): VehicleP
       // 10. ride coupling: low-passed specific forces the tyres supply
       const ax = sumFx / m;
       const ay = sumFy / m;
-      input.ax += (ax - input.ax) * LP_ALPHA;
-      input.ay += (ay - input.ay) * LP_ALPHA;
+      const lp = dt === SIM_DT ? LP_ALPHA : 1 - dexp(-2 * Math.PI * 8 * dt);
+      input.ax += (ax - input.ax) * lp;
+      input.ay += (ay - input.ay) * lp;
       scal[3] = (sumFx - drag - rr) / m;
       scal[4] = ay;
       core.linkInputs();
@@ -1026,7 +1036,7 @@ export function createPlant(core: CarCore, options: PlantOptions = {}): VehicleP
       // front-view IC line; with equal left/right forces and lines through the RC it is the M1 roll-centre pair.
       const sprung = vehicle.sprungMass / m;
       for (let i = 0; i < 4; i++) {
-        st[FYLP + i] = st[FYLP + i]! + (fyvW[i]! - st[FYLP + i]!) * LP_ALPHA;
+        st[FYLP + i] = st[FYLP + i]! + (fyvW[i]! - st[FYLP + i]!) * lp;
         linkVertical[i] = -jackSlope[i]! * st[FYLP + i]! * sprung;
       }
       pinput.ax = input.ax;
