@@ -31,6 +31,8 @@ import { ANNEX_MATERIALS, buildZoneMesh } from './surface';
 const OWN_CHUNK_AREA = 10_000;
 /** A chunk switches to its distant level of detail when the camera is this far from its bounding box, m. */
 const FAR_LOD = 100;
+/** The treeline (11-05) is drawn while the camera is within this distance of its side's bounding box, m. */
+const TREES_FAR = 240;
 
 /** Zone meshes are drawn in these pieces (one draw call per material used in each): every large zone and every zone
  *  with features alone, the rest together. */
@@ -219,7 +221,18 @@ export default {
     root.add(markings);
     const cones = createCones(world, def);
     if (cones) root.add(cones);
-    root.add(...createFacility(world, facilityPlacement(world, zones, def.field ?? null)));
+    // the treeline only while the camera is within TREES_FAR of a side (from the loop it is fog; triangle budget)
+    for (const o of createFacility(world, facilityPlacement(world, zones, def.field ?? null))) {
+      if (!o.name.startsWith('annex-treeline')) {
+        root.add(o);
+        continue;
+      }
+      const lod = new BoxLOD(new Box3().setFromObject(o), TREES_FAR);
+      lod.name = `${o.name}-lod`;
+      lod.addLevel(o, 0);
+      lod.addLevel(new Group(), 1);
+      root.add(lod);
+    }
     performance.measure('proving-ground-meshes', { start: t0, end: performance.now() });
     const signs = await createSigns(world, def);
     if (signs) root.add(signs);

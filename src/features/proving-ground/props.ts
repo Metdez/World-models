@@ -183,7 +183,7 @@ function poleGeometry(): BufferGeometry {
 
 /** A tree in the distance: a tall low-poly blob, white (coloured per instance; no trunk: it is seen through fog). */
 function treeGeometry(): BufferGeometry {
-  return tinted(new SphereGeometry(1, 7, 5).scale(1, 0.8, 1).translate(0, 0.55, 0), [1, 1, 1]);
+  return tinted(new SphereGeometry(1, 6, 4).scale(1, 0.8, 1).translate(0, 0.55, 0), [1, 1, 1]);
 }
 
 export interface FacilityPlacement {
@@ -280,7 +280,7 @@ export function createFacility(world: GroundWorld, place: FacilityPlacement): Me
     out.push(mesh);
   }
 
-  // treeline: two staggered rows of clumps 110-165 m beyond the field, only on open grass away from the loop corridor
+  // treeline: a row of clumps about 135 m beyond the field, only on open grass away from the loop corridor
   const f = place.field;
   if (f) {
     // one instanced mesh per side of the field (frustum culling works per side)
@@ -291,10 +291,7 @@ export function createFacility(world: GroundWorld, place: FacilityPlacement): Me
       seed = (seed + 0x6d2b79f5) >>> 0;
       return seed / 4294967296;
     };
-    for (const [margin, step] of [
-      [110, 11],
-      [165, 15],
-    ] as const) {
+    for (const [margin, step] of [[135, 10]] as const) {
       const x0 = f.minX - margin;
       const x1 = f.maxX + margin;
       const y0 = f.minY - margin;
@@ -317,8 +314,8 @@ export function createFacility(world: GroundWorld, place: FacilityPlacement): Me
           const crowns = 2;
           for (let c = 0; c < crowns; c++) {
             const s = 4 + rnd() * 3.5;
-            const cx = x + (rnd() - 0.5) * 8;
-            const cy = y + (rnd() - 0.5) * 8;
+            const cx = x + (rnd() - 0.5) * 12;
+            const cy = y + (rnd() - 0.5) * 12;
             q.setFromAxisAngle(up, rnd() * Math.PI * 2);
             sides[side]!.push([Math.floor(rnd() * TREE.length), new Matrix4().compose(new Vector3(cx, hit.h - 0.5, -cy), q.clone(), new Vector3(s, s * (1.1 + rnd() * 0.9), s))]);
           }

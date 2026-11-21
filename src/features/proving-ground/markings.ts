@@ -17,12 +17,11 @@ export const MARK_LIFT = 0.008;
 const MAX_STEP = 0.5;
 const WHITE = [0.78, 0.78, 0.76] as const;
 const YELLOW = [0.8, 0.54, 0.07] as const;
-/** Faint paint (radius rings), a sealed joint, the kerb's concrete and the gravel margin (two tones). */
+/** Faint paint (radius rings), a sealed joint, the kerb's concrete and the gravel margin. */
 const FAINT = [0.42, 0.42, 0.41] as const;
 const JOINT = [0.07, 0.07, 0.075] as const;
 const KERB = [0.62, 0.61, 0.58] as const;
-const GRAVEL = [0.21, 0.2, 0.17] as const;
-const GRAVEL_DARK = [0.16, 0.15, 0.13] as const;
+const GRAVEL = [0.19, 0.18, 0.155] as const;
 /** Edge line inset from a paved edge; kerb and gravel margin widths outside it, m. */
 const EDGE_INSET = 0.35;
 const KERB_W = 0.3;
@@ -124,17 +123,21 @@ export function grassEdges(zone: CompiledZone, world: GroundWorld, out = 1): { r
   for (const [side, at, outAt, span] of sides) {
     const n = Math.max(1, Math.round(span));
     let start = Number.NaN;
+    let last = Number.NaN;
     for (let i = 0; i <= n; i++) {
       const t = (span * i) / n;
       const a = side === 'w' ? t : t - W; // along: u for the long sides, w for the ends
       if (side === 'w') zone.toWorld(a, outAt, p);
       else zone.toWorld(outAt, a, p);
-      const grass = i < n && world.sample(p.x, p.y, NaN, hit).surface === 'grass';
+      const grass = world.sample(p.x, p.y, NaN, hit).surface === 'grass';
       if (grass && start !== start) start = a;
-      if (!grass && start === start) {
-        res.push({ side, at, from: start, to: a });
+      // a run ends at its last grass sample (before a join), or at the corner
+      if (start === start && (!grass || i === n)) {
+        const to = grass ? a : last;
+        if (to - start > 1) res.push({ side, at, from: start, to });
         start = Number.NaN;
       }
+      last = a;
     }
   }
   return res;
@@ -146,8 +149,8 @@ export function annexMarkings(def: WorldDefinition, zones: readonly CompiledZone
   const strips: Strip[] = [];
   const solid = (points: Pt[], width: number, colour: Rgb = WHITE) => strips.push({ points, width, colour });
 
-  // Paved edges meeting grass: an edge line inside, a low kerb and a mottled gravel margin outside (2 m resampling:
-  // the field is flat there).
+  // Paved edges meeting grass: an edge line inside, a low kerb and a gravel margin outside (4 m resampling: the field is
+  // flat there).
   for (const z of world ? zones : []) {
     if (z.def.shape.kind !== 'rect') continue;
     for (const e of grassEdges(z, world!)) {
@@ -159,8 +162,7 @@ export function annexMarkings(def: WorldDefinition, zones: readonly CompiledZone
       // the ride street has its own edge lines; the field is flat along these edges: 2 m resampling
       if (!z.def.features?.length) strips.push({ points: run(-EDGE_INSET), width: 0.15, colour: WHITE, step: 4 });
       strips.push({ points: run(KERB_W / 2), width: KERB_W, colour: KERB, step: 4, lift: KERB_LIFT });
-      strips.push({ points: run(KERB_W + GRAVEL_W * 0.3), width: GRAVEL_W * 0.6 + 0.02, colour: GRAVEL, step: 4 });
-      strips.push({ points: run(KERB_W + GRAVEL_W * 0.8), width: GRAVEL_W * 0.4, colour: GRAVEL_DARK, step: 4 });
+      strips.push({ points: run(KERB_W + GRAVEL_W / 2), width: GRAVEL_W + 0.02, colour: GRAVEL, step: 4 });
     }
     // sealed construction joints on the large slabs (not on the edge line itself)
     if (z.length * 2 * z.halfWidth > JOINT_AREA && !z.def.patches?.length && !z.def.features?.length) {
@@ -231,7 +233,8 @@ export function annexMarkings(def: WorldDefinition, zones: readonly CompiledZone
     const w1 = Math.max(...patches.map((p) => p.w[1])) + lane;
     const lanes: number[] = [];
     for (let w = w0; w <= w1 + 1e-6; w += lane) if (Math.abs(w) <= z.halfWidth - 0.5) lanes.push(w);
-    for (const w of lanes) solid(along(z, w, 4, z.length - 4), 0.2);
+    // lane lines: 2 m resampling (the platform is level; the paint's lift covers its class-A roughness)
+    for (const w of lanes) strips.push({ points: along(z, w, 4, z.length - 4, 2), width: 0.2, colour: WHITE, step: 2 });
     // a chevron in each lane, pointing the way to drive, before the run-up
     for (let i = 0; i + 1 < lanes.length; i++) {
       const wc = (lanes[i]! + lanes[i + 1]!) / 2;

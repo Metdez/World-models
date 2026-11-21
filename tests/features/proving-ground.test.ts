@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { BufferGeometry } from 'three';
+import { type BufferGeometry, InstancedMesh, Matrix4, Vector3 } from 'three';
 import type { Registries } from '../../src/contracts/app';
 import type { GroundHit, WorldDefinition } from '../../src/contracts/world';
-import feature, { annexChunks } from '../../src/features/proving-ground/index';
-import { annexMarkings, buildMarkings, MARK_LIFT } from '../../src/features/proving-ground/markings';
-import { coneGeometry } from '../../src/features/proving-ground/props';
-import { buildZoneMesh } from '../../src/features/proving-ground/surface';
+import feature, { annexChunks, facilityPlacement } from '../../src/features/proving-ground/index';
+import { annexMarkings, buildMarkings, grassEdges, MARK_LIFT } from '../../src/features/proving-ground/markings';
+import { coneGeometry, createFacility } from '../../src/features/proving-ground/props';
+import { buildZoneMesh, tarmacTone } from '../../src/features/proving-ground/surface';
 import { buildRibbon } from '../../src/features/track/ribbon';
 import { provingGround } from '../../src/sim-core/content/proving-ground';
 import { provingLoop } from '../../src/sim-core/content/proving-loop';
@@ -215,5 +215,66 @@ describe('markings and props', () => {
       bp.toWorld(200, w, p);
       expect(near(p.x, p.y, 0.01)).toBe(true);
     }
+  });
+});
+
+describe('11-05 facility look', () => {
+  it('edge treatment only where the paving meets grass: the dynamics pad has a gap at the pad link, the kerb rises', () => {
+    const pad = zones.find((z) => z.def.id === 'dynamics-pad')!;
+    const edges = grassEdges(pad, world);
+    // the u = 0 end (towards the ride street) is broken by the pad link (10 m wide)
+    const south = edges.filter((e) => e.side === 'u' && e.at === 0);
+    expect(south.length).toBe(2);
+    const gap = Math.max(...south.map((e) => e.from)) - Math.min(...south.map((e) => e.to));
+    expect(gap).toBeGreaterThan(8);
+    expect(gap).toBeLessThan(14);
+    const strips = annexMarkings(provingGround, zones, world);
+    const kerb = strips.filter((s) => s.lift === 0.04);
+    expect(kerb.length).toBeGreaterThan(5);
+    // the gravel margin lies on the field (inner points: a run's ends sit at a corner)
+    const gravel = strips.filter((s) => s.width > 2);
+    expect(gravel.length).toBe(kerb.length);
+    for (const s of gravel) for (const [x, y] of s.points.slice(1, -1)) expect(world.sample(x, y, NaN, hit).surface, `${x.toFixed(2)},${y.toFixed(2)} ${hit.zone}`).toBe('grass');
+    // the steering circle gets radius rings (every 10 m) and the centre cross
+    const circle = provingGround.props.find((p) => p.kind === 'circle')!;
+    for (const r of [10, 20, 30, 50, 60]) expect(strips.some((s) => s.points.length > 20 && s.points.every(([x, y]) => Math.abs(Math.hypot(x - circle.x, y - circle.y) - r) < 1e-6))).toBe(true);
+  });
+
+  it('tarmac tone is subtle and deterministic', () => {
+    const pad = zones.find((z) => z.def.id === 'dynamics-pad')!;
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let x = -240; x < 80; x += 3.7)
+      for (let y = 145; y < 335; y += 4.1) {
+        const t = tarmacTone(pad, x, y);
+        lo = Math.min(lo, t);
+        hi = Math.max(hi, t);
+      }
+    expect(lo).toBeGreaterThanOrEqual(0.91);
+    expect(hi).toBeLessThanOrEqual(1.09);
+    expect(hi - lo).toBeGreaterThan(0.05);
+    expect(tarmacTone(pad, -50.5, 200.25)).toBe(tarmacTone(pad, -50.5, 200.25));
+  });
+
+  it('poles, boards and the hut stand on grass; the treeline never on paving or the loop corridor', () => {
+    const meshes = createFacility(world, facilityPlacement(world, zones, provingGround.field ?? null));
+    const names = meshes.map((m) => m.name);
+    expect(names).toContain('annex-poles');
+    expect(names).toContain('annex-facility');
+    expect(names.filter((n) => n.startsWith('annex-treeline')).length).toBeGreaterThanOrEqual(3);
+    const m4 = new Matrix4();
+    const v = new Vector3();
+    for (const mesh of meshes) {
+      if (!(mesh instanceof InstancedMesh)) continue;
+      for (let i = 0; i < mesh.count; i++) {
+        mesh.getMatrixAt(i, m4);
+        v.setFromMatrixPosition(m4);
+        world.sample(v.x, -v.z, NaN, hit);
+        expect(hit.surface, `${mesh.name} ${i}`).toBe('grass');
+        if (mesh.name.startsWith('annex-treeline')) expect(Number.isNaN(hit.s)).toBe(true);
+      }
+    }
+    const hut = facilityPlacement(world, zones, provingGround.field ?? null).hut!;
+    for (const [dx, dy] of [[-5, -3], [5, 3], [-5, 3], [5, -3]]) expect(world.sample(hut.x + dx, hut.y + dy, NaN, hit).surface).toBe('grass');
   });
 });
