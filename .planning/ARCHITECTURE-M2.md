@@ -2104,7 +2104,7 @@ adds the two new `AnalyticsEvent` variants (`drive-session`: seconds int 0–864
     {
       "binding": "REPLAYS",
       "database_name": "suspension-lab-replays",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "012e9d77-53a2-46b2-b1df-57a244e5d078",
       "migrations_dir": "worker/migrations"
     }
   ],

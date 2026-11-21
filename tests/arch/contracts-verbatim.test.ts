@@ -19,7 +19,7 @@ function blockAfter(md: string, heading: string, lang: string): string {
 
 interface Block { readonly doc: string; readonly heading: string; readonly path: string; readonly lang: string }
 /** Block kinds of the addendum that are live: 'CF' from 08-01; 12-01 changes it to 'CFW'. */
-const M2_KINDS = 'CF';
+const M2_KINDS = 'CFW';
 const m2Blocks: Block[] = [...m2.matchAll(/^### ([A-Z])(\d+) `([^`]+)`$/gm)]
   .filter((m) => M2_KINDS.includes(m[1]!))
   .map((m) => ({ doc: m2, heading: `### ${m[1]!}${m[2]!} `, path: m[3]!, lang: m[3]!.endsWith('.jsonc') ? 'jsonc' : 'ts' }));

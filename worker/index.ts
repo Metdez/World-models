@@ -3,6 +3,8 @@ import { secureHeaders } from 'hono/secure-headers';
 import engineer from './routes/engineer';
 import event from './routes/event';
 import health from './routes/health';
+import insight from './routes/insight';
+import replays from './routes/replays';
 import rooms from './routes/rooms';
 import time from './routes/time';
 
@@ -21,6 +23,8 @@ app.route('/', time);
 app.route('/', rooms);
 app.route('/', engineer);
 app.route('/', event);
+app.route('/', replays);
+app.route('/', insight);
 app.notFound((c) => c.json({ error: 'not_found' }, 404));
 app.onError((err, c) => {
   console.error(err);

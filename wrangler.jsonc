@@ -20,6 +20,14 @@
     { "tag": "v1", "new_sqlite_classes": ["Room"] },
     { "tag": "v2", "new_sqlite_classes": ["Limiter"] }
   ],
+  "d1_databases": [
+    {
+      "binding": "REPLAYS",
+      "database_name": "suspension-lab-replays",
+      "database_id": "012e9d77-53a2-46b2-b1df-57a244e5d078",
+      "migrations_dir": "worker/migrations"
+    }
+  ],
   "ai": { "binding": "AI" },
   "analytics_engine_datasets": [{ "binding": "STATS", "dataset": "suspension_lab_events" }],
   "vars": { "APP_VERSION": "dev" },
