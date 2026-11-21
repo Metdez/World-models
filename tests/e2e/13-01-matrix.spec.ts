@@ -143,4 +143,20 @@ test.describe('13-01 feature-off matrix', () => {
     // offline network failures of background requests (room, analytics) are allowed; nothing else
     expect(errors.filter((e) => !/net::ERR_INTERNET_DISCONNECTED|Failed to fetch|WebSocket/i.test(e))).toEqual([]);
   });
+
+  test('-proving-ground removes the annex from physics too: no station spawn, the car stays on the loop (MD-35)', async ({ page }) => {
+    const errors = captureConsole(page);
+    const zoneAfterSpawn = async (flags: string) => {
+      await page.goto(`/?e2e=1&quality=low&drive=manual&spawn=steering-pad${flags}`);
+      await page.waitForFunction(() => globalThis.__app?.ready === true, undefined, { timeout: 180_000 });
+      await expect.poll(() => mode(page), { timeout: 30_000 }).toBe('manual');
+      await page.evaluate(() => globalThis.__app!.advance(0.5));
+      return (await page.evaluate(() => globalThis.__app!.drive())).zone;
+    };
+    expect(await zoneAfterSpawn('')).toBe('dynamics-pad');
+    expect(await zoneAfterSpawn('&features=-proving-ground')).toBe('loop');
+    expect(await page.evaluate(() => globalThis.__app!.errors)).toEqual([]);
+    expect(errors).toEqual([]);
+  });
 });
+
