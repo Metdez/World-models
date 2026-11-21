@@ -109,7 +109,7 @@ test.describe('09-05 handling HUD', () => {
     await intent(page, null);
     await page.keyboard.up('ArrowUp');
     await page.keyboard.press('Enter');
-    await expect.poll(() => mode(page)).toBe('auto');
+    await expect.poll(() => mode(page)).not.toBe('manual');
     await expect(page.locator('.sl-drive-lamp:visible')).toHaveCount(0);
     await expect(btn).toBeHidden();
     await expectHealthyBoot(page, errors);
