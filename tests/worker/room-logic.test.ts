@@ -10,6 +10,8 @@ import {
   generateRoomCode,
   isPrivateCode,
   isRoomCode,
+  laneOf,
+  frameLimit,
   mergeCtl,
   newBucket,
   nextCueSeq,
@@ -29,6 +31,7 @@ import { hostKeySchema, type UpgradeQuery } from '../../worker/schemas/room';
 
 const q = (over: Partial<UpgradeQuery> = {}): UpgradeQuery => ({ id: 'client-1', role: 'viewer', pv: PROTOCOL_VERSION, ...over });
 const KEY = 'abcdefghijklmnopqrstuvwxyz012345';
+const DKEY = 'ZYXWVUTSRQPONMLKJIHGFEDCBA_-9876';
 
 describe('room codes and host keys', () => {
   it('generates 5-char codes from the unambiguous alphabet, never LIVE', () => {
@@ -70,18 +73,18 @@ describe('room codes and host keys', () => {
 
 describe('decideJoin', () => {
   it('admits viewers to LIVE with their pick as attachment', () => {
-    const d = decideJoin({ code: PUBLIC_ROOM, query: q({ v: 'gt-coupe', s: 'macpherson' }), hostKey: null, connections: 3 });
+    const d = decideJoin({ code: PUBLIC_ROOM, query: q({ v: 'gt-coupe', s: 'macpherson' }), hostKey: null, driverKey: null, connections: 3 });
     expect(d).toEqual({ ok: true, attachment: { id: 'client-1', role: 'viewer', vehicleId: 'gt-coupe', suspensionId: 'macpherson' } });
   });
 
   it('omits a half-specified pick', () => {
-    const d = decideJoin({ code: PUBLIC_ROOM, query: q({ v: 'gt-coupe' }), hostKey: null, connections: 0 });
+    const d = decideJoin({ code: PUBLIC_ROOM, query: q({ v: 'gt-coupe' }), hostKey: null, driverKey: null, connections: 0 });
     expect(d).toEqual({ ok: true, attachment: { id: 'client-1', role: 'viewer' } });
   });
 
   it('rejects bad queries and stale protocol versions with 4400', () => {
-    expect(decideJoin({ code: PUBLIC_ROOM, query: null, hostKey: null, connections: 0 })).toMatchObject({ ok: false, close: CLOSE.badRequest });
-    expect(decideJoin({ code: PUBLIC_ROOM, query: q({ pv: PROTOCOL_VERSION + 1 }), hostKey: null, connections: 0 })).toMatchObject({
+    expect(decideJoin({ code: PUBLIC_ROOM, query: null, hostKey: null, driverKey: null, connections: 0 })).toMatchObject({ ok: false, close: CLOSE.badRequest });
+    expect(decideJoin({ code: PUBLIC_ROOM, query: q({ pv: PROTOCOL_VERSION + 1 }), hostKey: null, driverKey: null, connections: 0 })).toMatchObject({
       ok: false,
       close: CLOSE.badRequest,
       reason: 'protocol',
@@ -89,22 +92,22 @@ describe('decideJoin', () => {
   });
 
   it('rejects private codes that were never created (4404)', () => {
-    expect(decideJoin({ code: 'ABCDE', query: q(), hostKey: null, connections: 0 })).toMatchObject({ ok: false, close: CLOSE.unknownRoom });
-    expect(decideJoin({ code: 'ABCDE', query: q(), hostKey: KEY, connections: 0 }).ok).toBe(true);
+    expect(decideJoin({ code: 'ABCDE', query: q(), hostKey: null, driverKey: null, connections: 0 })).toMatchObject({ ok: false, close: CLOSE.unknownRoom });
+    expect(decideJoin({ code: 'ABCDE', query: q(), hostKey: KEY, driverKey: null, connections: 0 }).ok).toBe(true);
   });
 
   it('admits role=host only as pending (the key comes in the auth frame); LIVE has no host (4401)', () => {
-    expect(decideJoin({ code: PUBLIC_ROOM, query: q({ role: 'host' }), hostKey: null, connections: 0 })).toMatchObject({ close: CLOSE.forbidden });
-    expect(decideJoin({ code: 'ABCDE', query: q({ role: 'host', v: 'gt-coupe', s: 'macpherson' }), hostKey: KEY, connections: 0 })).toEqual({
+    expect(decideJoin({ code: PUBLIC_ROOM, query: q({ role: 'host' }), hostKey: null, driverKey: null, connections: 0 })).toMatchObject({ close: CLOSE.forbidden });
+    expect(decideJoin({ code: 'ABCDE', query: q({ role: 'host', v: 'gt-coupe', s: 'macpherson' }), hostKey: KEY, driverKey: null, connections: 0 })).toEqual({
       ok: true,
       attachment: { id: 'client-1', role: 'host', pending: true },
     });
   });
 
   it('bounds the room size with a clear close code', () => {
-    const full = decideJoin({ code: PUBLIC_ROOM, query: q(), hostKey: null, connections: ROOM_LIMITS.maxConnections });
+    const full = decideJoin({ code: PUBLIC_ROOM, query: q(), hostKey: null, driverKey: null, connections: ROOM_LIMITS.maxConnections });
     expect(full).toEqual({ ok: false, close: CLOSE.full, reason: 'room-full' });
-    expect(decideJoin({ code: PUBLIC_ROOM, query: q(), hostKey: null, connections: ROOM_LIMITS.maxConnections - 1 }).ok).toBe(true);
+    expect(decideJoin({ code: PUBLIC_ROOM, query: q(), hostKey: null, driverKey: null, connections: ROOM_LIMITS.maxConnections - 1 }).ok).toBe(true);
   });
 });
 
@@ -157,7 +160,7 @@ describe('presence', () => {
 
   it('counts everyone but hosts and builds the vehicle:suspension distribution', () => {
     const p = presenceOf([a('1', 'viewer', 'macpherson'), a('2', 'viewer', 'macpherson'), a('3', 'screen', 'multilink'), a('4', 'audience'), a('5', 'host', 'x'), null]);
-    expect(p).toEqual({ viewers: 4, hosts: 1, dist: { 'gt-coupe:macpherson': 2, 'gt-coupe:multilink': 1 } });
+    expect(p).toEqual({ viewers: 4, hosts: 1, drivers: 0, dist: { 'gt-coupe:macpherson': 2, 'gt-coupe:multilink': 1 } });
     expect(presenceOf([{ id: '6', role: 'host', pending: true }]).hosts).toBe(0);
   });
 
@@ -195,7 +198,7 @@ describe('reduceMessage', () => {
   const viewer: Attachment = { id: 'v1', role: 'viewer', vehicleId: 'gt-coupe', suspensionId: 'macpherson' };
   const host: Attachment = { id: 'h1', role: 'host' };
   const poll: PollRecord = { id: 'p1', question: 'Q?', options: ['A', 'B'], open: true };
-  const room = (over: Partial<RoomView> = {}): RoomView => ({ hostKey: KEY, ctl: { seq: 4 }, poll: null, now: 1234, newPollId: () => 'p2', ...over });
+  const room = (over: Partial<RoomView> = {}): RoomView => ({ hostKey: KEY, driverKey: DKEY, ctl: { seq: 4 }, poll: null, now: 1234, newPollId: () => 'p2', ...over });
 
   it('a pending host authenticates with its first frame; anything else (or a wrong key) is refused', () => {
     const pending: Attachment = { id: 'h1', role: 'host', pending: true };
@@ -265,5 +268,82 @@ describe('expiry alarm', () => {
   it('wipes only rooms without connections', () => {
     expect(expireOnAlarm(0)).toBe(true);
     expect(expireOnAlarm(1)).toBe(false);
+  });
+});
+
+describe('driver role (12-02)', () => {
+  const room = (over: Partial<RoomView> = {}): RoomView => ({ hostKey: KEY, driverKey: DKEY, ctl: { seq: 0 }, poll: null, now: 5000, newPollId: () => 'p', ...over });
+  const driver: Attachment = { id: 'd1', role: 'driver' };
+  const forbidden = [{ k: 'reply', msg: { t: 'err', code: 'forbidden' } }];
+
+  it('admits role=driver only as pending in rooms with a driver key; LIVE and pre-12-02 rooms refuse 4401', () => {
+    expect(decideJoin({ code: 'ABCDE', query: q({ role: 'driver' }), hostKey: KEY, driverKey: DKEY, connections: 0 })).toEqual({
+      ok: true,
+      attachment: { id: 'client-1', role: 'driver', pending: true },
+    });
+    expect(decideJoin({ code: PUBLIC_ROOM, query: q({ role: 'driver' }), hostKey: null, driverKey: null, connections: 0 })).toMatchObject({ close: CLOSE.forbidden });
+    expect(decideJoin({ code: 'ABCDE', query: q({ role: 'driver' }), hostKey: KEY, driverKey: null, connections: 0 })).toMatchObject({ close: CLOSE.forbidden });
+  });
+
+  it('authenticates with the driver key only (timing-safe); success replaces older drivers', () => {
+    const pending: Attachment = { id: 'd1', role: 'driver', pending: true };
+    expect(reduceMessage(pending, { t: 'auth', k: DKEY }, room())).toEqual([
+      { k: 'attach', attachment: { id: 'd1', role: 'driver' } },
+      { k: 'welcome' },
+      { k: 'replace-driver' },
+    ]);
+    const close = [{ k: 'close', code: CLOSE.forbidden, reason: 'forbidden' }];
+    expect(reduceMessage(pending, { t: 'auth', k: KEY }, room())).toEqual(close); // the host key is not a driver key
+    expect(reduceMessage(pending, { t: 'auth', k: DKEY }, room({ driverKey: null }))).toEqual(close);
+    expect(reduceMessage({ id: 'h', role: 'host', pending: true }, { t: 'auth', k: DKEY }, room())).toEqual(close);
+    expect(reduceMessage(pending, { t: 'in', n: 1, s: 0, th: 0, br: 0, f: 1 }, room())).toEqual(forbidden);
+    expect(CLOSE.replaced).toBe(4409);
+  });
+
+  it('relays `in` to screens stamped with the room time; `tel` from screens to the driver; others are forbidden', () => {
+    const frame = { t: 'in', n: 7, s: -250, th: 1000, br: 0, f: 5 } as const;
+    expect(reduceMessage(driver, frame, room())).toEqual([{ k: 'to-screens', msg: { ...frame, r: 5000 } }]);
+    const tel = { t: 'tel', v: 87, g: 3, m: 1, k: 2 } as const;
+    expect(reduceMessage({ id: 's', role: 'screen' }, tel, room())).toEqual([{ k: 'to-driver', msg: tel }]);
+    for (const role of ['viewer', 'screen', 'audience', 'host'] as const) expect(reduceMessage({ id: 'x', role }, frame, room())).toEqual(forbidden);
+    for (const role of ['viewer', 'audience', 'host', 'driver'] as const) expect(reduceMessage({ id: 'x', role }, tel, room())).toEqual(forbidden);
+    // A driver has no presenter powers and no pick.
+    expect(reduceMessage(driver, { t: 'ctl', set: { xray: true } }, room())).toEqual(forbidden);
+    expect(reduceMessage(driver, { t: 'pick', vehicleId: 'gt-coupe', suspensionId: 'multilink' }, room())).toEqual([]);
+    expect(reduceMessage(driver, { t: 'sync', c0: 1 }, room())).toEqual([{ k: 'reply', msg: { t: 'sync', c0: 1, s1: 5000 } }]);
+  });
+
+  it('per-role lanes: drivers 90/s burst 30, screen telemetry 5/s, viewers unchanged; 128 B driver frames', () => {
+    expect(laneOf('driver', 'in')).toBe('driver');
+    expect(laneOf('driver', null)).toBe('driver');
+    expect(laneOf('screen', 'tel')).toBe('tel');
+    expect(laneOf('screen', 'sync')).toBe('general');
+    expect(laneOf('viewer', 'tel')).toBe('general');
+    expect(laneOf('audience', 'in')).toBe('general');
+    const b = newBucket(0, 'driver');
+    for (let i = 0; i < NET_LIMITS.driverBurst; i++) expect(takeToken(b, 0, 'driver')).toBe('ok');
+    expect(takeToken(b, 0, 'driver')).toBe('drop');
+    // A steady 60 Hz stream for 30 s never drops (refill 90/s).
+    const s = newBucket(0, 'driver');
+    let drops = 0;
+    for (let i = 0; i < 1800; i++) if (takeToken(s, (i * 1000) / 60, 'driver') !== 'ok') drops++;
+    expect(drops).toBe(0);
+    // ...while the same stream on the general lane (the M1 blocker) would lose most frames.
+    const g = newBucket(0);
+    const lost = Array.from({ length: 1800 }, (_, i) => takeToken(g, (i * 1000) / 60)).filter((v) => v !== 'ok').length;
+    expect(lost).toBeGreaterThan(1600);
+    const t = newBucket(0, 'tel');
+    for (let i = 0; i < NET_LIMITS.telemetryPerSecond; i++) expect(takeToken(t, 0, 'tel')).toBe('ok');
+    expect(takeToken(t, 0, 'tel')).toBe('drop');
+    expect(frameLimit('driver')).toBe(NET_LIMITS.driverMessageBytes);
+    expect(frameLimit('viewer')).toBe(NET_LIMITS.wsMessageBytes);
+    expect(frameTooBig('x'.repeat(129), frameLimit('driver'))).toBe(true);
+    expect(frameTooBig(JSON.stringify({ t: 'in', n: 4294967295, s: -1000, th: 1000, br: 1000, f: 7 }), frameLimit('driver'))).toBe(false);
+  });
+
+  it('presence counts authenticated drivers apart from viewers', () => {
+    const p = presenceOf([{ id: '1', role: 'screen' }, { id: 'd', role: 'driver' }, { id: 'e', role: 'driver', pending: true }]);
+    expect(p).toEqual({ viewers: 1, hosts: 0, drivers: 1, dist: {} });
+    expect(samePresence(p, { ...p, drivers: 0 })).toBe(false);
   });
 });

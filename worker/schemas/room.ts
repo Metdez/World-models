@@ -7,7 +7,7 @@ const contentId = z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/);
 /** Anonymous client uuid (or any short token of the same alphabet). */
 export const clientIdSchema = z.string().regex(/^[A-Za-z0-9-]{1,36}$/);
 export const hostKeySchema = z.string().regex(/^[A-Za-z0-9_-]{16,64}$/);
-export const roleSchema = z.enum(['viewer', 'screen', 'host', 'audience']) satisfies z.ZodType<RoomRole>;
+export const roleSchema = z.enum(['viewer', 'screen', 'host', 'audience', 'driver']) satisfies z.ZodType<RoomRole>;
 
 export interface UpgradeQuery {
   readonly id: string;
@@ -51,6 +51,7 @@ export const presenterControlsSchema: z.ZodType<PresenterControls> = z.strictObj
 });
 
 const trimmed = (max: number) => z.string().trim().min(1).max(max);
+const int = (min: number, max: number) => z.number().int().min(min).max(max);
 
 export const clientMessageSchema: z.ZodType<ClientMessage> = z.discriminatedUnion('t', [
   z.strictObject({ t: z.literal('auth'), k: hostKeySchema }),
@@ -72,6 +73,10 @@ export const clientMessageSchema: z.ZodType<ClientMessage> = z.discriminatedUnio
     pollId: z.string().min(1).max(36),
     choice: z.number().int().min(0).max(NET_LIMITS.pollOptionsMax - 1),
   }),
+  // Driver input (M2): u32 sequence, fixed-point steer/pedals, 3 flag bits.
+  z.strictObject({ t: z.literal('in'), n: int(0, 0xffffffff), s: int(-1000, 1000), th: int(0, 1000), br: int(0, 1000), f: int(0, 7) }),
+  // Screen telemetry (M2): km/h, gear (-1 reverse), DriveMode index, haptic bits.
+  z.strictObject({ t: z.literal('tel'), v: int(0, 999), g: int(-1, 12), m: int(0, 3), k: int(0, 3) }),
 ]);
 
 /** JSON text frame -> validated message, or null (unparsable / invalid). */

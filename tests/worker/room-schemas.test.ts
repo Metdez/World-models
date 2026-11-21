@@ -37,6 +37,7 @@ describe('parseUpgradeQuery', () => {
     expect(p(`id=${'a'.repeat(37)}&role=viewer&pv=1`)).toBeNull();
     expect(p('id=a b&role=viewer&pv=1')).toBeNull();
     expect(p('id=a&role=admin&pv=1')).toBeNull();
+    expect(p('id=a&role=driver&pv=3')).toEqual({ id: 'a', role: 'driver', pv: 3 });
     expect(p('id=a&role=viewer&pv=x')).toBeNull();
     expect(p('id=a&role=viewer&s=Bad Id&pv=1')).toBeNull();
   });
@@ -56,6 +57,10 @@ describe('parseClientMessage', () => {
       { t: 'poll', poll: { question: 'Which handles the kerb best?', options: ['A', 'B', 'C', 'D'] } },
       { t: 'poll', poll: null },
       { t: 'vote', pollId: crypto.randomUUID(), choice: 3 },
+      { t: 'in', n: 0, s: -1000, th: 0, br: 1000, f: 0 },
+      { t: 'in', n: 4294967295, s: 1000, th: 1000, br: 0, f: 7 },
+      { t: 'tel', v: 0, g: -1, m: 3, k: 3 },
+      { t: 'tel', v: 241, g: 6, m: 1, k: 0 },
     ];
     for (const m of messages) expect(ok(m)).toEqual(m);
   });
@@ -86,6 +91,21 @@ describe('parseClientMessage', () => {
       { t: 'vote', pollId: 'p', choice: 1.5 },
       { t: 'vote', pollId: 'p', choice: -1 },
       { t: 'vote', pollId: 'p', choice: NET_LIMITS.pollOptionsMax },
+      { t: 'in', n: -1, s: 0, th: 0, br: 0, f: 0 },
+      { t: 'in', n: 4294967296, s: 0, th: 0, br: 0, f: 0 },
+      { t: 'in', n: 1, s: 1001, th: 0, br: 0, f: 0 },
+      { t: 'in', n: 1, s: 0.5, th: 0, br: 0, f: 0 },
+      { t: 'in', n: 1, s: 0, th: -1, br: 0, f: 0 },
+      { t: 'in', n: 1, s: 0, th: 0, br: 1001, f: 0 },
+      { t: 'in', n: 1, s: 0, th: 0, br: 0, f: 8 },
+      { t: 'in', n: 1, s: 0, th: 0, br: 0 },
+      { t: 'in', n: 1, s: 0, th: 0, br: 0, f: 0, c: 12.5 },
+      { t: 'in', n: 1, s: 0, th: 0, br: 0, f: 0, r: 1 },
+      { t: 'tel', v: -1, g: 0, m: 0, k: 0 },
+      { t: 'tel', v: 10, g: 0, m: 4, k: 0 },
+      { t: 'tel', v: 10, g: 0, m: 0, k: 4 },
+      { t: 'tel', v: 10.5, g: 0, m: 0, k: 0 },
+      { t: 'gst', x: 0, y: 0, h: 0, v: 0 },
       null,
       [],
       42,
