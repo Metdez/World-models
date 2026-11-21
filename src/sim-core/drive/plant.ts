@@ -247,7 +247,6 @@ export function createPlant(core: CarCore, options: PlantOptions = {}): VehicleP
   const plane = new Float64Array(3); // z0, g, c
   const hit: GroundHit = { h: 0, base: 0, surface: 'asphalt', zone: 'loop', s: 0, l: 0 };
   const fr: Frenet = { s: 0, l: 0, heading: 0, curvature: 0, converged: true };
-  const fr2: Frenet = { s: 0, l: 0, heading: 0, curvature: 0, converged: true };
   const ts: TrackSample = { s: 0, x: 0, y: 0, z: 0, heading: 0, curvature: 0, bank: 0, grade: 0 };
   const cmdOut: DriveCommand = { steer: 0, throttle: 0, brake: 0, handbrake: 0, direction: 1 };
   const ring = Array.from({ length: RING }, () => new Float64Array(PLANT_SNAPSHOT_LENGTH));
@@ -356,9 +355,7 @@ export function createPlant(core: CarCore, options: PlantOptions = {}): VehicleP
         track.sample(sw, ts);
         vc[i] = ts.z - swellA * dsin(swellK * sw);
       } else {
-        // off the corridor: keep the wheel's projection hint current (warm starts stay O(1) on the terrain)
-        world.project(wx, wy, st[HINT + i]!, fr2);
-        st[HINT + i] = fr2.s;
+        // off the corridor (the ground is a function of (x, y) alone since 09-04: no hint to keep current)
         h[i] = hit.h;
         vc[i] = 0;
       }

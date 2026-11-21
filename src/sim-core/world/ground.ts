@@ -4,13 +4,20 @@
  * Loop corridor (|l| <= LOOP_CORRIDOR): h = track.roadHeight(s, l), base = swell(s) + l tan(bank(s)) (vertical curves,
  * roughness and features stay in h exactly as the M1 ride input sees them); surface bands by |l|. Between |l| 17.5 and
  * 18.5 h and base blend to the terrain. Pure; sample/project are allocation-free.
+ * Off the corridor (09-04) the terrain is a continuous function of (x, y): where several loop sections are near (the
+ * hairpin finger runs 41 m from the launch straight, 1-3 m higher or lower), the M1 terrain of each local nearest
+ * centreline node within TERRAIN_REACH of the nearest contributes with inverse-square weights on the distance beyond
+ * the ribbon (terrain.ts createBlendedTerrain: the nearest section dominates at its own edge), instead of jumping where
+ * the nearest section changes.
+ * The projection is the global nearest point (the hint only names the API). `terrainHeight(x, y)` is that same
+ * function: the renderer's terrain must call it.
  */
 import type { BuiltTrack, TrackSample } from '../../contracts/track';
 import type { Frenet, GroundHit, GroundWorld, SurfaceKind, WorldDefinition } from '../../contracts/world';
 import { wrap } from '../math/interp';
 import { dsin, dtan } from '../math/det';
-import { createProjectorCore } from './project';
-import { loopTerrainHeight } from './terrain';
+import { createProjectorCore, MAX_REACH } from './project';
+import { createBlendedTerrain, loopTerrainHeight } from './terrain';
 
 /** m: |l| of the drawn ribbon (width/2 + kerb + runoff of the proving loop). */
 export const LOOP_CORRIDOR = 18;
@@ -20,6 +27,10 @@ export const OUT_OF_BOUNDS = 60;
 const EDGE_BLEND = 0.5;
 /** Asphalt apron beyond the kerb, m. */
 const APRON = 2;
+/** Off-corridor terrain blends the sections whose distance is within this of the nearest, m. */
+const TERRAIN_REACH = MAX_REACH;
+/** Inside this distance from the centreline the terrain (hidden under the ribbon) is the nearest section's alone, m. */
+const BLEND_FROM = LOOP_CORRIDOR - 1;
 
 interface Bands {
   readonly half: number;
@@ -67,13 +78,21 @@ export function buildGroundWorld(track: BuiltTrack, def: WorldDefinition | null)
   const scratch: TrackSample = { s: 0, x: 0, y: 0, z: 0, heading: 0, curvature: 0, bank: 0, grade: 0 };
   const fr: Frenet = { s: 0, l: 0, heading: 0, curvature: 0, converged: true };
   const stations = new Map((def?.stations ?? []).map((st) => [st.id, st] as const));
+
+  const blended = createBlendedTerrain(track, core, BLEND_FROM, TERRAIN_REACH);
+  /** Terrain at (x, y) whose nearest centreline point is in `fr`. */
+  function terrainAt(x: number, y: number): number {
+    const b = blended(x, y, Math.abs(fr.l));
+    return b === b ? b : loopTerrainHeight(track, x, y, fr.s, fr.l, scratch);
+  }
   const swellA = track.def.swell.amplitude;
   const swellK = (2 * Math.PI * track.def.swell.cycles) / track.length;
 
   const world: GroundWorld = {
     def,
-    sample(x, y, hint, out) {
-      core.project(x, y, hint, fr);
+    sample(x, y, _hint, out) {
+      // The nearest point only; off (or at the edge of) the ribbon all candidates within the terrain reach.
+      core.project(x, y, NaN, fr);
       const s = fr.s;
       const l = fr.l;
       const a = Math.abs(l);
@@ -83,7 +102,7 @@ export function buildGroundWorld(track: BuiltTrack, def: WorldDefinition | null)
         let base = swellA * dsin(swellK * s) + l * dtan(ts.bank);
         if (a > LOOP_CORRIDOR - EDGE_BLEND) {
           const w = smoothstep(LOOP_CORRIDOR - EDGE_BLEND, LOOP_CORRIDOR + EDGE_BLEND, a);
-          const t = loopTerrainHeight(track, x, y, s, l, scratch);
+          const t = terrainAt(x, y);
           h += (t - h) * w;
           base += (t - base) * w;
         }
@@ -95,7 +114,7 @@ export function buildGroundWorld(track: BuiltTrack, def: WorldDefinition | null)
         out.l = a <= LOOP_CORRIDOR ? l : NaN;
         return out;
       }
-      const t = loopTerrainHeight(track, x, y, s, l, scratch);
+      const t = terrainAt(x, y);
       out.h = t;
       out.base = t;
       out.surface = 'grass';
@@ -106,7 +125,7 @@ export function buildGroundWorld(track: BuiltTrack, def: WorldDefinition | null)
     },
     terrainHeight(x, y) {
       core.project(x, y, NaN, fr);
-      return loopTerrainHeight(track, x, y, fr.s, fr.l, scratch);
+      return terrainAt(x, y);
     },
     project: (x, y, hint, out) => core.project(x, y, hint, out),
     inBounds(x, y) {
