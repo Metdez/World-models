@@ -90,7 +90,8 @@ export function buildGroundWorld(track: BuiltTrack, def: WorldDefinition | null)
   const swellA = track.def.swell.amplitude;
   const swellK = (2 * Math.PI * track.def.swell.cycles) / track.length;
 
-  if (def) return buildZonedWorld(track, def, core, fr, terrainAt, swellA, swellK, stations);
+  // a definition without zones and field (a stub registered by a test) grounds like no world
+  if (def?.zones && def.field) return buildZonedWorld(track, def, core, fr, terrainAt, swellA, swellK, stations);
 
   const world: GroundWorld = {
     def,
