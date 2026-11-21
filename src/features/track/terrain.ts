@@ -6,7 +6,8 @@
  * zone mesh) are `terrainHeight`, which lies below those surfaces.
  * One indexed mesh: over the loop, the field and the zones (FINE region) 4 m cells, each split into four (to 2 m, then
  * 1 m) while the linear surface misses the function by more than TOLERANCE at its edge midpoints or centre and the cell is
- * not hidden under the ribbon or a zone (tested where the coarse grid bends); outside it cells grow geometrically to HORIZON. A cell next to finer cells is a
+ * not hidden under the ribbon or a zone (tested where the coarse grid bends), and flat runs of whole cells merged into
+ * 8 m and 16 m leaves; outside it cells grow geometrically to HORIZON. A cell next to finer cells is a
  * fan round its centre through every vertex on its edges, so no T-junction cracks. The terrain maths lives in sim-core
  * (`world/terrain.ts`): this file only samples it.
  */
@@ -28,6 +29,8 @@ const HORIZON = 4500;
 const FINE_MARGIN = 40;
 /** Largest linear-interpolation error accepted on visible ground, m. */
 export const TOLERANCE = 0.01;
+/** Coarse cells merged into leaves of up to MERGE x MERGE cells (16 m) where the ground is flat. */
+const MERGE = 4;
 /** A coarse cell is tested for splitting only where the 4 m grid bends by more than this (second difference), m. */
 const CANDIDATE = 0.02;
 /** Beyond the runoff edge the loop terrain is the far field from this distance on (sim-core terrain BLEND_FAR = 220 m, plus
@@ -49,8 +52,10 @@ function axis(lo: number, hi: number): { values: number[]; inner0: number; inner
 export interface TerrainStats {
   readonly vertices: number;
   readonly triangles: number;
-  /** Leaves per size (4, 2, 1 m) in the fine region. */
-  readonly leaves: readonly [number, number, number];
+  /** Leaves per size in the fine region. */
+  readonly leaves: Readonly<Record<string, number>>;
+  /** Leaves left out because they lie wholly under the ribbon or a zone mesh. */
+  readonly hidden: number;
 }
 
 export function buildTerrain(track: BuiltTrack, world: GroundWorld): BufferGeometry & { userData: { stats?: TerrainStats } } {
@@ -163,7 +168,12 @@ export function buildTerrain(track: BuiltTrack, world: GroundWorld): BufferGeome
   // Quadtree leaves (lattice x, y, size in lattice units).
   const leaves: number[] = [];
   const used = new Uint8Array(LW * LH);
-  const counts: [number, number, number] = [0, 0, 0];
+  const counts: Record<string, number> = {};
+  const leaf = (i: number, j: number, s: number) => {
+    leaves.push(i, j, s);
+    counts[`${s * MIN_CELL} m`] = (counts[`${s * MIN_CELL} m`] ?? 0) + 1;
+    used[j * LW + i] = used[j * LW + i + s] = used[(j + s) * LW + i] = used[(j + s) * LW + i + s] = 1;
+  };
   const refine = (i: number, j: number, s: number) => {
     const h2 = s / 2;
     let split = false;
@@ -182,33 +192,56 @@ export function buildTerrain(track: BuiltTrack, world: GroundWorld): BufferGeome
       );
       split = err > TOLERANCE && !(isHidden(i, j) && isHidden(i + s, j) && isHidden(i, j + s) && isHidden(i + s, j + s) && isHidden(i + h2, j + h2));
     }
-    if (split) {
-      refine(i, j, h2);
-      refine(i + h2, j, h2);
-      refine(i, j + h2, h2);
-      refine(i + h2, j + h2, h2);
-      return;
-    }
-    leaves.push(i, j, s);
-    counts[s === per ? 0 : s === per / 2 ? 1 : 2]++;
-    used[j * LW + i] = used[j * LW + i + s] = used[(j + s) * LW + i] = used[(j + s) * LW + i + s] = 1;
+    if (!split) return leaf(i, j, s);
+    refine(i, j, h2);
+    refine(i + h2, j, h2);
+    refine(i, j + h2, h2);
+    refine(i + h2, j + h2, h2);
   };
+  // Coarse cells where the grid bends are split; the others stay whole and are merged into 8 m and 16 m leaves where
+  // the merged cell's plane meets every coarse vertex inside it within TOLERANCE (the open field, the far field).
+  const whole = new Uint8Array(ax.innerN * ay.innerN);
   for (let j = 0; j < ay.innerN; j++)
     for (let i = 0; i < ax.innerN; i++) {
       const border = i === 0 || j === 0 || i === ax.innerN - 1 || j === ay.innerN - 1;
-      if (border) {
-        leaves.push(i * per, j * per, per);
-        counts[0]++;
-        const p = j * per * LW + i * per;
-        used[p] = used[p + per] = used[p + per * LW] = used[p + per * LW + per] = 1;
-      } else if (!coarseHidden(i, j) && Math.max(bend(i, j), bend(i + 1, j), bend(i, j + 1), bend(i + 1, j + 1)) > CANDIDATE) refine(i * per, j * per, per);
-      else {
-        leaves.push(i * per, j * per, per);
-        counts[0]++;
-        const p = j * per * LW + i * per;
-        used[p] = used[p + per] = used[p + per * LW] = used[p + per * LW + per] = 1;
-      }
+      if (!border && !coarseHidden(i, j) && Math.max(bend(i, j), bend(i + 1, j), bend(i, j + 1), bend(i + 1, j + 1)) > CANDIDATE) refine(i * per, j * per, per);
+      else whole[j * ax.innerN + i] = 1;
     }
+  const flat = (i0: number, j0: number, n: number): boolean => {
+    if (i0 + n > ax.innerN || j0 + n > ay.innerN) return false;
+    for (let q = 0; q < n; q++) for (let p = 0; p < n; p++) if (!whole[(j0 + q) * ax.innerN + i0 + p]) return false;
+    const a = G(i0, j0);
+    const b = G(i0 + n, j0);
+    const c = G(i0, j0 + n);
+    const d = G(i0 + n, j0 + n);
+    for (let q = 0; q <= n; q++)
+      for (let p = 0; p <= n; p++) {
+        const fx = p / n;
+        const fy = q / n;
+        const h = fx + fy <= 1 ? a + (b - a) * fx + (c - a) * fy : d + (c - d) * (1 - fx) + (b - d) * (1 - fy);
+        if (Math.abs(G(i0 + p, j0 + q) - h) > TOLERANCE) return false;
+      }
+    return true;
+  };
+  for (let bj = 0; bj < ay.innerN; bj += MERGE)
+    for (let bi = 0; bi < ax.innerN; bi += MERGE) {
+      if (flat(bi, bj, MERGE)) {
+        leaf(bi * per, bj * per, MERGE * per);
+        continue;
+      }
+      for (let qj = bj; qj < Math.min(bj + MERGE, ay.innerN); qj += MERGE / 2)
+        for (let qi = bi; qi < Math.min(bi + MERGE, ax.innerN); qi += MERGE / 2) {
+          if (flat(qi, qj, MERGE / 2)) {
+            leaf(qi * per, qj * per, (MERGE / 2) * per);
+            continue;
+          }
+          for (let j = qj; j < Math.min(qj + MERGE / 2, ay.innerN); j++)
+            for (let i = qi; i < Math.min(qi + MERGE / 2, ax.innerN); i++) if (whole[j * ax.innerN + i]) leaf(i * per, j * per, per);
+        }
+    }
+  // the outer ring meets the fine region at every coarse vertex of its border
+  for (let i = 0; i <= ax.innerN; i++) used[i * per] = used[ay.innerN * per * LW + i * per] = 1;
+  for (let j = 0; j <= ay.innerN; j++) used[j * per * LW] = used[j * per * LW + ax.innerN * per] = 1;
 
   const index: number[] = [];
   // Outer ring: plain cells of the axis grid.
@@ -222,10 +255,23 @@ export function buildTerrain(track: BuiltTrack, world: GroundWorld): BufferGeome
     }
   // Fine region: two triangles, or a fan round the centre through the finer neighbours' vertices on the edges.
   const ring: number[] = [];
+  let culled = 0;
   for (let k = 0; k < leaves.length; k += 3) {
     const i = leaves[k]!;
     const j = leaves[k + 1]!;
     const s = leaves[k + 2]!;
+    // a leaf wholly under the ribbon or a zone mesh is never seen: corners, edge midpoints and centre all hidden
+    const h2 = s / 2;
+    if (
+      isHidden(i, j) &&
+      isHidden(i + s, j) &&
+      isHidden(i, j + s) &&
+      isHidden(i + s, j + s) &&
+      (s === 1 || (isHidden(i + h2, j + h2) && isHidden(i + h2, j) && isHidden(i, j + h2) && isHidden(i + s, j + h2) && isHidden(i + h2, j + s)))
+    ) {
+      culled++;
+      continue;
+    }
     ring.length = 0;
     const visit = (li: number, lj: number) => {
       if (used[lj * LW + li]) ring.push(vertex(li, lj));
@@ -249,6 +295,6 @@ export function buildTerrain(track: BuiltTrack, world: GroundWorld): BufferGeome
   geometry.setIndex(new BufferAttribute(count > 65535 ? new Uint32Array(index) : new Uint16Array(index), 1));
   geometry.computeVertexNormals();
   geometry.computeBoundingSphere();
-  geometry.userData.stats = { vertices: count, triangles: index.length / 3, leaves: counts };
+  geometry.userData.stats = { vertices: count, triangles: index.length / 3, leaves: counts, hidden: culled };
   return geometry;
 }

@@ -14,19 +14,25 @@ const STATIONS = ['ride-street', 'steering-pad', 'slalom', 'lane-change', 'braki
 const QUALITY = process.env.QUALITY ?? 'low';
 
 type View = readonly [number, number, number];
-/** Free test views (sim x, y, z: eye, target). */
-const VIEWS: Record<string, [View, View, number?, boolean?]> = {
-  overview: [[-60, -140, 260], [-40, 260, 0], 50, false],
-  'overview-annex': [[-40, 40, 140], [-40, 300, 0], 55, false],
-  'spur-east': [[60, -14, 9], [100, 25, 0]],
-  'spur-west': [[-10, -12, 9], [-50, 30, 0]],
-  'ride-modules': [[-24, 118, 3.2], [40, 125, 0]],
-  'ride-pave': [[-136, 119, 2.2], [-110, 126, 0]],
-  'ride-sleepers': [[-66, 119.5, 2.2], [-40, 125, 0]],
-  'wet-lanes': [[130, 240, 6], [150, 300, 0]],
-  circle: [[-170, 280, 30], [-170, 340, 0]],
-  slalom: [[-120, 272, 6], [-40, 282, 0]],
-  'lane-gates': [[-130, 392, 5], [-80, 403, 0]],
+/** Free test views (sim x, y, height above the ground: eye, target; fov; fog), taken on the page of a station so the
+ *  sun's shadow map (which follows the car) covers them. */
+type Shot = [name: string, eye: View, target: View, fov?: number, fog?: boolean];
+const VIEWS: Record<(typeof STATIONS)[number], Shot[]> = {
+  'ride-street': [
+    ['ride-washboard', [-226, 121, 1.4], [-180, 125, 0]],
+    ['ride-pave', [-146, 120.5, 1.6], [-110, 125, 0]],
+    ['ride-sleepers', [-68, 121, 1.3], [-45, 124.5, 0]],
+    ['ride-steps-twist', [-12, 121.5, 1.3], [30, 124.5, 0]],
+    ['ride-pothole', [45, 120.5, 1.6], [53.5, 124.8, 0]],
+  ],
+  'steering-pad': [['circle', [-170, 270, 35], [-170, 335, 0]], ['overview', [-30, -560, 380], [-20, 170, 0], 45, false]],
+  slalom: [['slalom', [-120, 272, 5], [-40, 282, 0]], ['overview-annex', [-40, 20, 160], [-40, 300, 0], 55, false]],
+  'lane-change': [['lane-gates', [-132, 394, 4], [-80, 403, 0]]],
+  'braking-platform': [
+    ['wet-lanes', [136, 250, 4], [150, 290, 0]],
+    ['spur-east', [70, -12, 8], [100, 25, 0]],
+    ['spur-west', [-15, -12, 8], [-50, 30, 0]],
+  ],
 };
 
 const measure = (page: Page, name: string) => page.evaluate((n) => performance.getEntriesByName(n).map((e) => e.duration)[0] ?? NaN, name);
@@ -51,17 +57,40 @@ test.describe('10-03 proving ground', () => {
       const d = await page.evaluate(() => globalThis.__app!.drive());
       report.push(`${id}: mode ${d.mode} zone ${d.zone} at (${d.x.toFixed(1)}, ${d.y.toFixed(1)})`);
       await page.screenshot({ path: join(SHOTS, `10-03-${id}.png`) });
+      for (const [name, eye, at, fov, fog] of VIEWS[id]) {
+        const url = await page.evaluate(([e, t, f, g]) => globalThis.__annexView!(e as View, t as View, f as number | undefined, g as boolean | undefined), [eye, at, fov, fog] as const);
+        writeFileSync(join(SHOTS, `10-03-${name}.png`), Buffer.from(url.split(',')[1]!, 'base64'));
+      }
       if (id === 'steering-pad') {
         const s = await draws(page);
         report.push(`draws at ${id} (${QUALITY}): ${s.calls} calls, ${s.triangles} triangles`);
       }
     }
     report.push(`load: track-ribbon ${(await measure(page, 'track-ribbon')).toFixed(0)} ms, track-terrain ${(await measure(page, 'track-terrain')).toFixed(0)} ms, proving-ground-meshes ${(await measure(page, 'proving-ground-meshes')).toFixed(0)} ms`);
-    for (const [name, [eye, at, fov, fog]] of Object.entries(VIEWS)) {
-      const url = await page.evaluate(([e, t, f, g]) => globalThis.__annexView!(e as View, t as View, f as number | undefined, g as boolean | undefined), [eye, at, fov, fog] as const);
-      writeFileSync(join(SHOTS, `10-03-${name}.png`), Buffer.from(url.split(',')[1]!, 'base64'));
-    }
     console.log(report.join('\n'));
+    await expectHealthyBoot(page, errors);
+  });
+
+  test('draw calls with and without the annex (high tier)', async ({ page }) => {
+    const errors = captureConsole(page);
+    const out: string[] = [];
+    const at = async (query: string) => {
+      await waitForReady(page, `/?e2e=1&quality=high&paused=1&${query}`);
+      await settle(page, 0.5);
+      return draws(page);
+    };
+    // the M1 measuring point (lap t = 14 s, follow view): the annex is in view past the loop
+    const without = await at('t=14&features=-proving-ground');
+    const withAnnex = await at('t=14');
+    out.push(`loop t=14 high: without annex ${without.calls} calls / ${without.triangles} tris; with ${withAnnex.calls} / ${withAnnex.triangles}`);
+    expect(withAnnex.calls - without.calls).toBeLessThanOrEqual(25);
+    expect(withAnnex.calls).toBeLessThanOrEqual(250);
+    for (const id of ['steering-pad', 'ride-street', 'braking-platform']) {
+      const s = await at(`drive=manual&spawn=${id}`);
+      out.push(`${id} high: ${s.calls} calls / ${s.triangles} tris`);
+      expect(s.calls).toBeLessThanOrEqual(250);
+    }
+    console.log(out.join('\n'));
     await expectHealthyBoot(page, errors);
   });
 

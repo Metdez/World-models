@@ -285,7 +285,7 @@ describe('terrain', () => {
   }
 
   it('world: between vertices the visible terrain is the GroundWorld within a few cm, also between competing loop sections', () => {
-    const at = probe(terrains.world);
+    const at = probe(terrains.world, 24);
     let seed = 11;
     const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
     const errs: number[] = [];
@@ -324,7 +324,7 @@ describe('terrain', () => {
   });
 
   it('stays below the asphalt, kerbs and apron', () => {
-    const at = probe(terrains.world);
+    const at = probe(terrains.world, 24);
     const p: XYZ = { x: 0, y: 0, z: 0 };
     const paved = provingLoop.width / 2 + provingLoop.kerbWidth + 2;
     for (let s = 0; s < track.length; s += 3.1) {

@@ -131,6 +131,8 @@ const CUT_SCAN = 0.5;
 
 /** Half-width of the GroundWorld's road-to-terrain blend round the runoff edge, m (sim-core world/ground.ts EDGE_BLEND). */
 const EDGE_BLEND = 0.5;
+/** Terrain-to-road difference at the runoff edge above which a row's blend band gets quarter columns, m. */
+const BAND_STEP = 0.03;
 
 const smoothstep = (a: number, b: number, x: number): number => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
@@ -204,7 +206,7 @@ export function buildRibbon(track: BuiltTrack, resolution: number, fine: boolean
   const baseCols = uniqueSorted([
     ...bands,
     ...range(-Math.floor(hw / RAIL) * RAIL, Math.floor(hw / RAIL) * RAIL, RAIL),
-    ...range(runoff - EDGE_BLEND, outer, EDGE_BLEND / 2).flatMap((l) => [l, -l]),
+    ...[runoff - EDGE_BLEND, outer].flatMap((l) => [l, -l]),
   ]);
 
   const zones = featureZones(track, fine);
@@ -250,15 +252,39 @@ export function buildRibbon(track: BuiltTrack, resolution: number, fine: boolean
   const paveZones = zones.filter((z) => z.kind === 'pave');
   const strikeZones = zones.filter((z) => z.kind === 'kerb-strike');
 
-  // Columns per row; the closing row (s = L) repeats row 0 so the loop has no seam.
-  const rowCols = stations.map((s) => {
+  // Terrain at the runoff edge and EDGE_BLEND past it on both sides of every row (the GroundWorld blends road -> terrain
+  // by smoothstep over runoff +- EDGE_BLEND; at runoff the weight is 1/2, at outer 1): the band's columns between them
+  // take the terrain linearly in l (it is smooth there) and the road exactly. [+runoff, -runoff, +outer, -outer] per row.
+  const edgeT = new Float64Array(stations.length * 4 + 4);
+  {
+    const sm: TrackSample = { s: 0, x: 0, y: 0, z: 0, heading: 0, curvature: 0, bank: 0, grade: 0 };
+    const gh: GroundHit = { h: 0, base: 0, surface: 'asphalt', zone: '', s: NaN, l: NaN };
+    stations.forEach((s, r) => {
+      track.sample(s, sm);
+      const sin = Math.sin(sm.heading);
+      const cos = Math.cos(sm.heading);
+      const at = (l: number) => world.sample(sm.x - sin * l, sm.y + cos * l, s, gh).h;
+      for (const side of [1, -1] as const) {
+        edgeT[r * 4 + (side > 0 ? 0 : 1)] = 2 * at(side * runoff) - track.roadHeight(s, side * runoff);
+        edgeT[r * 4 + (side > 0 ? 2 : 3)] = at(side * outer);
+      }
+    });
+  }
+
+  // Columns per row; the closing row (s = L) repeats row 0 so the loop has no seam. Where the terrain at the runoff
+  // edge differs from the road by more than BAND_STEP the band gets quarter columns (the smoothstep's shape).
+  const rowCols = stations.map((s, r) => {
     const extra = zones.filter((z) => s >= z.s0 - EPS && s <= z.s1 + EPS).flatMap((z) => z.cols);
+    for (const side of [1, -1] as const)
+      if (Math.abs(edgeT[r * 4 + (side > 0 ? 0 : 1)]! - track.roadHeight(s, side * runoff)) > BAND_STEP)
+        extra.push(side * (runoff - EDGE_BLEND / 2), side * (runoff + EDGE_BLEND / 2));
     const sp = spanAt(s);
     if (sp) extra.push(...crossings(s, sp));
     return extra.length ? uniqueSorted([...baseCols, ...extra.filter((l) => l > -outer && l < outer)]) : baseCols;
   });
   stations.push(L);
   rowCols.push(rowCols[0]!);
+  edgeT.copyWithin((stations.length - 1) * 4, 0, 4);
 
   const rowStart: number[] = [];
   let count = 0;
@@ -271,8 +297,6 @@ export function buildRibbon(track: BuiltTrack, resolution: number, fine: boolean
   const paint = new Float32Array(count * 2);
   const sample: TrackSample = { s: 0, x: 0, y: 0, z: 0, heading: 0, curvature: 0, bank: 0, grade: 0 };
   const hit: GroundHit = { h: 0, base: 0, surface: 'asphalt', zone: '', s: NaN, l: NaN };
-  /** Terrain at +runoff, -runoff, +outer, -outer of the current row. */
-  const edgeT = new Float64Array(4);
 
   for (let r = 0; r < stations.length; r++) {
     const s = stations[r]!;
@@ -286,16 +310,6 @@ export function buildRibbon(track: BuiltTrack, resolution: number, fine: boolean
     // Lateral side (+1 left, -1 right) of a kerb strike covering this row, 0 if none.
     const strike = strikeZones.find((z) => s >= z.s0 && s <= z.s1)?.cols[0] ?? 0;
     const cols = rowCols[r]!;
-    // Terrain at the runoff edge and EDGE_BLEND past it on both sides (the GroundWorld blends road -> terrain by
-    // smoothstep over runoff +- EDGE_BLEND; at runoff the weight is 1/2, at outer 1): the band's columns between them take
-    // the terrain linearly in l (it is smooth there) and the road exactly.
-    for (const side of [1, -1] as const) {
-      const at = (l: number) => world.sample(sample.x - sin * l, sample.y + cos * l, s, hit).h;
-      const t1 = at(side * outer);
-      const t0 = 2 * at(side * runoff) - track.roadHeight(s, side * runoff);
-      edgeT[side > 0 ? 0 : 1] = t0;
-      edgeT[side > 0 ? 2 : 3] = t1;
-    }
     for (let c = 0; c < cols.length; c++) {
       const l = cols[c]!;
       const v = rowStart[r]! + c;
@@ -304,7 +318,7 @@ export function buildRibbon(track: BuiltTrack, resolution: number, fine: boolean
       let h = track.roadHeight(s, l);
       const a = Math.abs(l);
       if (a > runoff - EDGE_BLEND + EPS) {
-        const k = l > 0 ? 0 : 1;
+        const k = r * 4 + (l > 0 ? 0 : 1);
         const t = edgeT[k]! + ((edgeT[k + 2]! - edgeT[k]!) * (a - runoff)) / EDGE_BLEND;
         h += (t - h) * smoothstep(runoff - EDGE_BLEND, outer, a);
       }
