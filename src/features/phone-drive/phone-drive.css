@@ -1,0 +1,205 @@
+/*
+ * Phone driver card (big screen). Tokens only. Right edge, vertically centred: the right column's top holds the HUD
+ * chrome and the curve trace, its bottom the view control, poll and ghost cards (04-05 layout, --sl-hud-* from
+ * controls.css). Compact (QR | text) and folds to its status line once a phone is connected.
+ */
+.sl-phone-drive {
+  position: absolute;
+  right: var(--margin);
+  top: 50%;
+  transform: translateY(-50%);
+  zoom: var(--sl-hud-zoom, 1);
+  width: 292px;
+  padding: var(--sp-3);
+  display: grid;
+  gap: var(--sp-3);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-panel);
+  color: var(--text-1);
+}
+
+.sl-phone-drive[hidden],
+.sl-phone-drive [hidden],
+.sl-phone-drive-toast[hidden] {
+  display: none;
+}
+
+.sl-phone-drive-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.sl-phone-drive-title {
+  color: var(--accent);
+}
+
+.sl-phone-drive-fold {
+  appearance: none;
+  border: 1px solid var(--hair);
+  background: transparent;
+  color: var(--text-2);
+  font: 500 var(--fs-label) / 1 var(--font-sans);
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  border-radius: var(--radius-pill);
+  padding: var(--sp-1) var(--sp-2);
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+
+.sl-phone-drive-fold:hover {
+  color: var(--text-1);
+  border-color: var(--hair-strong);
+}
+
+.sl-phone-drive-body {
+  display: grid;
+  grid-template-columns: 112px 1fr;
+  gap: var(--sp-3);
+  align-items: start;
+}
+
+.sl-phone-drive-qr {
+  padding: 6px;
+  border-radius: var(--radius-chip);
+  background: var(--text-1);
+  line-height: 0;
+  box-shadow: 0 0 0 2px var(--accent-dim);
+  aspect-ratio: 1;
+}
+
+.sl-phone-drive-qr .sl-qr {
+  width: 100%;
+  height: auto;
+  fill: var(--bg-0);
+}
+
+.sl-phone-drive-qr .sl-qr-bg {
+  fill: var(--text-1);
+}
+
+.sl-phone-drive-meta {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.sl-phone-drive-lead,
+.sl-phone-drive-note {
+  margin: 0;
+  font-size: var(--fs-label);
+  line-height: var(--lh-body);
+}
+
+.sl-phone-drive-lead {
+  color: var(--text-1);
+  font-weight: 500;
+}
+
+.sl-phone-drive-note {
+  color: var(--text-2);
+}
+
+/* status line: dot (link level) + what is happening + the link word */
+.sl-phone-drive-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 20px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+.sl-phone-drive-status-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.sl-phone-drive[data-state='driving'] .sl-phone-drive-status-text {
+  color: var(--text-1);
+  font-weight: 500;
+}
+
+.sl-phone-drive-link {
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.sl-phone-drive-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--text-3);
+  transition: background var(--dur-hud) var(--ease);
+}
+
+.sl-phone-drive[data-link='ok'] .sl-phone-drive-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.sl-phone-drive[data-link='amber'] .sl-phone-drive-dot,
+.sl-phone-drive[data-link='red'] .sl-phone-drive-dot {
+  background: var(--warn);
+}
+
+.sl-phone-drive[data-link='red'] .sl-phone-drive-link {
+  color: var(--warn);
+}
+
+/* folded: header + status only */
+.sl-phone-drive[data-folded] .sl-phone-drive-body {
+  display: none;
+}
+
+.sl-phone-drive[data-folded] {
+  gap: var(--sp-2);
+}
+
+/* the failsafe note: top centre, above the scene, calm */
+.sl-phone-drive-toast {
+  position: absolute;
+  top: var(--margin);
+  left: 50%;
+  transform: translateX(-50%);
+  zoom: var(--sl-hud-zoom, 1);
+  display: grid;
+  gap: 2px;
+  max-width: min(440px, calc(100vw - 2 * var(--margin)));
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-panel);
+  color: var(--text-2);
+  font-size: var(--fs-label);
+  text-align: center;
+  pointer-events: none;
+}
+
+.sl-phone-drive-toast-title {
+  color: var(--warn);
+  font-weight: 600;
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+}
+
+@media (max-width: 900px) {
+  .sl-phone-drive {
+    width: 248px;
+  }
+  .sl-phone-drive-body {
+    grid-template-columns: 88px 1fr;
+  }
+}
