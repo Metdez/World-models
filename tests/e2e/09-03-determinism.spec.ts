@@ -6,6 +6,7 @@
  */
 import { existsSync } from 'node:fs';
 import { expect, firefox, test, webkit, type Browser, type BrowserType, type Page } from '@playwright/test';
+import { provingGround } from '../../src/sim-core/content/proving-ground';
 import { createSimulation, runDriveScript } from '../../src/sim-core/index';
 import { waitForReady } from './helpers';
 
@@ -14,11 +15,17 @@ const SEED = 7;
 const SECONDS = 60;
 const empty = { track: () => undefined, vehicle: () => undefined, suspension: () => undefined };
 
-/** The page's simulation ids, and the Node hash for the same ids (built-in content, as the app registers it). */
+/**
+ * The page's simulation ids, and the Node hash for the same ids (built-in content, as the app registers it). The page
+ * grounds on the proving-ground world whenever that feature is on (its spurs join the loop), so the Node side must use
+ * the same world: 13-01 found this spec comparing a world-less Node run with the page's world run since 10-03.
+ */
 async function nodeHashFor(page: Page): Promise<{ ids: string; hash: string }> {
   const st = await page.evaluate(() => globalThis.__app!.state());
-  const sim = createSimulation({ catalog: empty, trackId: st.trackId, vehicleId: st.vehicleId, suspensionId: st.suspensionId });
-  return { ids: `${st.trackId}/${st.vehicleId}/${st.suspensionId}`, hash: runDriveScript(sim, SEED, SECONDS) };
+  const annex = (await page.evaluate(() => globalThis.__app!.features())).some((f) => f.id === 'proving-ground' && f.enabled);
+  const catalog = annex ? { ...empty, world: (trackId: string) => (trackId === provingGround.trackId ? provingGround : undefined) } : empty;
+  const sim = createSimulation({ catalog, trackId: st.trackId, vehicleId: st.vehicleId, suspensionId: st.suspensionId });
+  return { ids: `${st.trackId}/${st.vehicleId}/${st.suspensionId}${annex ? '+proving-ground' : ''}`, hash: runDriveScript(sim, SEED, SECONDS) };
 }
 
 async function compare(page: Page, engine: string): Promise<void> {
