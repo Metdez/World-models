@@ -7,6 +7,9 @@
  */
 import { Box3, BufferAttribute, BufferGeometry, Sphere, Vector3 } from 'three';
 import type { BuiltTrack, RoadFeature, TrackSample } from '../../contracts/track';
+import type { Frenet, GroundHit, GroundWorld } from '../../contracts/world';
+import { buildGroundWorld } from '../../sim-core/world/ground';
+import { createZoneLocal, ZONE_EDGE, type CompiledZone } from '../../sim-core/world/zones';
 
 /** Materials: `road` = asphalt, kerbs and apron in one shader (fewer draw calls); cobbles replace the asphalt in the pavé. */
 export const SURFACES = ['road', 'cobbles', 'grass'] as const;
@@ -25,7 +28,8 @@ const EPS = 1e-6;
 
 /** A stretch of s with its own row spacing and extra lateral columns (one per closed-form feature). */
 export interface Zone {
-  readonly kind: RoadFeature['kind'];
+  /** A road feature, or a world zone overlaying the ribbon (dense rows, columns from its edge crossings). */
+  readonly kind: RoadFeature['kind'] | 'world-zone';
   readonly s0: number;
   readonly s1: number;
   readonly rows: readonly number[];
@@ -120,12 +124,78 @@ export interface Ribbon {
   readonly rows: number;
 }
 
-/** Builds the ribbon geometry. `resolution` = the tier's `trackResolution`; `fine` = high tier. */
-export function buildRibbon(track: BuiltTrack, resolution: number, fine: boolean): Ribbon {
+/** Row spacing where a world zone overlays the ribbon, m. */
+const CUT_ROW = 0.25;
+/** Lateral scan step for a zone edge crossing a row, m. */
+const CUT_SCAN = 0.5;
+
+/** Half-width of the GroundWorld's road-to-terrain blend round the runoff edge, m (sim-core world/ground.ts EDGE_BLEND). */
+const EDGE_BLEND = 0.5;
+
+const smoothstep = (a: number, b: number, x: number): number => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+
+/** The simulation's ground: the ribbon's outer EDGE_BLEND metres follow it, and world zones that overlay the ribbon (the
+ *  link roads where they join the loop) cut it. */
+export interface RibbonGround {
+  readonly world: GroundWorld;
+  /** World zones (any order); only those reaching the corridor matter. */
+  readonly zones?: readonly CompiledZone[];
+}
+
+interface CutSpan {
+  readonly s0: number;
+  readonly s1: number;
+  readonly zones: readonly CompiledZone[];
+}
+
+/** s spans of the ribbon that the cut zones (footprint + ZONE_EDGE band) reach. */
+function cutSpans(track: BuiltTrack, cut: Required<RibbonGround>, outer: number): CutSpan[] {
+  const fr: Frenet = { s: 0, l: 0, heading: 0, curvature: 0, converged: true };
+  const p = { x: 0, y: 0 };
+  const spans: CutSpan[] = [];
+  for (const z of cut.zones) {
+    let s0 = Infinity;
+    let s1 = -Infinity;
+    const span = z.length + 2 * ZONE_EDGE;
+    // coarse pass along the centre line first: a zone whose centre stays far from the loop never reaches the ribbon
+    let near = false;
+    for (let u = 0; u <= span && !near; u += 5) {
+      z.toWorld(-ZONE_EDGE + u, 0, p);
+      cut.world.project(p.x, p.y, NaN, fr);
+      near = Math.abs(fr.l) < outer + z.halfWidth + 6;
+    }
+    if (!near) continue;
+    const nu = Math.ceil(span / 0.25);
+    for (let i = 0; i <= nu; i++)
+      for (const w of [-z.halfWidth - ZONE_EDGE, 0, z.halfWidth + ZONE_EDGE]) {
+        z.toWorld(-ZONE_EDGE + (i / nu) * span, w, p);
+        cut.world.project(p.x, p.y, NaN, fr);
+        if (Math.abs(fr.l) > outer + 1) continue;
+        s0 = Math.min(s0, fr.s);
+        s1 = Math.max(s1, fr.s);
+      }
+    if (s0 <= s1) spans.push({ s0: Math.max(0, s0 - 1), s1: Math.min(track.length, s1 + 1), zones: [z] });
+  }
+  return spans;
+}
+
+/** Builds the ribbon geometry. `resolution` = the tier's `trackResolution`; `fine` = high tier. The ribbon runs
+ *  EDGE_BLEND past the runoff edge, where its heights are the GroundWorld's road-to-terrain blend (`world.sample`), so the
+ *  terrain mesh starts where the ground is the terrain alone. Under a world zone that reaches the ribbon (a link road) it
+ *  follows `world.sample` where the zone contributes, has columns on the zone's footprint and band edges and leaves out
+ *  the triangles inside the footprint: the zone's own mesh is the surface there. Without `ground` the bare GroundWorld
+ *  of the track is used. */
+export function buildRibbon(track: BuiltTrack, resolution: number, fine: boolean, ground?: RibbonGround): Ribbon {
+  const world = ground?.world ?? buildGroundWorld(track, null);
+  const cut = ground?.zones?.length ? { world, zones: ground.zones } : undefined;
   const L = track.length;
   const hw = track.def.width / 2;
   const kw = track.def.kerbWidth;
-  const outer = hw + kw + track.def.runoff;
+  const runoff = hw + kw + track.def.runoff;
+  const outer = runoff + EDGE_BLEND;
   const edges = [hw, hw + kw, hw + kw + APRON, outer];
   const bands = [...edges.map((e) => -e).reverse(), ...edges];
   // Band surfaces left to right across `bands` (index b covers bands[b]..bands[b + 1]).
@@ -134,9 +204,48 @@ export function buildRibbon(track: BuiltTrack, resolution: number, fine: boolean
   const baseCols = uniqueSorted([
     ...bands,
     ...range(-Math.floor(hw / RAIL) * RAIL, Math.floor(hw / RAIL) * RAIL, RAIL),
+    ...range(runoff - EDGE_BLEND, outer, EDGE_BLEND / 2).flatMap((l) => [l, -l]),
   ]);
 
   const zones = featureZones(track, fine);
+  const spans = cut ? cutSpans(track, cut, outer) : [];
+  const loc = createZoneLocal();
+  const p2 = { x: 0, y: 0, z: 0 };
+  /** Zone edge crossings (footprint, band middle, band edge) of the row at s, l in (-outer, outer). */
+  const crossings = (s: number, span: CutSpan): number[] => {
+    const out: number[] = [];
+    const levels = [0, ZONE_EDGE / 2, ZONE_EDGE];
+    for (const z of span.zones) {
+      const signed = (l: number) => {
+        track.toWorld(s, l, p2);
+        z.local(p2.x, p2.y, loc);
+        return loc.inside >= 0 ? -loc.inside : loc.outside;
+      };
+      let la = -outer;
+      let da = signed(la);
+      for (let l = -outer + CUT_SCAN; l <= outer + EPS; l += CUT_SCAN) {
+        const db = signed(l);
+        // signed() changes by at most |dl| between samples: far from the zone no level can be crossed
+        if (Math.min(da, db) - CUT_SCAN <= ZONE_EDGE)
+          for (const lv of levels)
+            if ((da - lv) * (db - lv) < 0) {
+              let a = la;
+              let b = l;
+              for (let k = 0; k < 18; k++) {
+                const m = (a + b) / 2;
+                if ((signed(m) - lv) * (da - lv) > 0) a = m;
+                else b = m;
+              }
+              out.push((a + b) / 2);
+            }
+        la = l;
+        da = db;
+      }
+    }
+    return out;
+  };
+  for (const sp of spans) zones.push({ kind: 'world-zone', s0: sp.s0, s1: sp.s1, rows: range(sp.s0, sp.s1, CUT_ROW), cols: [] });
+  const spanAt = (s: number) => spans.find((sp) => s >= sp.s0 - EPS && s <= sp.s1 + EPS);
   const stations = rowStations(L, resolution, zones);
   const paveZones = zones.filter((z) => z.kind === 'pave');
   const strikeZones = zones.filter((z) => z.kind === 'kerb-strike');
@@ -144,6 +253,8 @@ export function buildRibbon(track: BuiltTrack, resolution: number, fine: boolean
   // Columns per row; the closing row (s = L) repeats row 0 so the loop has no seam.
   const rowCols = stations.map((s) => {
     const extra = zones.filter((z) => s >= z.s0 - EPS && s <= z.s1 + EPS).flatMap((z) => z.cols);
+    const sp = spanAt(s);
+    if (sp) extra.push(...crossings(s, sp));
     return extra.length ? uniqueSorted([...baseCols, ...extra.filter((l) => l > -outer && l < outer)]) : baseCols;
   });
   stations.push(L);
@@ -159,9 +270,13 @@ export function buildRibbon(track: BuiltTrack, resolution: number, fine: boolean
   const uv = new Float32Array(count * 2);
   const paint = new Float32Array(count * 2);
   const sample: TrackSample = { s: 0, x: 0, y: 0, z: 0, heading: 0, curvature: 0, bank: 0, grade: 0 };
+  const hit: GroundHit = { h: 0, base: 0, surface: 'asphalt', zone: '', s: NaN, l: NaN };
+  /** Terrain at +runoff, -runoff, +outer, -outer of the current row. */
+  const edgeT = new Float64Array(4);
 
   for (let r = 0; r < stations.length; r++) {
     const s = stations[r]!;
+    const cutRow = spanAt(s) !== undefined;
     track.sample(s, sample);
     const sin = Math.sin(sample.heading);
     const cos = Math.cos(sample.heading);
@@ -171,12 +286,34 @@ export function buildRibbon(track: BuiltTrack, resolution: number, fine: boolean
     // Lateral side (+1 left, -1 right) of a kerb strike covering this row, 0 if none.
     const strike = strikeZones.find((z) => s >= z.s0 && s <= z.s1)?.cols[0] ?? 0;
     const cols = rowCols[r]!;
+    // Terrain at the runoff edge and EDGE_BLEND past it on both sides (the GroundWorld blends road -> terrain by
+    // smoothstep over runoff +- EDGE_BLEND; at runoff the weight is 1/2, at outer 1): the band's columns between them take
+    // the terrain linearly in l (it is smooth there) and the road exactly.
+    for (const side of [1, -1] as const) {
+      const at = (l: number) => world.sample(sample.x - sin * l, sample.y + cos * l, s, hit).h;
+      const t1 = at(side * outer);
+      const t0 = 2 * at(side * runoff) - track.roadHeight(s, side * runoff);
+      edgeT[side > 0 ? 0 : 1] = t0;
+      edgeT[side > 0 ? 2 : 3] = t1;
+    }
     for (let c = 0; c < cols.length; c++) {
       const l = cols[c]!;
       const v = rowStart[r]! + c;
       // Same formula as BuiltTrack.toWorld, then simToThree (x, z, -y).
       position[v * 3] = sample.x - sin * l;
-      position[v * 3 + 1] = track.roadHeight(s, l);
+      let h = track.roadHeight(s, l);
+      const a = Math.abs(l);
+      if (a > runoff - EDGE_BLEND + EPS) {
+        const k = l > 0 ? 0 : 1;
+        const t = edgeT[k]! + ((edgeT[k + 2]! - edgeT[k]!) * (a - runoff)) / EDGE_BLEND;
+        h += (t - h) * smoothstep(runoff - EDGE_BLEND, outer, a);
+      }
+      if (cutRow) {
+        // wherever a zone contributes (s NaN) the ground is the GroundWorld's zone blend
+        world.sample(sample.x - sin * l, sample.y + cos * l, s, hit);
+        if (hit.s !== hit.s) h = hit.h;
+      }
+      position[v * 3 + 1] = h;
       position[v * 3 + 2] = -(sample.y + cos * l);
       uv[v * 2] = l;
       uv[v * 2 + 1] = s;
@@ -191,6 +328,16 @@ export function buildRibbon(track: BuiltTrack, resolution: number, fine: boolean
     const mid = (stations[r]! + stations[r + 1]!) / 2;
     const chunk = indices[Math.min(CHUNKS - 1, Math.floor((mid / L) * CHUNKS))]!;
     const paved = paveZones.some((z) => mid > z.s0 && mid < z.s1);
+    const span = spanAt(mid);
+    /** false = the triangle lies inside a cut zone's footprint (that zone's mesh draws it). */
+    const keep = (i: number, j: number, k: number): boolean => {
+      if (!span) return true;
+      const cs = (uv[i * 2 + 1]! + uv[j * 2 + 1]! + uv[k * 2 + 1]!) / 3;
+      const cl = (uv[i * 2]! + uv[j * 2]! + uv[k * 2]!) / 3;
+      track.toWorld(cs, cl, p2);
+      for (const z of span.zones) if (z.local(p2.x, p2.y, loc).inside > 0) return false;
+      return true;
+    };
     const a = rowCols[r]!;
     const b = rowCols[r + 1]!;
     let ia = 0;
@@ -208,10 +355,10 @@ export function buildRibbon(track: BuiltTrack, resolution: number, fine: boolean
       const B = rowStart[r + 1]!;
       while (ia < ea || ib < eb) {
         if (ib === eb || (ia < ea && a[ia + 1]! <= b[ib + 1]! + EPS)) {
-          out.push(A + ia, B + ib, A + ia + 1);
+          if (keep(A + ia, B + ib, A + ia + 1)) out.push(A + ia, B + ib, A + ia + 1);
           ia++;
         } else {
-          out.push(A + ia, B + ib, B + ib + 1);
+          if (keep(A + ia, B + ib, B + ib + 1)) out.push(A + ia, B + ib, B + ib + 1);
           ib++;
         }
       }
