@@ -37,6 +37,9 @@ async function installHook(page: Page): Promise<void> {
       }
     });
     globalThis.__THREE_DEVTOOLS__ = hook;
+    // The test intent is not a device source, so the drive feature's idle hand-back (12 s of wall-clock render time
+    // without input) would return the car to Auto mid-test. A visitor at the booth touches the screen: keep it alive.
+    setInterval(() => window.dispatchEvent(new Event('pointerdown')), 1000);
   });
 }
 
@@ -66,11 +69,30 @@ const relation = (page: Page) =>
       dist: Math.hypot(dx, dy),
       u: d.u,
       speed: d.speed,
+      slip: (Math.atan2(d.v, Math.abs(d.u)) * 180) / Math.PI,
       mode: d.mode,
     };
   });
 
 const intent = (page: Page, i: Record<string, number> | null) => page.evaluate((x) => globalThis.__app!.driveIntent(x), i);
+
+/** `n` frames holding `steer` at about `target` m/s (a per-frame P cruise on the test intent). Fixed pedals overshoot
+ * badly under SwiftShader (each slow frame is a 0.1 s sim step), so a 12 m/s "corner" became a 22 m/s slide. */
+const cruise = (page: Page, target: number, steer: number, n: number) =>
+  page.evaluate(
+    ({ target, steer, n }) =>
+      new Promise<void>((resolve) => {
+        let k = 0;
+        const f = () => {
+          const e = target - globalThis.__app!.drive().u;
+          globalThis.__app!.driveIntent({ steer, throttle: Math.min(1, Math.max(0, 0.25 + 0.3 * e)), brake: Math.min(1, Math.max(0, -0.3 * e)) });
+          if (++k >= n) resolve();
+          else requestAnimationFrame(f);
+        };
+        requestAnimationFrame(f);
+      }),
+    { target, steer, n },
+  );
 const shot = (page: Page, name: string) => page.screenshot({ path: join(SHOTS, `08-04-${name}.png`) });
 
 test('manual chase: behind the car straight, cornering and reversing; explore and close-up while driving', async ({ page }) => {
@@ -85,29 +107,30 @@ test('manual chase: behind the car straight, cornering and reversing; explore an
   // Straight: accelerate to 12 m/s, then hold.
   await intent(page, { throttle: 0.7 });
   await page.waitForFunction(() => globalThis.__app!.drive().speed > 12, undefined, { timeout: 300_000, polling: 100 });
-  await intent(page, { throttle: 0.3 });
-  await frames(page, 20);
+  await cruise(page, 12, 0, 20);
   const straight = await relation(page);
   console.info('[08-04] straight', straight);
+  expect(straight.mode).toBe('manual');
   expect(straight.angle).toBeLessThan(25);
   expect(straight.dist).toBeGreaterThan(3);
   expect(straight.dist).toBeLessThan(10);
   await shot(page, 'straight');
 
-  // Held steer (left) for 2 s of frames at ~60 fps-equivalent sim time: still behind.
-  await intent(page, { throttle: 0.35, steer: 0.5 });
-  await frames(page, 40);
+  // Held steer (left) at about 12 m/s for 40 frames: still behind (within the camera's slip window).
+  await cruise(page, 12, 0.3, 40);
   const corner = await relation(page);
   console.info('[08-04] corner', corner);
+  expect(corner.mode).toBe('manual');
   expect(corner.angle).toBeLessThan(25);
   await shot(page, 'corner');
 
-  // Brake to a stop, keep braking: reverse is selected at standstill; hold it.
+  // Brake to a stop, keep braking: reverse is selected at standstill (0.25 s held); the brake pedal then drives back.
   await intent(page, { brake: 1 });
   await page.waitForFunction(() => globalThis.__app!.drive().u < -0.5, undefined, { timeout: 300_000, polling: 100 });
   await frames(page, 40);
   const reverse = await relation(page);
   console.info('[08-04] reverse', reverse);
+  expect(reverse.mode).toBe('manual');
   expect(reverse.u).toBeLessThan(-0.5);
   expect(reverse.angle).toBeLessThan(25);
   await shot(page, 'reversing');
