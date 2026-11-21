@@ -23,6 +23,8 @@ export interface RoomTarget {
   readonly code: string;
   readonly role: RoomRole;
   readonly hostKey: string | null;
+  /** Phone-driver pairing key (12-02), only for a screen that created the room; absent on older rooms. */
+  readonly driverKey?: string | null;
 }
 
 export interface RoomServiceDeps {
@@ -120,8 +122,8 @@ export function createRoomConnection(deps: RoomServiceDeps): RoomConnection {
   const createScreenRoom = async (): Promise<RoomTarget | null> => {
     const res = await fetch(API.rooms, { method: 'POST' });
     if (!res.ok) return null;
-    const { code, hostKey } = (await res.json()) as CreateRoomResponse;
-    const room: RoomTarget = { code, role: 'screen', hostKey };
+    const { code, hostKey, driverKey } = (await res.json()) as CreateRoomResponse;
+    const room: RoomTarget = { code, role: 'screen', hostKey, driverKey: driverKey ?? null };
     store(SCREEN_ROOM_KEY, JSON.stringify(room));
     return room;
   };
@@ -167,6 +169,9 @@ export function createRoomConnection(deps: RoomServiceDeps): RoomConnection {
     },
     get hostKey() {
       return target?.hostKey ?? null;
+    },
+    get driverKey() {
+      return target?.driverKey ?? null;
     },
     get connected() {
       return connected;

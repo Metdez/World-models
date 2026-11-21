@@ -1,0 +1,36 @@
+{
+  "id": "59715b09498143f4897b3c93baae198b",
+  "object": "chat.completion",
+  "created": 1795252016,
+  "model": "@cf/google/gemma-4-26b-a4b-it-external",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "You experienced lift-off oversteer because lifting off the throttle mid-corner moved load onto the front tyres and off the rear. This caused the rear to lose grip and rotate, resulting in a sideslip of 7.4 degrees.\n\n",
+        "tool_calls": [
+          {
+            "id": "call_16167016593c40b098c11d8b",
+            "type": "function",
+            "function": {
+              "name": "set_slow_motion",
+              "arguments": "{\"scale\": 0.1}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls",
+      "logprobs": null
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 3046,
+    "completion_tokens": 67,
+    "total_tokens": 3113,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "neurons": 29.51818084716797
+  }
+}
