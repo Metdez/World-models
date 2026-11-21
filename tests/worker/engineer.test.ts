@@ -15,7 +15,7 @@ import { parseAction } from '../../worker/schemas/engineer';
 const load = async (name: string): Promise<unknown> => ((await import(`../fixtures/${name}.json`)) as { default: unknown }).default;
 const raw = async (path: string): Promise<string> => ((await import(`${path}?raw`)) as { default: string }).default;
 
-/** Carousel apex, MacPherson (values from the 02-04 difference report, rounded like the client does). */
+/** Carousel at peak lateral g, MacPherson: generated from the sim through the client payload builder (07-02). */
 const TELEMETRY = (await load('06-02-telemetry-carousel')) as EngineerTelemetry;
 const request = (question: string, telemetry: EngineerTelemetry = TELEMETRY): EngineerRequest => ({ question, telemetry, history: [] });
 const IDS = { suspensions: ['macpherson', 'double-wishbone', 'multilink'], sections: ['carousel', 'hairpin'], corners: ['fl', 'fr', 'rl', 'rr'] as const };
@@ -99,11 +99,11 @@ describe('number grounding', () => {
   });
 
   it('accepts telemetry numbers (exact, rounded, magnitude, within 5 %) and rejects others', () => {
-    expect(ungroundedNumbers('The body rolls 1.26 degrees and the outside front sits at -0.76.', TELEMETRY)).toEqual([]);
-    expect(ungroundedNumbers('About 1.3 degrees of roll at 0.85 g, roughly 6,000 N.', TELEMETRY)).toEqual([]);
-    expect(ungroundedNumbers('The roll centre is 106 mm high.', TELEMETRY)).toEqual([]);
-    expect(ungroundedNumbers('It loses 30 percent of the camber.', TELEMETRY)).toEqual([30]);
-    expect(ungroundedNumbers('Camber is +0.76 degrees.', TELEMETRY)).toEqual([0.76]); // explicit wrong sign
+    expect(ungroundedNumbers('The body rolls 1.18 degrees and the outside front sits at -0.8.', TELEMETRY)).toEqual([]);
+    expect(ungroundedNumbers('About 1.2 degrees of roll at 0.85 g, roughly 6,500 N.', TELEMETRY)).toEqual([]);
+    expect(ungroundedNumbers('The roll centre is 104 mm high.', TELEMETRY)).toEqual([]);
+    expect(ungroundedNumbers('It loses 45 percent of the camber.', TELEMETRY)).toEqual([45]);
+    expect(ungroundedNumbers('Camber is +2.12 degrees.', TELEMETRY)).toEqual([2.12]); // explicit wrong sign
     expect(ungroundedNumbers('A 3D view.', TELEMETRY)).toEqual([3]);
     expect(ungroundedNumbers('Per 10 mm of bump.', { derived: { gain_deg_per_10mm: -0.4 } })).toEqual([]);
   });
@@ -148,9 +148,9 @@ describe('facts, prompt and rule-based answers', () => {
     expect(msgs[0]!.content).toContain('ACTIVE SUSPENSION: MacPherson strut');
     expect(msgs[0]!.content).not.toContain('ACTIVE SUSPENSION: double wishbone');
     expect(msgs[0]!.content).toContain('SECTION: Carousel.');
-    expect(msgs[0]!.content).toContain('body roll: 1.26 degrees, leaning left');
-    expect(msgs[0]!.content).toContain('front-left wheel: camber to road -0.76 degrees');
-    expect(msgs[0]!.content).toContain('front roll-centre height, mm: 106');
+    expect(msgs[0]!.content).toContain('body roll: 1.18 degrees, leaning left');
+    expect(msgs[0]!.content).toContain('front-left wheel: camber to road -0.8 degrees');
+    expect(msgs[0]!.content).toContain('front roll-centre height, mm: 104');
     expect(msgs[2]!.content).toBe('why?');
   });
 
@@ -166,7 +166,7 @@ describe('facts, prompt and rule-based answers', () => {
     }
     expect(ruleAnswer('What is a roll centre?', 'settle', TELEMETRY)).toMatch(/^The roll centre/);
     expect(ruleAnswer('Which is best?', 'settle', TELEMETRY)).toMatch(/None is best/);
-    expect(ruleAnswer('x', 'steady-state-roll', TELEMETRY)).toContain('front-left wheel sits at minus 0.76 degrees');
+    expect(ruleAnswer('x', 'steady-state-roll', TELEMETRY)).toContain('front-left wheel sits at minus 0.8 degrees');
   });
 
   it('the browser copy of the rule module is byte-identical (layering forbids a shared import)', async () => {
@@ -177,7 +177,7 @@ describe('facts, prompt and rule-based answers', () => {
 describe('POST /api/engineer', () => {
   it('returns a grounded model answer with validated actions (max 2, deduplicated), uncached', async () => {
     const ai = fakeAi(
-      openAi('The strut adds little camber in bump, so the outside front leans with the body at 1.26 degrees of roll.', [
+      openAi('The strut adds little camber in bump, so the outside front leans with the body at 1.18 degrees of roll.', [
         { name: 'highlight_component', arguments: '{"component":"strut","corner":"fl"}' },
         { name: 'highlight_component', arguments: '{"component":"strut","corner":"fl"}' },
         { name: 'hack', arguments: '{}' },

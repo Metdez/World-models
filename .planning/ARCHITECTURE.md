@@ -313,7 +313,7 @@ export type ComponentRole =
 
 /**
  * One colour per role, identical across every suspension type and both vehicle classes.
- * Linear-sRGB hex for THREE.Color. Rubber/bushings use RUBBER_COLOR; brake parts BRAKE_COLORS.
+ * sRGB hex for THREE.Color (converted to linear on set). Rubber/bushings use RUBBER_COLOR; brake parts BRAKE_COLORS.
  */
 export const COMPONENT_COLORS: Readonly<Record<ComponentRole, number>> = {
   'upper-arm': 0xb8a1ff,
