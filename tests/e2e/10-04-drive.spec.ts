@@ -70,6 +70,11 @@ test.describe('10-04 drive UX v2', () => {
     await page.waitForTimeout(300);
     expect(await stop()).toBe(0);
     await expect(pill).not.toHaveClass(/is-returning/);
+    // still on the detached clock after the latch (MD-07, 13-01): the pill says so and offers Rejoin now
+    expect((await drive(page)).detached).toBe(true);
+    await expect(pill).toHaveClass(/is-off-lap/);
+    await expect(page.locator('.sl-drive-return-text')).toHaveText('Off the live lap');
+    await expect(page.locator('.sl-drive-rejoin')).toBeVisible();
 
     // take the wheel, hand back, and take it again while returning (any driving key, no cut)
     await page.keyboard.press('ArrowUp');
@@ -89,6 +94,9 @@ test.describe('10-04 drive UX v2', () => {
     await page.waitForTimeout(800);
     expect(await stop2()).toBeGreaterThan(0.5);
     expect(await fadeOpacity(page)).toBe(0);
+    // the release re-synced to the shared lap: no longer off the live lap
+    await expect.poll(async () => (await drive(page)).detached).toBe(false);
+    await expect(pill).not.toHaveClass(/is-off-lap/);
     await expectHealthyBoot(page, errors);
   });
 

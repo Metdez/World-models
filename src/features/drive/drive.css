@@ -697,8 +697,14 @@
   color: var(--text-1);
   white-space: nowrap;
 }
-.sl-drive-pill.is-returning .sl-drive-return {
+.sl-drive-pill.is-returning .sl-drive-return,
+.sl-drive-pill.is-off-lap .sl-drive-return {
   display: inline-flex;
+}
+/* Off the live lap (MD-07): the same chip, calm (no breathing dot) */
+.sl-drive-pill.is-off-lap .sl-drive-return-dot {
+  animation: none;
+  background: var(--text-2);
 }
 .sl-drive-return-dot {
   width: 6px;

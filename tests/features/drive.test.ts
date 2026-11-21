@@ -3,7 +3,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { createDriveFrame, DEFAULT_AIDS, neutralIntent, type DriveFrame, type DriveIntent, type DriveMode } from '../../src/contracts/drive';
 import type { DriveIntentSource } from '../../src/contracts/services';
 import { createArbiter, HYSTERESIS_S } from '../../src/features/drive/arbiter';
-import { handBackAfter, idleState, promptVisible, TIMING } from '../../src/features/drive/idle';
+import { handBackAfter, idleState, noteFault, promptVisible, TIMING } from '../../src/features/drive/idle';
 import { AID_COPY, AID_KEYS, aidsSummary, LAMP_HOLD_S, LAMP_TEXT, LAMP_TITLE, LAMPS, updateLamps, withAid } from '../../src/features/drive/hud';
 import { capturesCode, gearLabel, isDriving, keyIntent } from '../../src/features/drive/keys';
 
@@ -339,3 +339,19 @@ describe('handling HUD (09-05; ARCH-M2 §10.2, §10.5, §13)', () => {
     expect(updateLamps(d, isDriving(d.mode), 1 / 60, new Float64Array(LAMPS.length))).toBe(bit('abs'));
   });
 });
+
+describe('Reset to road (MD-18, 13-01)', () => {
+  it('fires on the third automatic restore within two seconds of sim time, then starts over', () => {
+    expect(TIMING.faultResets).toBe(3);
+    expect(TIMING.faultWindow).toBe(2);
+    const t: number[] = [];
+    expect([noteFault(t, 10), noteFault(t, 10.5), noteFault(t, 11.9)]).toEqual([false, false, true]);
+    expect(t).toEqual([]);
+    // spread out: never
+    expect([noteFault(t, 20), noteFault(t, 21.5), noteFault(t, 23), noteFault(t, 24.5)]).toEqual([false, false, false, false]);
+    // a burst after isolated restores
+    expect([noteFault(t, 30), noteFault(t, 30.01), noteFault(t, 30.02)]).toEqual([false, false, true]);
+  });
+  it('the off-lap idle re-sync waits twenty seconds', () => expect(TIMING.rejoinAfter).toBe(20));
+});
+

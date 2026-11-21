@@ -16,7 +16,7 @@ import { kmh } from '../../ui/format';
 import { createArbiter } from './arbiter';
 import { canRumble, createGamepadSource, type PadLike } from './gamepad';
 import { FADE, fadeOpacity, handBackKind, nearestSpawn, returningLabel } from './handback';
-import { idleState, promptVisible, TIMING, type IdleState } from './idle';
+import { idleState, noteFault, promptVisible, TIMING, type IdleState } from './idle';
 import { AID_COPY, AID_KEYS, aidsSummary, HUD_ICON, LAMP_TEXT, LAMP_TITLE, LAMPS, updateLamps, withAid } from './hud';
 import { createKeyboardSource } from './keyboard';
 import { gearLabel, isDriving } from './keys';
@@ -243,6 +243,10 @@ export default {
       if (store.get().paused) store.setKey('paused', false);
     };
     const release = () => bus.emit('drive:request', { mode: 'auto', immediate: true });
+    /** Auto on the detached clock a drive left behind (MD-07): "Off the live lap" + Rejoin now; idle re-syncs. */
+    const offLap = () => mode() === 'auto' && c.sim.frame.drive.detached;
+    /** Simulation times of the latest automatic state restores (plant faults), for the "Reset to road" rule (MD-18). */
+    const faultTimes: number[] = [];
     let annexOf: WorldDefinition | null = null;
     let annex: ReadonlySet<string> = new Set();
     const annexZones = () => {
@@ -333,7 +337,7 @@ export default {
     });
     rejoinBtn.addEventListener('click', (e) => {
       if (e.detail > 0) rejoinBtn.blur();
-      if (mode() !== 'returning') return;
+      if (mode() !== 'returning' && !offLap()) return;
       fadeThen(release);
     });
 
@@ -472,6 +476,12 @@ export default {
         showNote('Back inside the proving ground');
         say('Out of bounds. Back inside the proving ground.');
         fadeThen(() => bus.emit('drive:reset', spawn ? { spawn } : {}));
+      } else if (e.kind === 'fault') {
+        // the plant restored its last good state; repeated restores mean the car cannot settle: put it on the road
+        if (!noteFault(faultTimes, e.simTime) || mode() !== 'manual') return;
+        showNote('Reset to road');
+        say('The model could not settle. Reset to road.');
+        fadeThen(() => bus.emit('drive:reset', {}));
       }
     });
     c.watch((s) => {
@@ -533,7 +543,15 @@ export default {
         else if (stationS > 0) kind = 'station';
         else if (controlsS > 0) kind = arbiter.active === 'gamepad' ? 'pad' : arbiter.active === 'touch' ? 'none' : 'controls';
       } else {
-        idleS = 0;
+        // off the live lap after a drive: 20 s without input re-syncs to the shared lap (a faded cut). Not in e2e mode
+        // (like attract's idle start): specs step slowly in wall-clock time and must not be re-synced under them.
+        idleS = offLap() && !store.get().paused ? idleS + dt : 0;
+        if (idleS >= TIMING.rejoinAfter && !c.flags.e2e) {
+          idleS = 0;
+          showNote('Rejoining the live lap');
+          say('Rejoining the live lap.');
+          fadeThen(release);
+        }
         if (m === 'auto') autoS += dt;
         if (noteS > 0) kind = 'note';
         else if (can && m === 'auto' && promptVisible(autoS)) kind = 'prompt';
@@ -574,8 +592,10 @@ export default {
         if (nStations === 0) setOpen(stationsPanel, false);
       }
       stationsBtn.setAttribute('aria-label', driving ? 'Stations: drive to an experiment on the proving ground' : 'Drive the proving ground: pick an experiment');
-      if (m === 'returning') {
-        const label = returningLabel((c.sim.current.drive as DriveHost | undefined)?.autopilot?.state);
+      const off = offLap();
+      pill.classList.toggle('is-off-lap', off);
+      if (m === 'returning' || off) {
+        const label = off ? 'Off the live lap' : returningLabel((c.sim.current.drive as DriveHost | undefined)?.autopilot?.state);
         if (label !== shown.returning) returnText.textContent = shown.returning = label;
       }
       const lit = updateLamps(t.drive, driving, dt, lampHold);

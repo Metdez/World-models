@@ -13,6 +13,12 @@ export const TIMING = {
   presenterScale: 2.5,
   /** The idle cue counts down over the last seconds before the hand-back. */
   cue: 3,
+  /** Auto off the live lap after a drive (MD-07): re-sync to the shared lap after this long without input. */
+  rejoinAfter: 20,
+  /** A "Reset to road" after this many automatic state restores (plant faults) ... */
+  faultResets: 3,
+  /** ... within this much simulation time (MD-18). */
+  faultWindow: 2,
 } as const;
 
 export interface IdleState {
@@ -37,4 +43,16 @@ export function idleState(idle: number, screen: boolean, out: IdleState): IdleSt
 /** The Auto prompt is visible `autoTime` seconds into Auto (once per stretch of Auto). */
 export function promptVisible(autoTime: number): boolean {
   return autoTime >= TIMING.promptAfter && autoTime < TIMING.promptAfter + TIMING.promptFor;
+}
+
+/**
+ * MD-18: record an automatic state restore (a plant `fault` event) at `simTime` in `times` (kept to the last
+ * TIMING.faultResets); true when that many fell within TIMING.faultWindow s, which clears the record ("Reset to road").
+ */
+export function noteFault(times: number[], simTime: number): boolean {
+  times.push(simTime);
+  while (times.length > TIMING.faultResets) times.shift();
+  if (times.length < TIMING.faultResets || simTime - times[0]! > TIMING.faultWindow) return false;
+  times.length = 0;
+  return true;
 }
