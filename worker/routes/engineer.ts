@@ -61,10 +61,12 @@ export async function answer(req: EngineerRequest, ai: Ai | undefined): Promise<
 /**
  * Global limits, counted in the `engineer` Limiter Durable Object for every request (valid or not): per anonymous
  * client id (a venue behind one NAT is not throttled as one visitor) and per address (bounds id rotation), plus a
- * UTC-day model-call budget kept below the free Workers AI allocation (10k neurons/day, ~22 per answer). Past the
- * budget every answer is the labelled rule-based one.
+ * UTC-day model-call budget kept below the free Workers AI allocation (10k neurons/day). A driving answer costs ~27-30
+ * neurons (12-03: the driving prompt is ~2.8-3.05k tokens; Auto answers ~22), so 280 calls x 30 = 8.4k neurons leaves
+ * ~16 % margin even on a day of driving questions (13-01; was 300). Past the budget every answer is the labelled
+ * rule-based one.
  */
-export const ENGINEER_LIMITS = { client: 6, ip: 40, windowMs: 60_000, dailyModelCalls: 300 } as const;
+export const ENGINEER_LIMITS = { client: 6, ip: 40, windowMs: 60_000, dailyModelCalls: 280 } as const;
 
 export type Admission = 'busy' | 'rules' | 'model';
 

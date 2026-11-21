@@ -217,6 +217,11 @@ describe('POST /api/engineer', () => {
     }
   });
 
+  it('daily model-call cap keeps a full day of driving answers (~30 neurons) under the free 10k neurons with margin', () => {
+    expect(ENGINEER_LIMITS.dailyModelCalls).toBe(280);
+    expect(ENGINEER_LIMITS.dailyModelCalls * 30).toBeLessThanOrEqual(10_000 * 0.85);
+  });
+
   it('limits globally per client id and per address, counting invalid requests too', async () => {
     const requests: AdmitRequest[] = [];
     const e = env({ LIMITER: limiterNs(requests) });
