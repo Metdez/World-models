@@ -502,8 +502,12 @@
   :root {
     --sl-drive-pill-h: 52px;
   }
-  .sl-drive-toggle {
+  .sl-drive-toggle,
+  .sl-drive-aids-btn {
     height: 44px;
+  }
+  .sl-drive-aid {
+    min-height: 52px;
   }
   .sl-drive-kbd,
   .sl-drive-hint[data-kind='prompt'],
@@ -517,5 +521,12 @@
   }
   .sl-drive-hint-or {
     display: none;
+  }
+  /* narrow: the Assists button keeps its icon (its accessible name still says Assists) */
+  .sl-drive-aids-text {
+    display: none;
+  }
+  .sl-drive-aids-panel {
+    width: min(300px, calc(100vw - 2 * var(--margin)));
   }
 }
