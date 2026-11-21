@@ -540,7 +540,7 @@ export default {
       }
       setHint(kind);
       if (kind === 'cue' && idle.countdown !== shown.countdown) {
-        if (shown.countdown <= 0) say('Back to Auto in 3 seconds. Press any key to keep driving.');
+        if (shown.countdown <= 0) say(`Back to Auto in ${idle.countdown} seconds. Press any key to keep driving.`);
         shown.countdown = idle.countdown;
         cueCount.textContent = String(idle.countdown);
       } else if (kind !== 'cue') shown.countdown = 0;
