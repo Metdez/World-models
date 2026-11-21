@@ -28,7 +28,7 @@ import type { AxleLinkage } from '../../contracts/suspension';
 import type { CornerSolution, KinematicsTable } from '../kinematics/table';
 import { datan, datan2, dcos, dexp, dsin, dwrapPi } from '../math/det';
 import { RIDE_STATE_LENGTH, type RideInput, type RideModel } from '../ride/ride7dof';
-import { LOOP_CORRIDOR, OUT_OF_BOUNDS } from '../world/ground';
+import { LOOP_CORRIDOR } from '../world/ground';
 import { AIDS_STATE_LENGTH, createAids, createAidsIo, peakSlipRatio } from './aids';
 import { deriveCompliance } from './compliance';
 import { faultEvent, outOfBoundsEvent, zoneEvent } from './events';
@@ -282,6 +282,7 @@ export function createPlant(core: CarCore, options: PlantOptions = {}): VehicleP
   const swellA = track.def.swell.amplitude;
   const swellK = (2 * Math.PI * track.def.swell.cycles) / track.length;
   let zone = 'loop';
+  const wheelZone: string[] = ['loop', 'loop', 'loop', 'loop'];
 
   const view = {
     get x() {
@@ -349,6 +350,7 @@ export function createPlant(core: CarCore, options: PlantOptions = {}): VehicleP
       const wx = st[X]! + c * cx[i]! - sn * cy[i]!;
       const wy = st[Y]! + sn * cx[i]! + c * cy[i]!;
       world.sample(wx, wy, st[HINT + i]!, hit);
+      wheelZone[i] = hit.zone;
       tyre.surface[i] = SURFACE_KINDS.indexOf(hit.surface);
       base[i] = hit.base;
       let sw = hit.s;
@@ -416,7 +418,15 @@ export function createPlant(core: CarCore, options: PlantOptions = {}): VehicleP
     const inside = Math.abs(fr.l) <= LOOP_CORRIDOR;
     scal[0] = inside ? fr.s : NaN;
     scal[1] = inside ? fr.l : NaN;
-    const z = inside ? 'loop' : 'terrain';
+    // zone (10-01, for the annex): the ground's zone under the wheels once at least three of them agree (a car
+    // straddling an edge keeps its zone); bounds from the world (loop |l| <= 60, field and zone margins)
+    let z = zone;
+    for (let i = 0; i < 2; i++) {
+      const c = wheelZone[i]!;
+      let n = 0;
+      for (let j = 0; j < 4; j++) if (wheelZone[j] === c) n++;
+      if (n >= 3) z = c;
+    }
     if (z !== zone) {
       if (events) {
         events.push(zoneEvent(view.simTime, zone, false));
@@ -424,7 +434,7 @@ export function createPlant(core: CarCore, options: PlantOptions = {}): VehicleP
       }
       zone = z;
     }
-    if (Math.abs(fr.l) > OUT_OF_BOUNDS) {
+    if (!world.inBounds(st[X]!, st[Y]!)) {
       st[OUT_T] = st[OUT_T]! + dt;
       st[OUT_D] = st[OUT_D]! + dt * Math.sqrt(st[U]! * st[U]! + st[V]! * st[V]!);
       if (!flags[2] && (st[OUT_T]! >= OOB_TIME || st[OUT_D]! >= OOB_DISTANCE)) {

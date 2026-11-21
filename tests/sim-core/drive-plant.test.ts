@@ -120,7 +120,7 @@ describe('Manual plant v0', () => {
     expect(maxAy).toBeLessThan(1.15);
   });
 
-  it('request(auto) releases at once (shortcut until 10-01): a cut, back on the rails, live seek clears detached', () => {
+  it('request(auto) returns (10-01), request(auto, immediate) releases at once: a cut, back on the rails, live seek clears detached', () => {
     const sim = makeSim('proving-loop', 'double-wishbone', 20);
     const d = sim.drive!;
     expect(d.available).toBe(true);
@@ -136,7 +136,12 @@ describe('Manual plant v0', () => {
     expect(d.mode).toBe('manual'); // applied at the next step
     sim.step(SIM_DT);
     ev = events(sim);
-    expect(ev).toEqual([expect.objectContaining({ kind: 'mode', mode: 'auto', previous: 'manual', cut: true })]);
+    expect(ev).toEqual([expect.objectContaining({ kind: 'mode', mode: 'returning', previous: 'manual', cut: false })]);
+    expect(sim.sample(1).drive.source).toBe('autopilot');
+    d.request('auto', true);
+    sim.step(SIM_DT);
+    ev = events(sim);
+    expect(ev).toEqual([expect.objectContaining({ kind: 'mode', mode: 'auto', previous: 'returning', cut: true })]);
     const f = sim.sample(1);
     expect(f.drive.mode).toBe('auto');
     expect(f.drive.detached).toBe(true);

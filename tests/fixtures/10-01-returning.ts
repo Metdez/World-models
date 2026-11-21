@@ -23,6 +23,10 @@ export interface ReturnResult {
   finite: boolean;
   braked: boolean;
   maxDecel: number;
+  /** First 2 s after the hand-over: max deceleration, and the Auto lap's own max deceleration at the same places. */
+  engageDecel: number;
+  engageProfileDecel: number;
+  engageBrake: number;
   maxLat: number;
   maxSteerRate: number;
   events: DriveEvent[];
@@ -30,6 +34,7 @@ export interface ReturnResult {
   last: string;
 }
 
+const scratch: PathState = { lapTime: 0, s: 0, l: 0, v: 0, ax: 0, ay: 0, curvature: 0, heading: 0, x: 0, y: 0, z: 0, bank: 0, grade: 0, sectionIndex: 0 };
 const fr: Frenet = { s: 0, l: 0, heading: 0, curvature: 0, converged: true };
 const newPath = (): PathState => ({ lapTime: 0, s: 0, l: 0, v: 0, ax: 0, ay: 0, curvature: 0, heading: 0, x: 0, y: 0, z: 0, bank: 0, grade: 0, sectionIndex: 0 });
 
@@ -60,8 +65,9 @@ export function begin(sim: Simulation, start: Start, centreOffset?: number): voi
 
 export function runReturn(sim: Simulation, limit: number): ReturnResult {
   const d = sim.drive!;
-  const res: ReturnResult = { latched: false, time: 0, maxLineDistance: 0, finite: true, braked: false, maxDecel: 0, maxLat: 0, maxSteerRate: 0, events: [], last: '' };
+  const res: ReturnResult = { latched: false, time: 0, maxLineDistance: 0, finite: true, braked: false, maxDecel: 0, engageDecel: 0, engageProfileDecel: 0, engageBrake: 0, maxLat: 0, maxSteerRate: 0, events: [], last: '' };
   let prevSteer = NaN;
+  const speeds = new Float64Array(60);
   const n = Math.round((limit + 1) / SIM_DT);
   for (let k = 0; k < n; k++) {
     sim.step(SIM_DT);
@@ -75,10 +81,17 @@ export function runReturn(sim: Simulation, limit: number): ReturnResult {
       res.time = k * SIM_DT;
       break;
     }
-    sim.world.project(f.drive.x, f.drive.y, NaN, fr);
+    sim.world!.project(f.drive.x, f.drive.y, NaN, fr);
     res.maxLineDistance = Math.max(res.maxLineDistance, Math.abs(fr.l - sim.track.lineOffset(fr.s)));
     if (f.drive.brake > 0.75) res.braked = true;
     res.maxDecel = Math.max(res.maxDecel, -f.ax);
+    speeds[k % 60] = f.speed;
+    if (k * SIM_DT < 2 && k >= 60) {
+      // deceleration over the last 0.25 s (speed change; per-step specific forces spike on kerbs and bumps)
+      res.engageDecel = Math.max(res.engageDecel, (speeds[(k + 1) % 60]! - f.speed) / (59 * SIM_DT));
+      res.engageBrake = Math.max(res.engageBrake, f.drive.brake);
+      res.engageProfileDecel = Math.max(res.engageProfileDecel, -sim.stateAt(sim.lapTimeAt(fr.s), scratch).ax);
+    }
     res.maxLat = Math.max(res.maxLat, Math.abs(f.ay));
     if (prevSteer === prevSteer && k > 0) res.maxSteerRate = Math.max(res.maxSteerRate, Math.abs(f.steer - prevSteer) / SIM_DT);
     prevSteer = f.steer;
