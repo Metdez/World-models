@@ -106,7 +106,7 @@ const PHENOMENON: Readonly<Record<string, (t: RuleTelemetry) => string>> = {
 /** Short glossary answers for common questions, matched by keyword (checked before the section rule). */
 const GLOSSARY: readonly (readonly [RegExp, string])[] = [
   [/^(?=.*\b(what|explain|mean))(?=.*roll cent(re|er))/i, 'The roll centre is the imaginary point the linkage lets the body pivot about in a corner; the higher it is, the more cornering load goes through the links instead of the springs, so the body rolls a little less.'],
-  [/\bbest\b|\bbetter\b|which (one|suspension)/i, 'None is best overall: a strut is the cheapest and most compact, a double wishbone controls camber best, and a multi-link gives the most freedom to tune at the cost of complexity.'],
+  [/\bbest\b|\bbetter\b|which (one|suspension)/i, 'None is best overall; each trades cost, packaging and wheel control: a strut is simple and compact, a double wishbone gives direct control of camber, and a multi-link gives more freedom to tune at the cost of complexity.'],
   [/^(?=.*\b(what|explain|mean))(?=.*camber)/i, 'Camber is how far the top of the wheel leans in or out; negative camber means the top leans toward the car, which keeps the outside tyre flatter on the road in a corner.'],
 ];
 

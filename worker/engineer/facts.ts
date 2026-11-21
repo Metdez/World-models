@@ -38,7 +38,7 @@ Strengths: typically the fewest parts, the lowest cost, compact across the car (
 It adds the most negative camber in bump of the three types here: as the body rolls it pulls the top of the outside wheel inward, so the tyre stays the flattest. The gain over the others is clearest at the rear in long corners; at the front, at true scale, it is small.
 Its roll centre is in the middle of the three here, and as the body rolls it moves sideways much less than the strut's, but more than the multi-link's.
 The spring and damper work in line with the motion, so friction is low.
-Strengths: typically the best camber control and a low bonnet line. Costs: more parts and cost, and a wider package. Over bumps its tyre scrubs sideways more than the multi-link's, though less than the strut's here.`,
+Strengths: typically close control of camber and a low bonnet line. Costs: more parts and cost, and a wider package. Over bumps its tyre scrubs sideways more than the multi-link's, though less than the strut's here.`,
   multilink: `ACTIVE SUSPENSION: multi-link. Here five separate rods locate each wheel, and the steering axis is a virtual one defined by the links.
 Its camber gain in bump and its camber recovery in roll lie between the strut and the double wishbone here.
 It has the lowest roll centre of the three here, so slightly more of the load transfer goes through the springs and the body rolls a tiny bit more. In this layout its roll centre moves sideways the least of the three as the body rolls, because its lower links sit close to horizontal across the car.
