@@ -11,7 +11,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import type {} from '../../src/features/proving-ground/index'; // declares __screenContacts
-import { captureConsole, expectHealthyBoot, waitForReady } from './helpers';
+import { captureConsole, expectHealthyBoot } from './helpers';
 
 const SHOTS = process.env.SHOTS_DIR ?? 'test-results/11-05-shots';
 mkdirSync(SHOTS, { recursive: true });
@@ -92,6 +92,12 @@ async function showCoach(page: Page, text: string | null): Promise<void> {
   }, text);
 }
 
+/** waitForReady with a longer boot allowance (software rendering at 1920x1080 can take over 20 s). */
+async function boot(page: Page, path: string): Promise<void> {
+  await page.goto(path);
+  await page.waitForFunction(() => globalThis.__app?.ready === true, undefined, { timeout: 120_000 });
+}
+
 const raf = (page: Page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 
 test.describe('11-05 driving layout (desktop)', () => {
@@ -103,7 +109,7 @@ test.describe('11-05 driving layout (desktop)', () => {
     test(`Manual at ${vp.width}x${vp.height}: one slim bottom row, nothing over the tyres`, async ({ browser }) => {
       const page = await (await browser.newContext({ viewport: vp, deviceScaleFactor: 1 })).newPage();
       const errors = captureConsole(page);
-      await waitForReady(page, '/?e2e=1&quality=low&paused=1&drive=manual&spawn=steering-pad');
+      await boot(page, '/?e2e=1&quality=low&paused=1&drive=manual&spawn=steering-pad');
       test.skip(!(await page.evaluate(() => globalThis.__app!.drive().available)), 'no Manual Drive plant in this build');
       await page.evaluate(() => globalThis.__app!.advance(1));
       await raf(page);
@@ -170,7 +176,7 @@ for (const [name, viewport, isMobile] of [
 
     test(`${viewport.width}x${viewport.height}: nothing over the slider or the pedals; captions a sensible width`, async ({ page }) => {
       const errors = captureConsole(page);
-      await waitForReady(page, '/?e2e=1&quality=low&paused=1&t=40');
+      await boot(page, '/?e2e=1&quality=low&paused=1&t=40');
       test.skip(!(await page.evaluate(() => globalThis.__app!.drive().available)), 'no Manual Drive plant in this build');
       await page.locator('.sl-drive-toggle').tap();
       await expect.poll(() => page.evaluate(() => globalThis.__app!.state().driveMode)).toBe('manual');
@@ -209,7 +215,7 @@ test.describe('11-05 annex budget (high tier)', () => {
     const errors = captureConsole(page);
     const out: string[] = [];
     for (const query of ['t=14', 'drive=manual&spawn=ride-street', 'drive=manual&spawn=steering-pad', 'drive=manual&spawn=braking-platform']) {
-      await waitForReady(page, `/?e2e=1&quality=high&paused=1&${query}`);
+      await boot(page, `/?e2e=1&quality=high&paused=1&${query}`);
       await page.evaluate(() => globalThis.__app!.advance(0.5));
       await raf(page);
       const s = (await page.evaluate(() => globalThis.__app!.stats()))!;

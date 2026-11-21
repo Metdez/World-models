@@ -36,12 +36,12 @@ const HUD = [
   // drive (08-03, 09-05): the pill (lamps and Assists button inside it), its hint, the action row, the Assists popover
   '.sl-drive-pill',
   '.sl-drive-hint',
-  '#overlay > .sl-drive-action',
+  '.sl-drive-actions',
   '.sl-drive-aids-panel',
 ];
 
 /** Deliberate stacking inside one feature: the Assists popover opens over the drive hint / action row above the pill. */
-const ALLOWED_OVERLAP = new Set(['.sl-drive-aids-panel|.sl-drive-hint', '.sl-drive-aids-panel|#overlay > .sl-drive-action']);
+const ALLOWED_OVERLAP = new Set(['.sl-drive-aids-panel|.sl-drive-hint', '.sl-drive-aids-panel|.sl-drive-actions']);
 const allowed = (a: string, b: string) => ALLOWED_OVERLAP.has(`${a}|${b}`) || ALLOWED_OVERLAP.has(`${b}|${a}`);
 
 interface Box {

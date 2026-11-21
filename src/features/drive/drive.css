@@ -105,6 +105,17 @@
   display: none;
 }
 
+/* driving with a mouse/keyboard: the lamps keep their slot even when dark, so the centred pill never changes width
+   (the toggle does not jump as an assist flickers on and off) */
+@media (pointer: fine) {
+  .sl-drive.is-driving .sl-drive-pill[data-mode='manual'] .sl-drive-lamps {
+    display: inline-flex;
+    justify-content: center;
+    min-width: 204px;
+    padding-left: var(--sp-2);
+  }
+}
+
 /* touch-driving: the pill sits between the slider and the pedals (centred in that span), the chips at the top right
    under the view control (the coach line takes the span above the pill) */
 #overlay:has(> .sl-drive-touch:not([hidden])) > .sl-drive {
