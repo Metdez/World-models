@@ -64,14 +64,18 @@ function kernelSin(x: number, y: number): number {
   return x - (z * (0.5 * y - v * r) - y - v * S1);
 }
 
+// High-word thresholds of fdlibm k_cos.c as plain comparisons on |x| (same branches, no word access on the common path).
+const COS_TINY = 7.450580596923828e-9; // 2^-27: ix < 0x3e400000
+const COS_SMALL = 0.2999999523162842; // ix < 0x3fd33333 (= fromWords(0x3fd33333, 0))
+const COS_BIG = 0.7812504768371582; // ix > 0x3fe90000 (= fromWords(0x3fe90001, 0))
 function kernelCos(x: number, y: number): number {
-  const ix = highWord(x) & 0x7fffffff;
-  if (ix < 0x3e400000) return 1;
+  const ax = Math.abs(x);
+  if (ax < COS_TINY) return 1;
   const z = x * x;
   const r = z * (0.0416666666666666 + z * (-0.001388888888887411 + z * (0.00002480158728947673 + z * (-2.7557314351390663e-7 + z * (2.087572321298175e-9 + z * -1.1359647557788195e-11)))));
-  if (ix < 0x3fd33333) return 1 - (0.5 * z - (z * r - x * y));
-  // |x| >= 0.3: subtract qx (about x/4, exact in its high word) first so 1 - z/2 keeps its low bits.
-  const qx = ix > 0x3fe90000 ? 0.28125 : fromWords(ix - 0x00200000, 0);
+  if (ax < COS_SMALL) return 1 - (0.5 * z - (z * r - x * y));
+  // |x| >= 0.3: subtract qx (x/4 cut to its high word, exact) first so 1 - z/2 keeps its low bits.
+  const qx = ax >= COS_BIG ? 0.28125 : withLowWord(ax, 0) * 0.25;
   const hz = 0.5 * z - qx;
   return 1 - qx - (hz - (z * r - x * y));
 }
