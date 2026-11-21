@@ -3,7 +3,7 @@ import type { AnalyticsEvent } from '../../src/contracts/net';
 import { initialState, type AppState } from '../../src/contracts/store';
 import { BATCH_MAX, createBatcher, FLUSH_DELAY_MS } from '../../src/features/analytics/batcher';
 import { trackingAllowed } from '../../src/features/analytics/privacy';
-import { createTracker, PICK_DWELL_MS, SESSION_AFTER_MS } from '../../src/features/analytics/tracker';
+import { createTracker, DRIVE_MIN_S, PICK_DWELL_MS, SESSION_AFTER_MS, STATION_REPEAT_MS } from '../../src/features/analytics/tracker';
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -139,5 +139,75 @@ describe('tracker', () => {
     t.dispose();
     vi.advanceTimersByTime(SESSION_AFTER_MS * 2);
     expect(events).toEqual([]);
+  });
+});
+
+describe('drive analytics (12-03)', () => {
+  function setup() {
+    const events: AnalyticsEvent[] = [];
+    let clock = 0;
+    const t = createTracker({ push: (e) => events.push(e), fps: () => 60, now: () => clock });
+    let s: AppState = initialState();
+    t.onState(s);
+    const set = (patch: Partial<AppState>) => {
+      s = { ...s, ...patch };
+      t.onState(s);
+    };
+    return { events, set, t, tick: (ms: number) => (clock += ms) };
+  }
+  const drives = (events: AnalyticsEvent[]) => events.filter((e) => e.type === 'drive-session' || e.type === 'station-visit');
+
+  it('one drive-session in whole seconds when Manual ends (Returning, a cut or a replay); short takeovers are dropped', () => {
+    const { events, set, tick } = setup();
+    set({ driveMode: 'manual' });
+    tick(95_700);
+    set({ driveMode: 'returning' });
+    set({ driveMode: 'auto' });
+    set({ driveMode: 'manual' });
+    tick((DRIVE_MIN_S - 1) * 1000 + 900);
+    set({ driveMode: 'auto' });
+    set({ driveMode: 'manual', suspensionId: 'multilink' });
+    tick(12_000);
+    set({ driveMode: 'replay' });
+    expect(drives(events)).toEqual([
+      { type: 'drive-session', vehicle: 'gt-coupe', suspension: 'double-wishbone', seconds: 95 },
+      { type: 'drive-session', vehicle: 'gt-coupe', suspension: 'multilink', seconds: 12 },
+    ]);
+  });
+
+  it('page hide closes the open session and starts a new one; dispose closes it', () => {
+    const { events, set, t, tick } = setup();
+    set({ driveMode: 'manual' });
+    tick(20_000);
+    t.endDrive();
+    tick(7_000);
+    t.dispose();
+    expect(drives(events).map((e) => (e as { seconds: number }).seconds)).toEqual([20, 7]);
+  });
+
+  it('station-visit only while driving, speed rounded and bounded, once per station per half minute; never in attract', () => {
+    const { events, set, t, tick } = setup();
+    t.onStation('steering-pad', 14.4);
+    set({ driveMode: 'manual', suspensionId: 'macpherson' });
+    t.onStation('steering-pad', 14.4);
+    t.onStation('steering-pad', 15);
+    tick(STATION_REPEAT_MS);
+    t.onStation('steering-pad', 140);
+    t.onStation('Not An Id', 3);
+    set({ attract: true });
+    t.onStation('slalom', 8);
+    expect(drives(events)).toEqual([
+      { type: 'station-visit', station: 'steering-pad', suspension: 'macpherson', speed: 14 },
+      { type: 'station-visit', station: 'steering-pad', suspension: 'macpherson', speed: 100 },
+    ]);
+  });
+
+  it('events carry no inputs, positions or ids beyond the contract fields', () => {
+    const { events, set, t, tick } = setup();
+    set({ driveMode: 'manual' });
+    t.onStation('slalom', 9.6);
+    tick(30_000);
+    set({ driveMode: 'auto' });
+    for (const e of drives(events)) expect(Object.keys(e).sort()).toEqual(e.type === 'drive-session' ? ['seconds', 'suspension', 'type', 'vehicle'] : ['speed', 'station', 'suspension', 'type']);
   });
 });

@@ -301,7 +301,7 @@ export function buildTelemetry(s: Snap, cornerIds: readonly string[], ctx: Paylo
       put('steer_before_deg', drive.before.steer * RAD_TO_DEG, 1);
     }
     if (drive.eventAge !== undefined) put('event_age_s', drive.eventAge, 1);
-    const off = drive.aidsOff.length > 0 ? `, assists off: ${drive.aidsOff.join(', ')}` : '';
+    const off = drive.aidsOff.length > 0 ? `, assists off (${drive.aidsOff.join(', ')})` : ''; // label charset: no colon
     if (event.length + off.length <= 120) event += off;
   }
   return {
