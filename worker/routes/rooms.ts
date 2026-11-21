@@ -9,16 +9,17 @@ export const ROOM_CREATES_PER_MINUTE = 10;
 
 const r = new Hono<{ Bindings: Env }>();
 
-/** Big screen creates a private room; the host key is only ever shown on that screen (QR fragment). */
+/** Big screen creates a private room; the host and driver keys are only ever shown on that screen (QR fragments). */
 r.post(API.rooms, async (c) => {
   const ip = c.req.header('cf-connecting-ip') ?? 'unknown';
   const verdict = await c.env.LIMITER.getByName('rooms').admit({ rules: [{ key: ip, limit: ROOM_CREATES_PER_MINUTE }], windowMs: 60_000 });
   if (verdict === 'busy') return c.json({ error: 'busy' } satisfies ErrorResponse, 429, NO_STORE);
   const hostKey = generateHostKey();
+  const driverKey = generateHostKey();
   for (let i = 0; i < CODE_ATTEMPTS; i++) {
     const code = generateRoomCode();
-    if (await c.env.ROOM.getByName(code).init(hostKey)) {
-      return c.json({ code, hostKey } satisfies CreateRoomResponse, 200, NO_STORE);
+    if (await c.env.ROOM.getByName(code).init(hostKey, driverKey)) {
+      return c.json({ code, hostKey, driverKey } satisfies CreateRoomResponse, 200, NO_STORE);
     }
   }
   return c.json({ error: 'no_code' } satisfies ErrorResponse, 503, NO_STORE);

@@ -5,8 +5,10 @@ import {
   CLOSE,
   decideJoin,
   expireOnAlarm,
+  frameLimit,
   frameTooBig,
   INITIAL_CTL,
+  laneOf,
   newBucket,
   nextCueSeq,
   presenceOf,
@@ -18,6 +20,7 @@ import {
   type Attachment,
   type Bucket,
   type Effect,
+  type Lane,
   type PollRecord,
   type VoteCount,
 } from './room-logic';
@@ -26,12 +29,14 @@ import { parseClientMessage, parseUpgradeQuery } from './schemas/room';
 const OPEN = 1;
 
 /**
- * One room = one Durable Object (ARCHITECTURE §12.4): hibernating WebSockets, presence, presenter state, poll.
- * I/O glue only; every decision is in room-logic.ts. In-memory fields are caches that are rebuilt after
- * hibernation (storage + socket attachments are the truth).
+ * One room = one Durable Object (ARCHITECTURE §12.4): hibernating WebSockets, presence, presenter state, poll,
+ * and the phone-driver relay (ARCHITECTURE-M2 §12.2). I/O glue only; every decision is in room-logic.ts.
+ * In-memory fields are caches that are rebuilt after hibernation (storage + socket attachments + the role tag
+ * each socket was accepted with are the truth). The drive path adds no timers and no storage writes.
  */
 export class Room extends DurableObject<Env> {
   private hostKey: string | null = null;
+  private driverKey: string | null = null;
   private ctl: PresenterState = INITIAL_CTL;
   private poll: PollRecord | null = null;
   private alarmAt: number | null = null;
@@ -40,7 +45,9 @@ export class Room extends DurableObject<Env> {
   private lastPresence: PresenceSnapshot | null = null;
   private presenceTimer: ReturnType<typeof setTimeout> | null = null;
   private tallyTimer: ReturnType<typeof setTimeout> | null = null;
-  private readonly buckets = new Map<WebSocket, Bucket>();
+  private readonly buckets = new Map<WebSocket, Partial<Record<Lane, Bucket>>>();
+  /** Saves a structured-clone deserializeAttachment() per frame on the 30-60 Hz driver path. */
+  private readonly atts = new WeakMap<WebSocket, Attachment>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -48,6 +55,7 @@ export class Room extends DurableObject<Env> {
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
     void ctx.blockConcurrencyWhile(async () => {
       this.hostKey = (await ctx.storage.get<string>('hostKey')) ?? null;
+      this.driverKey = (await ctx.storage.get<string>('driverKey')) ?? null;
       this.ctl = (await ctx.storage.get<PresenterState>('ctl')) ?? INITIAL_CTL;
       this.poll = (await ctx.storage.get<PollRecord>('poll')) ?? null;
       this.alarmAt = await ctx.storage.getAlarm();
@@ -55,10 +63,12 @@ export class Room extends DurableObject<Env> {
   }
 
   /** RPC from POST /api/rooms. False if the code is already taken (caller draws another). */
-  async init(hostKey: string): Promise<boolean> {
+  async init(hostKey: string, driverKey?: string): Promise<boolean> {
     if (this.hostKey !== null) return false;
     this.hostKey = hostKey;
+    this.driverKey = driverKey ?? null;
     await this.ctx.storage.put('hostKey', hostKey);
+    if (driverKey !== undefined) await this.ctx.storage.put('driverKey', driverKey);
     await this.touch();
     return true;
   }
@@ -72,6 +82,7 @@ export class Room extends DurableObject<Env> {
       code: decodeURIComponent(url.pathname.slice(WS_PREFIX.length)),
       query: parseUpgradeQuery(url.searchParams),
       hostKey: this.hostKey,
+      driverKey: this.driverKey,
       connections: this.sockets().length,
     });
     const pair = new WebSocketPair();
@@ -83,9 +94,11 @@ export class Room extends DurableObject<Env> {
       server.close(decision.close, decision.reason);
       return new Response(null, { status: 101, webSocket: client });
     }
-    this.ctx.acceptWebSocket(server);
+    // The role tag lets the relay find screens / the driver without scanning every socket (survives hibernation).
+    this.ctx.acceptWebSocket(server, [decision.attachment.role]);
     server.serializeAttachment(decision.attachment);
-    // A host is welcomed after its `auth` frame.
+    this.atts.set(server, decision.attachment);
+    // A host or driver is welcomed after its `auth` frame.
     if (!decision.attachment.pending) this.join(server, decision.attachment);
     await this.touch();
     return new Response(null, { status: 101, webSocket: client });
@@ -108,23 +121,31 @@ export class Room extends DurableObject<Env> {
 
   override async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer): Promise<void> {
     if (typeof raw !== 'string') return send(ws, { t: 'err', code: 'bad-message' });
-    if (frameTooBig(raw)) {
+    const att = this.attachment(ws);
+    if (!att) return ws.close(CLOSE.badRequest, 'no-session');
+    if (frameTooBig(raw, frameLimit(att.role))) {
       send(ws, { t: 'err', code: 'too-big' });
       return ws.close(CLOSE.tooBig, 'too-big');
     }
     const now = Date.now();
-    let bucket = this.buckets.get(ws);
-    if (!bucket) this.buckets.set(ws, (bucket = newBucket(now)));
-    const verdict = takeToken(bucket, now);
+    const msg = parseClientMessage(raw);
+    const lane = laneOf(att.role, msg?.t ?? null);
+    let lanes = this.buckets.get(ws);
+    if (!lanes) this.buckets.set(ws, (lanes = {}));
+    const bucket = (lanes[lane] ??= newBucket(now, lane));
+    const verdict = takeToken(bucket, now, lane);
     if (verdict === 'close') return ws.close(CLOSE.policy, 'rate');
     if (verdict === 'drop') return bucket.strikes === 1 ? send(ws, { t: 'err', code: 'rate' }) : undefined;
-
-    const msg = parseClientMessage(raw);
     if (!msg) return send(ws, { t: 'err', code: 'bad-message' });
-    const att = ws.deserializeAttachment() as Attachment | null;
-    if (!att) return ws.close(CLOSE.badRequest, 'no-session');
 
-    const effects = reduceMessage(att, msg, { hostKey: this.hostKey, ctl: this.ctl, poll: this.poll, now, newPollId: () => crypto.randomUUID() });
+    const effects = reduceMessage(att, msg, {
+      hostKey: this.hostKey,
+      driverKey: this.driverKey,
+      ctl: this.ctl,
+      poll: this.poll,
+      now,
+      newPollId: () => crypto.randomUUID(),
+    });
     for (const effect of effects) await this.apply(ws, effect, now);
   }
 
@@ -152,6 +173,7 @@ export class Room extends DurableObject<Env> {
     }
     await this.ctx.storage.deleteAll();
     this.hostKey = null;
+    this.driverKey = null;
     this.ctl = INITIAL_CTL;
     this.poll = null;
     this.alarmAt = null;
@@ -167,6 +189,16 @@ export class Room extends DurableObject<Env> {
         return send(ws, effect.msg);
       case 'attach':
         ws.serializeAttachment(effect.attachment);
+        this.atts.set(ws, effect.attachment);
+        return this.markPresence();
+      case 'to-screens':
+        return this.sendTo('screen', effect.msg);
+      case 'to-driver':
+        return this.sendTo('driver', effect.msg);
+      case 'replace-driver':
+        for (const other of this.tagged('driver')) {
+          if (other !== ws && !this.attachment(other)?.pending) other.close(CLOSE.replaced, 'replaced');
+        }
         return this.markPresence();
       case 'ctl':
         this.ctl = effect.state;
@@ -200,6 +232,32 @@ export class Room extends DurableObject<Env> {
 
   private sockets(): WebSocket[] {
     return this.ctx.getWebSockets().filter((ws) => ws.readyState === OPEN);
+  }
+
+  private tagged(role: 'screen' | 'driver'): WebSocket[] {
+    return this.ctx.getWebSockets(role).filter((ws) => ws.readyState === OPEN);
+  }
+
+  private attachment(ws: WebSocket): Attachment | null {
+    let att = this.atts.get(ws);
+    if (!att) {
+      att = (ws.deserializeAttachment() as Attachment | null) ?? undefined;
+      if (att) this.atts.set(ws, att);
+    }
+    return att ?? null;
+  }
+
+  /** Point-to-point relay: screens get `in`, the authenticated driver gets `tel`; nobody else ever sees them. */
+  private sendTo(role: 'screen' | 'driver', msg: ServerMessage): void {
+    const text = JSON.stringify(msg);
+    for (const ws of this.tagged(role)) {
+      if (this.attachment(ws)?.pending) continue;
+      try {
+        ws.send(text);
+      } catch {
+        /* closing socket */
+      }
+    }
   }
 
   private presence(): PresenceSnapshot {

@@ -1,11 +1,20 @@
-// Room smoke (ARCHITECTURE §12.4): node scripts/smoke-room.mjs [baseUrl] [--load N]
+// Room smoke (ARCHITECTURE §12.4): node scripts/smoke-room.mjs [baseUrl] [--load N] [--drive-s S] [--drive-hz HZ]
 // Exercises the real Durable Object over WebSockets: presence + distribution, picks, clock sync, host ctl,
-// poll/vote, validation, close codes, and optionally N concurrent sockets. Exits 1 if any check fails.
+// poll/vote, validation, close codes, the phone driver (ARCHITECTURE-M2 §12.2: pairing, a HZ stream for S seconds
+// with relay latency, audience isolation, telemetry, takeover), and optionally N concurrent sockets.
+// Exits 1 if any check fails.
 // Uses private rooms (exact counts); LIVE is only checked for connectivity because real visitors may be there.
 const args = process.argv.slice(2);
 const loadIdx = args.indexOf('--load');
 const load = loadIdx >= 0 ? Number(args[loadIdx + 1]) : 0;
-const base = (args.find((a, i) => !a.startsWith('--') && !(loadIdx >= 0 && i === loadIdx + 1)) ?? 'https://suspension-lab.zh-a16.workers.dev').replace(/\/$/, '');
+const opt = (name, fallback) => {
+  const i = args.indexOf(name);
+  return i >= 0 ? Number(args[i + 1]) : fallback;
+};
+const driveS = opt('--drive-s', 30);
+const driveHz = opt('--drive-hz', 60);
+const isValue = (i) => i > 0 && ['--load', '--drive-s', '--drive-hz'].includes(args[i - 1]);
+const base = (args.find((a, i) => !a.startsWith('--') && !isValue(i)) ?? 'https://suspension-lab.zh-a16.workers.dev').replace(/\/$/, '');
 const wsBase = base.replace(/^http/, 'ws');
 const PV = 3; // PROTOCOL_VERSION (src/contracts/net.ts)
 const LAP_S = 83.72; // proving loop lap (02-04); only used to express clock error as lap time
@@ -33,7 +42,7 @@ function client(code, { role = 'viewer', s, k, pv = PV, id = uid() } = {}) {
   const q = new URLSearchParams({ id, role, pv: String(pv) });
   if (s) q.set('v', V), q.set('s', s);
   const ws = new WebSocket(`${wsBase}/ws/${code}?${q}`);
-  // A host's key never goes in the URL: it is the first frame after every open (protocol 2).
+  // A host's or driver's key never goes in the URL: it is the first frame after every open (protocol 2+).
   if (k) ws.addEventListener('open', () => ws.send(JSON.stringify({ t: 'auth', k })));
   const messages = [];
   const waiters = new Set();
@@ -225,6 +234,78 @@ if (room) {
     assert(old.code === 4400, `pv mismatch closed ${old.code}`);
     const unknown = await client('ZZZZ2').done;
     assert(unknown.code === 4404, `unknown room closed ${unknown.code}`);
+  });
+
+  await check('driver: wrong key / host key / LIVE -> 4401, pending `in` and viewer `in` forbidden, pairing -> presence drivers 1', async () => {
+    assert(typeof room.driverKey === 'string' && room.driverKey.length === 32 && room.driverKey !== room.hostKey, 'POST /api/rooms has no distinct driverKey');
+    const codes = await Promise.all([
+      client(room.code, { role: 'driver', k: 'y'.repeat(32) }).done,
+      client(room.code, { role: 'driver', k: room.hostKey }).done,
+      client('LIVE', { role: 'driver', k: room.driverKey }).done,
+    ]);
+    assert(codes.every((c) => c.code === 4401), `closed ${codes.map((c) => c.code).join('/')}`);
+    const unauth = client(room.code, { role: 'driver' });
+    unauth.ws.addEventListener('open', () => unauth.send({ t: 'in', n: 0, s: 0, th: 0, br: 0, f: 1 }));
+    await unauth.waitFor((m) => m.t === 'err' && m.code === 'forbidden', 5000, 'pending in forbidden');
+    unauth.close();
+    v1.send({ t: 'in', n: 0, s: 0, th: 0, br: 0, f: 1 });
+    await v1.next((m) => m.t === 'err' && m.code === 'forbidden', 5000, 'viewer in forbidden');
+    const driver = await client(room.code, { role: 'driver', k: room.driverKey }).ready;
+    assert(driver.last('welcome').role === 'driver', 'welcome role');
+    await presence(globalThis.screen, (p) => p.drivers === 1 && p.viewers === 3, 'presence drivers 1');
+    globalThis.driver = driver;
+    return `wrong/host/LIVE keys closed ${codes.map((c) => c.code).join('/')}; driver welcomed; presence viewers 3 + drivers 1`;
+  });
+
+  await check(`driver: ${driveHz} Hz for ${driveS} s reaches the screen whole; audience + viewer get 0 input frames; tel 5 Hz to the driver`, async () => {
+    const { driver, screen } = globalThis;
+    assert(driver, 'no driver');
+    const audience = await client(room.code, { role: 'audience' }).ready;
+    const total = Math.round(driveHz * driveS);
+    const sentAt = new Float64Array(total);
+    const screenStart = screen.messages.length;
+    const driverStart = driver.messages.length;
+    const t0 = performance.now();
+    let telSent = 0;
+    for (let n = 0; n < total; n++) {
+      const due = t0 + (n * 1000) / driveHz;
+      const wait = due - performance.now();
+      if (wait > 1) await new Promise((r) => setTimeout(r, wait));
+      sentAt[n] = performance.now();
+      driver.send({ t: 'in', n, s: Math.round(Math.sin(n / 30) * 1000), th: 600, br: 0, f: 1 });
+      if (n % Math.round(driveHz / 5) === 0) screen.send({ t: 'tel', v: n % 200, g: 3, m: 1, k: n % 4 }), telSent++;
+    }
+    const sendSpan = performance.now() - t0;
+    await new Promise((r) => setTimeout(r, 1500));
+    const got = screen.messages.slice(screenStart).filter((m) => m.t === 'in');
+    const lat = got.map((m) => m.at - sentAt[m.n]).sort((a, b) => a - b);
+    const q = (p) => lat[Math.min(lat.length - 1, Math.floor(p * lat.length))];
+    const inOrder = got.every((m, i) => i === 0 || m.n > got[i - 1].n);
+    const errs = driver.messages.slice(driverStart).filter((m) => m.t === 'err');
+    const tel = driver.messages.slice(driverStart).filter((m) => m.t === 'tel').length;
+    const leaked = [audience, v1, v2].map((c) => c.messages.filter((m) => m.t === 'in' || m.t === 'tel').length);
+    audience.close();
+    assert(got.length === total, `screen received ${got.length} of ${total}`);
+    assert(inOrder, 'frames out of order');
+    assert(errs.length === 0, `driver got ${JSON.stringify(errs[0])}`);
+    assert(got.every((m) => typeof m.r === 'number'), 'relayed frame without r');
+    assert(leaked.every((n) => n === 0), `audience/viewers received ${leaked.join('/')} drive frames`);
+    assert(tel === telSent, `driver received ${tel} of ${telSent} tel`);
+    globalThis.driveStats = { total, p50: q(0.5), p95: q(0.95), p99: q(0.99), max: lat.at(-1), min: lat[0] };
+    return `${got.length}/${total} delivered in order (sent over ${(sendSpan / 1000).toFixed(1)} s), relay driver->DO->screen min ${lat[0].toFixed(1)} / p50 ${q(0.5).toFixed(1)} / p95 ${q(0.95).toFixed(1)} / p99 ${q(0.99).toFixed(1)} / max ${lat.at(-1).toFixed(1)} ms; audience/viewers 0/0/0; tel ${tel}/${telSent}`;
+  });
+
+  await check('driver: a newer driver takes the wheel (older closed 4409), leaving -> presence drivers 0', async () => {
+    const { driver, screen } = globalThis;
+    const d2 = await client(room.code, { role: 'driver', k: room.driverKey }).ready;
+    const old = await driver.done;
+    assert(old.code === 4409, `older driver closed ${old.code}`);
+    screen.send({ t: 'tel', v: 50, g: 2, m: 1, k: 0 });
+    await d2.next((m) => m.t === 'tel' && m.v === 50, 5000, 'tel to the new driver');
+    await presence(screen, (p) => p.drivers === 1, 'presence drivers 1');
+    d2.close();
+    await screen.next((m) => m.t === 'presence' && m.drivers === 0, 8000, 'presence drivers 0');
+    return 'older driver 4409 replaced, tel follows the new driver, drivers 1 -> 0';
   });
 
   await check('leaving updates presence', async () => {

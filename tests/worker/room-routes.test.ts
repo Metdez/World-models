@@ -6,6 +6,7 @@ function fakeEnv(opts: { allow?: boolean; initResults?: boolean[] } = {}) {
   const results = [...(opts.initResults ?? [true])];
   const names: string[] = [];
   const forwarded: Request[] = [];
+  const inits: string[][] = [];
   const limit = vi.fn(async () => (opts.allow ?? true ? 'model' : 'busy'));
   const env = {
     LIMITER: { getByName: (name: string) => (names.push(`limiter:${name}`), { admit: limit }) },
@@ -13,7 +14,7 @@ function fakeEnv(opts: { allow?: boolean; initResults?: boolean[] } = {}) {
       getByName(name: string) {
         names.push(name);
         return {
-          init: async () => results.shift() ?? false,
+          init: async (...keys: string[]) => (inits.push(keys), results.shift() ?? false),
           fetch: async (req: Request) => {
             forwarded.push(req);
             return new Response('forwarded', { status: 200 });
@@ -22,20 +23,23 @@ function fakeEnv(opts: { allow?: boolean; initResults?: boolean[] } = {}) {
       },
     },
   } as unknown as Env;
-  return { env, names, forwarded, limit };
+  return { env, names, forwarded, limit, inits };
 }
 
 const upgrade = { headers: { Upgrade: 'websocket' } };
 
 describe('POST /api/rooms', () => {
-  it('creates a private room and returns code + host key, uncached', async () => {
-    const { env, names, limit } = fakeEnv();
+  it('creates a private room and returns code + host key + driver key, uncached', async () => {
+    const { env, names, limit, inits } = fakeEnv();
     const res = await app.request('/api/rooms', { method: 'POST', headers: { 'cf-connecting-ip': '203.0.113.7' } }, env);
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
     const body = (await res.json()) as CreateRoomResponse;
     expect(body.code).toMatch(new RegExp(`^[${ROOM_CODE_ALPHABET}]{5}$`));
     expect(body.hostKey).toMatch(/^[A-Za-z0-9_-]{32}$/);
+    expect(body.driverKey).toMatch(/^[A-Za-z0-9_-]{32}$/);
+    expect(body.driverKey).not.toBe(body.hostKey);
+    expect(inits).toEqual([[body.hostKey, body.driverKey]]);
     expect(names).toEqual(['limiter:rooms', body.code]);
     expect(limit).toHaveBeenCalledWith({ rules: [{ key: '203.0.113.7', limit: 10 }], windowMs: 60_000 });
   });

@@ -10,6 +10,7 @@ import { Room } from '../../worker/room';
 
 class FakeSocket {
   readyState = 1;
+  tags: string[] = [];
   sent: ServerMessage[] = [];
   closed: { code: number; reason: string } | null = null;
   private att: unknown = null;
@@ -49,8 +50,11 @@ function fakeState() {
       return state.ready;
     },
     setWebSocketAutoResponse: vi.fn(),
-    acceptWebSocket: (ws: FakeSocket) => sockets.push(ws),
-    getWebSockets: () => sockets,
+    acceptWebSocket: (ws: FakeSocket, tags: string[] = []) => {
+      ws.tags = tags;
+      sockets.push(ws);
+    },
+    getWebSockets: (tag?: string) => (tag === undefined ? sockets : sockets.filter((ws) => ws.tags.includes(tag))),
     storage: {
       get: async (k: string) => structuredClone(kv.get(k)),
       put: async (k: string, v: unknown) => void kv.set(k, structuredClone(v)),
@@ -90,12 +94,13 @@ type RoomInternals = {
   join(ws: FakeSocket, att: Attachment): void;
   webSocketMessage(ws: FakeSocket, raw: string | ArrayBuffer): Promise<void>;
   webSocketClose(ws: FakeSocket, code: number, reason: string): Promise<void>;
-  init(hostKey: string): Promise<boolean>;
+  init(hostKey: string, driverKey?: string): Promise<boolean>;
   alarm(): Promise<void>;
   fetch(req: Request): Promise<Response>;
 };
 
 const HOST_KEY = 'k'.repeat(32);
+const DRIVER_KEY = 'd'.repeat(32);
 
 async function setup() {
   const state = fakeState();
@@ -109,13 +114,20 @@ async function setup() {
   await state.ready;
   const connect = (att: Attachment) => {
     const ws = new FakeSocket();
-    state.acceptWebSocket(ws);
+    state.acceptWebSocket(ws, [att.role]);
     ws.serializeAttachment(att);
     room.join(ws, att);
     return ws;
   };
+  /** A host/driver socket as fetch() leaves it: tagged, pending, no welcome yet. */
+  const pending = (id: string, role: 'host' | 'driver') => {
+    const ws = new FakeSocket();
+    state.acceptWebSocket(ws, [role]);
+    ws.serializeAttachment({ id, role, pending: true });
+    return ws;
+  };
   const say = (ws: FakeSocket, m: unknown) => room.webSocketMessage(ws, JSON.stringify(m));
-  return { state, room, connect, say };
+  return { state, room, connect, pending, say };
 }
 
 beforeEach(() => {
@@ -143,7 +155,7 @@ describe('Room DO', () => {
     expect(a.last('presence')).toBeUndefined();
 
     vi.advanceTimersByTime(NET_LIMITS.presenceFlushMs);
-    const expected = { t: 'presence', viewers: 2, hosts: 0, dist: { 'gt-coupe:macpherson': 1, 'gt-coupe:multilink': 1 } };
+    const expected = { t: 'presence', viewers: 2, hosts: 0, drivers: 0, dist: { 'gt-coupe:macpherson': 1, 'gt-coupe:multilink': 1 } };
     expect(a.last('presence')).toEqual(expected);
     expect(b.last('presence')).toEqual(expected);
 
@@ -156,7 +168,7 @@ describe('Room DO', () => {
     await say(b, { t: 'pick', vehicleId: 'gt-coupe', suspensionId: 'macpherson' });
     vi.advanceTimersByTime(NET_LIMITS.presenceFlushMs);
     expect(a.sent.filter((m) => m.t === 'presence')).toHaveLength(2);
-    expect(a.last('presence')).toEqual({ t: 'presence', viewers: 2, hosts: 0, dist: { 'gt-coupe:macpherson': 2 } });
+    expect(a.last('presence')).toEqual({ t: 'presence', viewers: 2, hosts: 0, drivers: 0, dist: { 'gt-coupe:macpherson': 2 } });
   });
 
   it('a burst of joins produces one presence broadcast', async () => {
@@ -164,7 +176,7 @@ describe('Room DO', () => {
     const first = connect({ id: 'x0', role: 'viewer' });
     for (let i = 1; i < 50; i++) connect({ id: `x${i}`, role: 'viewer' });
     vi.advanceTimersByTime(NET_LIMITS.presenceFlushMs);
-    expect(first.sent.filter((m) => m.t === 'presence')).toEqual([{ t: 'presence', viewers: 50, hosts: 0, dist: {} }]);
+    expect(first.sent.filter((m) => m.t === 'presence')).toEqual([{ t: 'presence', viewers: 50, hosts: 0, drivers: 0, dist: {} }]);
   });
 
   it('drops closed sockets from presence and excludes the host', async () => {
@@ -327,6 +339,110 @@ describe('Room DO', () => {
     state.acceptWebSocket(ws);
     revived.join(ws, { id: 'n', role: 'screen' });
     expect(ws.sent[0]).toMatchObject({ t: 'welcome', ctl: { seq: 1, view: 'closeup' } });
+  });
+
+  it('driver: pairs with the driver key, relays `in` to screens only, `tel` to the driver only, newest driver wins', async () => {
+    const { room, connect, pending, say, state } = await setup();
+    await room.init(HOST_KEY, DRIVER_KEY);
+    expect(state.kv.get('driverKey')).toBe(DRIVER_KEY);
+    const screen = connect({ id: 's', role: 'screen' });
+    const viewer = connect({ id: 'v', role: 'viewer' });
+    const audience = connect({ id: 'a', role: 'audience' });
+    const host = pending('h', 'host');
+    await say(host, { t: 'auth', k: HOST_KEY });
+
+    const wrong = pending('x', 'driver');
+    await say(wrong, { t: 'auth', k: HOST_KEY });
+    expect(wrong.closed).toEqual({ code: CLOSE.forbidden, reason: 'forbidden' });
+
+    const d1 = pending('d1', 'driver');
+    await say(d1, { t: 'in', n: 0, s: 0, th: 0, br: 0, f: 1 });
+    expect(d1.last('err')).toEqual({ t: 'err', code: 'forbidden' });
+    expect(screen.last('in')).toBeUndefined();
+    await say(d1, { t: 'auth', k: DRIVER_KEY });
+    expect(d1.last('welcome')).toMatchObject({ role: 'driver', id: 'd1' });
+    vi.advanceTimersByTime(NET_LIMITS.presenceFlushMs);
+    expect(screen.last('presence')).toMatchObject({ viewers: 3, hosts: 1, drivers: 1 });
+
+    await say(d1, { t: 'in', n: 1, s: 420, th: 800, br: 0, f: 5 });
+    expect(screen.last('in')).toEqual({ t: 'in', n: 1, s: 420, th: 800, br: 0, f: 5, r: Date.now() });
+    for (const other of [viewer, audience, host, d1]) expect(other.last('in')).toBeUndefined();
+
+    await say(screen, { t: 'tel', v: 72, g: 3, m: 1, k: 2 });
+    expect(d1.last('tel')).toEqual({ t: 'tel', v: 72, g: 3, m: 1, k: 2 });
+    for (const other of [viewer, audience, host, screen]) expect(other.last('tel')).toBeUndefined();
+    await say(viewer, { t: 'in', n: 2, s: 0, th: 0, br: 0, f: 0 });
+    expect(viewer.last('err')).toEqual({ t: 'err', code: 'forbidden' });
+    await say(viewer, { t: 'tel', v: 1, g: 1, m: 1, k: 1 });
+    expect(d1.sent.filter((m) => m.t === 'tel')).toHaveLength(1);
+
+    // A newer driver takes the wheel; the older one is closed 4409 and stops receiving telemetry.
+    const d2 = pending('d2', 'driver');
+    await say(d2, { t: 'auth', k: DRIVER_KEY });
+    expect(d1.closed).toEqual({ code: CLOSE.replaced, reason: 'replaced' });
+    expect(d2.closed).toBeNull();
+    await room.webSocketClose(d1, CLOSE.replaced, 'replaced');
+    vi.advanceTimersByTime(1000);
+    await say(screen, { t: 'tel', v: 80, g: 4, m: 1, k: 0 });
+    expect(d2.last('tel')).toMatchObject({ v: 80 });
+    expect(screen.last('presence')).toMatchObject({ drivers: 1 });
+
+    d2.readyState = 3;
+    await room.webSocketClose(d2, 1001, 'gone');
+    vi.advanceTimersByTime(NET_LIMITS.presenceFlushMs);
+    expect(screen.last('presence')).toMatchObject({ viewers: 3, drivers: 0 });
+  });
+
+  it('driver: a 60 Hz stream for 30 s is relayed whole without tripping any limit; nothing is stored', async () => {
+    const { room, connect, pending, say, state } = await setup();
+    await room.init(HOST_KEY, DRIVER_KEY);
+    const screen = connect({ id: 's', role: 'screen' });
+    const audience = connect({ id: 'a', role: 'audience' });
+    const d = pending('d', 'driver');
+    await say(d, { t: 'auth', k: DRIVER_KEY });
+    const kvBefore = JSON.stringify([...state.kv]);
+    const alarmBefore = state.alarm();
+    for (let n = 0; n < 1800; n++) {
+      vi.advanceTimersByTime(1000 / 60);
+      await say(d, { t: 'in', n, s: (n % 2001) - 1000, th: 500, br: 0, f: 1 });
+      if (n % 12 === 0) await say(screen, { t: 'tel', v: n % 200, g: 2, m: 1, k: 0 }); // 5 Hz
+      if (n % 60 === 0) await say(screen, { t: 'sync', c0: n }); // screen keeps its own 1 Hz sync
+    }
+    const got = screen.sent.filter((m) => m.t === 'in');
+    expect(got).toHaveLength(1800);
+    expect(got.map((m) => (m as { n: number }).n)).toEqual(Array.from({ length: 1800 }, (_, i) => i));
+    expect(d.sent.filter((m) => m.t === 'tel')).toHaveLength(150);
+    expect(screen.sent.filter((m) => m.t === 'sync')).toHaveLength(30);
+    for (const ws of [screen, d]) expect(ws.sent.filter((m) => m.t === 'err')).toEqual([]);
+    expect(audience.sent.filter((m) => m.t === 'in' || m.t === 'tel')).toEqual([]);
+    expect(d.closed).toBeNull();
+    expect(JSON.stringify([...state.kv])).toBe(kvBefore);
+    expect(state.alarm()).toBe(alarmBefore);
+  });
+
+  it('driver: flooding past 90/s is dropped (one err), frames over 128 B close 1009', async () => {
+    const { room, pending, say, connect } = await setup();
+    await room.init(HOST_KEY, DRIVER_KEY);
+    const screen = connect({ id: 's', role: 'screen' });
+    const d = pending('d', 'driver');
+    await say(d, { t: 'auth', k: DRIVER_KEY });
+    for (let n = 0; n < NET_LIMITS.driverBurst + 5; n++) await say(d, { t: 'in', n, s: 0, th: 0, br: 0, f: 0 });
+    expect(screen.sent.filter((m) => m.t === 'in')).toHaveLength(NET_LIMITS.driverBurst - 1); // the auth frame took one token
+    expect(d.sent.filter((m) => m.t === 'err')).toEqual([{ t: 'err', code: 'rate' }]);
+    // a screen's telemetry burst beyond 5 is dropped too
+    for (let i = 0; i < 8; i++) await say(screen, { t: 'tel', v: i, g: 1, m: 1, k: 0 });
+    expect(d.sent.filter((m) => m.t === 'tel')).toHaveLength(NET_LIMITS.telemetryPerSecond);
+    await room.webSocketMessage(d, JSON.stringify({ t: 'in', n: 1, s: 0, th: 0, br: 0, f: 0, pad: 'x'.repeat(80) }));
+    expect(d.closed).toEqual({ code: CLOSE.tooBig, reason: 'too-big' });
+  });
+
+  it('a room created before 12-02 (no driver key) still serves hosts', async () => {
+    const { room, pending, say, state } = await setup();
+    await room.init(HOST_KEY);
+    expect(state.kv.has('driverKey')).toBe(false);
+    const h = pending('h', 'host');
+    await say(h, { t: 'auth', k: HOST_KEY });
+    expect(h.last('welcome')).toMatchObject({ role: 'host' });
   });
 
   it('fetch without an upgrade header answers 426', async () => {
