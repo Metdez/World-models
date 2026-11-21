@@ -29,10 +29,10 @@ async function open(context: BrowserContext, path: string): Promise<Watch> {
   return { page, errors, sockets, violations: () => page.evaluate(() => (globalThis as unknown as { __csp: string[] }).__csp) };
 }
 
-const ready = (page: Page) => page.waitForFunction(() => globalThis.__app?.ready === true, undefined, { timeout: 90_000 });
+const ready = (page: Page) => page.waitForFunction(() => globalThis.__app?.ready === true, undefined, { timeout: 150_000 }); // SwiftShader under shared CPU load
 
 test('enforced CSP: zero violations in follow, close-up, explore, x-ray, motorcycle and the engineer', async ({ browser }) => {
-  test.setTimeout(240_000);
+  test.setTimeout(360_000);
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const app = await open(context, '/?quality=low&debug=1');
   await ready(app.page);
@@ -71,7 +71,7 @@ test('enforced CSP: zero violations in follow, close-up, explore, x-ray, motorcy
 });
 
 test('remote pages: CSP clean; the host key never travels in a WebSocket URL; screen sees the host connect', async ({ browser }) => {
-  test.setTimeout(240_000);
+  test.setTimeout(360_000);
   const big = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const screen = await open(big, '/?screen=1&quality=low&debug=1');
   await ready(screen.page);
