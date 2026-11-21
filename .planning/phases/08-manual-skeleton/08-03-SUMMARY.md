@@ -46,7 +46,19 @@
   build has no plant.
 
 ## Verification (real output)
-VERIFICATION_PLACEHOLDER
+- `npm run check` at HEAD 693db86 + this plan's final CSS fix: typecheck clean; depcruise `✔ no dependency violations
+  found (239 modules, 765 dependencies cruised)`; vitest `Test Files 68 passed | 1 skipped (69)`, `Tests 770 passed | 11
+  skipped (781)`. (One earlier run showed `simulation.test.ts` step-cost failing at 7218 ms while Playwright ran in
+  parallel; it passes alone and in the final run.)
+- **e2e against the real 08-02 plant** (private `vite build --outDir <scratch>`, `vite preview --port 4191`, `--trace
+  off`, `.wrangler/deploy/config.json` restored after the preview was up; served bundle hash checked):
+  `tests/e2e/08-03-drive.spec.ts` → `✓ the pill in Auto and the motorcycle says Auto only (1.5m)`, `✓ keyboard: take
+  over, accelerate, steer, reverse, reset, hand back (1.0m)`, `2 passed (2.5m)`, zero console/page errors.
+  `tests/e2e/07-03-a11y.spec.ts` on the same build → `4 passed (4.7m)` (contrast min ratios follow 5.53, explore 5.62,
+  help card 4.81).
+- Screenshots (1280×720): `08-03-auto-pill.png` (Auto pill + "Press W or ↑ to take the wheel"), `08-03-manual-hint.png`
+  (Manual, 59 km/h, gear 2, control hint above the pill), `08-03-moto-pill.png` ("Auto only for this vehicle") in the
+  orchestrator scratchpad `shots/`.
 
 ## Deviations / notes
 - §10.2 says "idle cue at 9 s, hand-back at 12 s (×2.5 with ?screen=1)"; I scale the hand-back (30 s, decision 5) and
@@ -55,3 +67,6 @@ VERIFICATION_PLACEHOLDER
   paused, so an abandoned paused booth still returns to Auto.
 - The Auto prompt re-arms after every hand-back (not "once per device"): an event booth sees many visitors.
 - `__app.drive()` exposes no `lineOffset`, so the e2e "R → near the line" checks speed < 0.5 m/s and `zone === 'loop'`.
+- The e2e needs generous timeouts (240 s per test): under SwiftShader the page renders a few frames per second, and
+  the Auto prompt waits on wall-clock render time.
+- Found in screenshots and fixed before the final run: the hint initially rendered below the pill (column-reverse).
