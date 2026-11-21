@@ -37,6 +37,29 @@ function zoneTint(zone: CompiledZone): number {
   if (zone.def.patches?.length) return 1.2;
   return zone.length * zone.halfWidth * 2 > 20_000 ? 1.3 : 1.05;
 }
+/** Smooth value noise in [-1, 1] at world (x, y) / scale (hash lattice, smoothstep blend; deterministic). */
+function valueNoise(x: number, y: number): number {
+  const xi = Math.floor(x);
+  const yi = Math.floor(y);
+  const fx = x - xi;
+  const fy = y - yi;
+  const hash = (i: number, j: number) => {
+    let h = Math.imul(i, 374761393) + Math.imul(j, 668265263);
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 2147483647.5 - 1;
+  };
+  const sx = fx * fx * (3 - 2 * fx);
+  const sy = fy * fy * (3 - 2 * fy);
+  const a = hash(xi, yi) + (hash(xi + 1, yi) - hash(xi, yi)) * sx;
+  const b = hash(xi, yi + 1) + (hash(xi + 1, yi + 1) - hash(xi, yi + 1)) * sx;
+  return a + (b - a) * sy;
+}
+/** 11-05: subtle tonal variation of the tarmac (laid in lanes, patched, weathered): up to +-9 % on large slabs over
+ *  ~30 m and ~8 m, +-4 % elsewhere. */
+export function tarmacTone(zone: CompiledZone, x: number, y: number): number {
+  const amp = zone.length * zone.halfWidth * 2 > 20_000 ? 0.09 : 0.04;
+  return 1 + amp * (0.7 * valueNoise(x / 31, y / 31) + 0.3 * valueNoise(x / 8.3 + 17, y / 8.3 - 5));
+}
 /** Concrete sleepers and blocks (x the dark asphalt map: about a light concrete albedo). */
 const CONCRETE = [5.2, 5.0, 4.6] as const;
 const POTHOLE = 0.55;
@@ -152,9 +175,10 @@ export function createOwner(zones: readonly CompiledZone[]): (x: number, y: numb
   };
 }
 
-/** Vertex colour of the asphalt at zone-local (u, w): zone tint, concrete sleepers / blocks, the dark pothole. */
-function tintAt(zone: CompiledZone, u: number, w: number, out: Float32Array, o: number): void {
-  const t = zoneTint(zone);
+/** Vertex colour of the asphalt at zone-local (u, w), world (x, y): zone tint and tone, concrete sleepers / blocks, the
+ *  dark pothole. */
+function tintAt(zone: CompiledZone, u: number, w: number, x: number, y: number, out: Float32Array, o: number): void {
+  const t = zoneTint(zone) * tarmacTone(zone, x, y);
   let r = t;
   let g = t;
   let b = t;
@@ -221,7 +245,7 @@ export function buildZoneMesh(world: GroundWorld, all: readonly CompiledZone[], 
         uv[v * 2 + 1] = p.y;
         local[v * 2] = rows[r]!;
         local[v * 2 + 1] = w;
-        tintAt(zone, rows[r]!, w, color, v * 3);
+        tintAt(zone, rows[r]!, w, p.x, p.y, color, v * 3);
         v++;
       }
     }

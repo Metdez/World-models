@@ -1,6 +1,7 @@
-import { Group, Mesh, TextureLoader } from 'three';
+import { type Camera, Group, LOD, Mesh, TextureLoader } from 'three';
 import type { FeatureModule } from '../../contracts/app';
 import { RENDER } from '../../contracts/services';
+import type { GroundHit, GroundWorld } from '../../contracts/world';
 import { provingLoop } from '../../sim-core/content/proving-loop';
 import { buildGroundWorld } from '../../sim-core/world/ground';
 import { compileZones } from '../../sim-core/world/zones';
@@ -8,6 +9,25 @@ import { createMaterials, setAnisotropy, TEXTURE_ASSETS, type TrackTextures } fr
 import { createCones, createSignboards } from './props';
 import { buildRibbon, SURFACES } from './ribbon';
 import { buildTerrain } from './terrain';
+
+/**
+ * 11-05: the ribbon at the tier's resolution (level 0) or, while the camera is over the proving-ground annex (a world
+ * zone or its field), at the low tier's 1 m rows (level 1): from the annex the loop is distant, and the full high-tier
+ * ribbon (doubled by the AO prepass) took the ride-street view over the triangle budget. One ground sample per frame.
+ */
+class AnnexRibbonLOD extends LOD {
+  private readonly hit: GroundHit = { h: 0, base: 0, surface: 'asphalt', zone: '', s: NaN, l: NaN };
+  constructor(private readonly world: GroundWorld) {
+    super();
+  }
+  override update(camera: Camera): void {
+    if (this.levels.length < 2) return;
+    const zone = this.world.sample(camera.position.x, -camera.position.z, NaN, this.hit).zone;
+    const far = zone !== 'loop' && zone !== 'terrain';
+    this.levels[0]!.object.visible = !far;
+    this.levels[1]!.object.visible = far;
+  }
+}
 
 /**
  * Contributes the proving loop (02-04) and draws it (03-01): the road ribbon sampled from the simulation's own
@@ -50,6 +70,25 @@ export default {
       mesh.renderOrder = -1;
       return mesh;
     });
+    const ribbonLod = new AnnexRibbonLOD(world);
+    ribbonLod.name = 'track-ribbon-lod';
+    const nearRoad = new Group();
+    nearRoad.add(...road);
+    ribbonLod.addLevel(nearRoad, 0);
+    if (zones.length && quality.trackResolution < 1) {
+      const coarse = buildRibbon(track, 1, false, { world, zones });
+      const farRoad = new Group();
+      farRoad.visible = false;
+      coarse.chunks.forEach((g, i) => {
+        const mesh = new Mesh(g, surfaceMaterials);
+        mesh.name = `track-ribbon-far-${i}`;
+        mesh.receiveShadow = true;
+        mesh.renderOrder = -1;
+        mesh.matrixAutoUpdate = false;
+        farRoad.add(mesh);
+      });
+      ribbonLod.addLevel(farRoad, 1);
+    }
     performance.measure('track-ribbon', { start: r0, end: performance.now() });
     const t0 = performance.now();
     const ground = new Mesh(buildTerrain(track, world), materials.grass);
@@ -58,7 +97,7 @@ export default {
     ground.name = 'track-terrain';
     ground.receiveShadow = true;
     ground.renderOrder = 1;
-    root.add(...road, ground);
+    root.add(ribbonLod, ground);
     const cones = createCones(track);
     if (cones) root.add(cones);
     root.add(await createSignboards(track));

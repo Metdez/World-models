@@ -200,3 +200,24 @@ for (const [name, viewport, isMobile] of [
     });
   });
 }
+
+test.describe('11-05 annex budget (high tier)', () => {
+  test.use({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
+  test.setTimeout(400_000);
+
+  test('the stations stay within 1.5 M triangles and 250 draw calls (coarse loop ribbon from the annex)', async ({ page }) => {
+    const errors = captureConsole(page);
+    const out: string[] = [];
+    for (const query of ['t=14', 'drive=manual&spawn=ride-street', 'drive=manual&spawn=steering-pad', 'drive=manual&spawn=braking-platform']) {
+      await waitForReady(page, `/?e2e=1&quality=high&paused=1&${query}`);
+      await page.evaluate(() => globalThis.__app!.advance(0.5));
+      await raf(page);
+      const s = (await page.evaluate(() => globalThis.__app!.stats()))!;
+      out.push(`${query}: ${s.calls} calls / ${s.triangles} triangles`);
+      expect.soft(s.triangles, query).toBeLessThanOrEqual(1_500_000);
+      expect.soft(s.calls, query).toBeLessThanOrEqual(250);
+    }
+    console.log(`[11-05] high tier\n${out.join('\n')}`);
+    await expectHealthyBoot(page, errors);
+  });
+});

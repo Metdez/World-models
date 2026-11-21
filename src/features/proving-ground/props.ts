@@ -7,6 +7,7 @@ import {
   BoxGeometry,
   BufferAttribute,
   CanvasTexture,
+  Color,
   InstancedMesh,
   LatheGeometry,
   Matrix4,
@@ -14,6 +15,7 @@ import {
   MeshStandardMaterial,
   PlaneGeometry,
   Quaternion,
+  SphereGeometry,
   SRGBColorSpace,
   Vector2,
   Vector3,
@@ -150,4 +152,193 @@ export async function createSigns(world: GroundWorld, def: WorldDefinition): Pro
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   return mesh;
+}
+
+// ---------------------------------------------------------------- 11-05: facility props (restrained, procedural)
+
+type Rgb = readonly [number, number, number];
+const POLE_GREY = [0.55, 0.56, 0.57] as const;
+const LAMP = [0.85, 0.85, 0.8] as const;
+const HUT_WALL = [0.72, 0.71, 0.68] as const;
+const HUT_ROOF = [0.22, 0.23, 0.25] as const;
+const GLASS = [0.08, 0.1, 0.12] as const;
+const BOARD_WHITE = [0.86, 0.86, 0.84] as const;
+const BOARD_BLACK = [0.05, 0.05, 0.05] as const;
+const TREE = [
+  [0.055, 0.085, 0.045],
+  [0.075, 0.1, 0.055],
+  [0.045, 0.065, 0.04],
+] as const;
+
+
+const tinted = (g: BufferGeometry, rgb: Rgb): BufferGeometry => coloured(g, () => rgb);
+
+/** Light pole, origin on the ground: an 8 m mast, a short arm and a flat lamp head facing the paving (-Z side). */
+function poleGeometry(): BufferGeometry {
+  const mast = tinted(new BoxGeometry(0.16, 8, 0.16).translate(0, 4, 0), POLE_GREY);
+  const arm = tinted(new BoxGeometry(0.08, 0.08, 1.2).translate(0, 7.9, -0.6), POLE_GREY);
+  const head = tinted(new BoxGeometry(0.5, 0.14, 0.7).translate(0, 7.84, -1.25), LAMP);
+  return mergeGeometries([mast, arm, head])!;
+}
+
+/** A tree in the distance: a tall low-poly blob, white (coloured per instance; no trunk: it is seen through fog). */
+function treeGeometry(): BufferGeometry {
+  return tinted(new SphereGeometry(1, 7, 5).scale(1, 0.8, 1).translate(0, 0.55, 0), [1, 1, 1]);
+}
+
+export interface FacilityPlacement {
+  /** Paved edges meeting grass: world start/end points and the outward unit normal (x, y). */
+  readonly edges: readonly { readonly a: readonly [number, number]; readonly b: readonly [number, number]; readonly n: readonly [number, number]; readonly zone: string }[];
+  /** Braking-lane brake-bar positions: world point and the lane direction (unit), half width of the lined lanes. */
+  readonly brake: readonly { readonly x: number; readonly y: number; readonly dir: readonly [number, number]; readonly half: number }[];
+  /** Control hut position (world) and heading (rad, the door side faces +heading). */
+  readonly hut: { readonly x: number; readonly y: number; readonly heading: number } | null;
+  /** The field rectangle (treeline beyond it). */
+  readonly field: { readonly minX: number; readonly minY: number; readonly maxX: number; readonly maxY: number } | null;
+}
+
+/**
+ * Light poles along the large slabs' grass edges, countdown marker boards before each brake bar, a low control hut,
+ * and a sparse treeline round the field (so the grass does not run on for ever). Two instanced meshes and one merged
+ * mesh; vertex / instance colours only. Heights from the GroundWorld.
+ */
+export function createFacility(world: GroundWorld, place: FacilityPlacement): Mesh[] {
+  const hit: GroundHit = { h: 0, base: 0, surface: 'asphalt', zone: '', s: NaN, l: NaN };
+  const h = (x: number, y: number) => world.sample(x, y, NaN, hit).h;
+  const m = new Matrix4();
+  const q = new Quaternion();
+  const up = new Vector3(0, 1, 0);
+  const out: Mesh[] = [];
+  const material = new MeshStandardMaterial({ vertexColors: true, roughness: 0.75 });
+
+  // light poles: every 40 m along long grass edges of the big slabs, 4 m out (past the gravel), facing the paving
+  const poles: Matrix4[] = [];
+  for (const e of place.edges) {
+    const len = Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]);
+    if (len < 60) continue;
+    const n = Math.floor(len / 40);
+    for (let i = 0; i <= n; i++) {
+      const t = (len - n * 40) / 2 + i * 40;
+      const x = e.a[0] + ((e.b[0] - e.a[0]) * t) / len + e.n[0] * 4;
+      const y = e.a[1] + ((e.b[1] - e.a[1]) * t) / len + e.n[1] * 4;
+      // three -Z (the lamp side) toward the paving: world direction -n
+      q.setFromAxisAngle(up, Math.atan2(e.n[1], e.n[0]) + Math.PI / 2);
+      poles.push(new Matrix4().compose(new Vector3(x, h(x, y), -y), q.clone(), new Vector3(1, 1, 1)));
+    }
+  }
+  if (poles.length) {
+    const mesh = new InstancedMesh(poleGeometry(), material, poles.length);
+    poles.forEach((pm, i) => mesh.setMatrixAt(i, pm));
+    mesh.name = 'annex-poles';
+    mesh.castShadow = true;
+    mesh.computeBoundingSphere();
+    out.push(mesh);
+  }
+
+  // countdown boards (3, 2, 1 stripes) 25 / 50 / 75 m before each brake bar, both sides; and the hut: one merged mesh
+  const parts: BufferGeometry[] = [];
+  const at = (x: number, y: number, heading: number, g: BufferGeometry) => {
+    q.setFromAxisAngle(up, heading + Math.PI / 2);
+    m.compose(new Vector3(x, h(x, y), -y), q, new Vector3(1, 1, 1));
+    parts.push(g.applyMatrix4(m));
+  };
+  for (const b of place.brake) {
+    const [dx, dy] = b.dir;
+    for (const [k, d] of [
+      [1, 25],
+      [2, 50],
+      [3, 75],
+    ] as const) {
+      for (const side of [1, -1]) {
+        const x = b.x - dx * d + -dy * side * (b.half + 3);
+        const y = b.y - dy * d + dx * side * (b.half + 3);
+        const board: BufferGeometry[] = [
+          tinted(new BoxGeometry(0.08, 1.6, 0.08).translate(0, 0.8, -0.05), POLE_GREY),
+          tinted(new BoxGeometry(0.7, 1.1, 0.04).translate(0, 1.45, 0), BOARD_WHITE),
+        ];
+        for (let s = 0; s < k; s++) board.push(tinted(new BoxGeometry(0.7, 0.14, 0.01).translate(0, 1.2 + s * 0.25, 0.025), BOARD_BLACK));
+        // the face (+Z) toward the approaching car: world direction -dir
+        at(x, y, Math.atan2(-dy, -dx), mergeGeometries(board)!);
+      }
+    }
+  }
+  if (place.hut) {
+    const { x, y, heading } = place.hut;
+    const hut = mergeGeometries([
+      tinted(new BoxGeometry(9, 3, 4.5).translate(0, 1.5, 0), HUT_WALL),
+      tinted(new BoxGeometry(7.4, 0.9, 0.02).translate(0, 1.9, 2.26), GLASS),
+      tinted(new BoxGeometry(10, 0.25, 5.6).translate(0, 3.12, 0.3), HUT_ROOF),
+      tinted(new BoxGeometry(0.12, 4, 0.12).translate(3.8, 5.2, -1.5), POLE_GREY),
+    ])!;
+    at(x, y, heading, hut);
+  }
+  if (parts.length) {
+    const mesh = new Mesh(mergeGeometries(parts)!, material);
+    mesh.name = 'annex-facility';
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    out.push(mesh);
+  }
+
+  // treeline: two staggered rows of clumps 110-165 m beyond the field, only on open grass away from the loop corridor
+  const f = place.field;
+  if (f) {
+    // one instanced mesh per side of the field (frustum culling works per side)
+    const sides: [colour: number, matrix: Matrix4][][] = [[], [], [], []];
+    let seed = 0x9e3779b9;
+    const rnd = () => {
+      seed = Math.imul(seed ^ (seed >>> 15), 0x2c1b3c6d) >>> 0;
+      seed = (seed + 0x6d2b79f5) >>> 0;
+      return seed / 4294967296;
+    };
+    for (const [margin, step] of [
+      [110, 11],
+      [165, 15],
+    ] as const) {
+      const x0 = f.minX - margin;
+      const x1 = f.maxX + margin;
+      const y0 = f.minY - margin;
+      const y1 = f.maxY + margin;
+      const ring: [number, number, number, number][] = [
+        [x0, y1, x1, y1],
+        [x1, y1, x1, y0],
+        [x1, y0, x0, y0],
+        [x0, y0, x0, y1],
+      ];
+      for (const [side, [ax, ay, bx, by]] of ring.entries()) {
+        const len = Math.hypot(bx - ax, by - ay);
+        for (let t = 0; t < len; t += step) {
+          const j = (rnd() - 0.5) * 14;
+          const x = ax + ((bx - ax) * t) / len + (by === ay ? 0 : j);
+          const y = ay + ((by - ay) * t) / len + (by === ay ? j : 0);
+          world.sample(x, y, NaN, hit);
+          if (hit.surface !== 'grass' || hit.s === hit.s) continue; // paving or the loop's corridor
+          // a clump: two or three overlapping crowns of different heights (a hedgerow silhouette, not a row of balls)
+          const crowns = 2;
+          for (let c = 0; c < crowns; c++) {
+            const s = 4 + rnd() * 3.5;
+            const cx = x + (rnd() - 0.5) * 8;
+            const cy = y + (rnd() - 0.5) * 8;
+            q.setFromAxisAngle(up, rnd() * Math.PI * 2);
+            sides[side]!.push([Math.floor(rnd() * TREE.length), new Matrix4().compose(new Vector3(cx, hit.h - 0.5, -cy), q.clone(), new Vector3(s, s * (1.1 + rnd() * 0.9), s))]);
+          }
+        }
+      }
+    }
+    // a blob coloured per instance (three's instanceColor x the white vertex colour)
+    const blob = treeGeometry();
+    const leaves = new MeshStandardMaterial({ vertexColors: true, roughness: 0.95 });
+    sides.forEach((all, i) => {
+      if (all.length === 0) return;
+      const mesh = new InstancedMesh(blob, leaves, all.length);
+      all.forEach(([k, mm], j) => {
+        mesh.setMatrixAt(j, mm);
+        mesh.setColorAt(j, new Color(...TREE[k]!));
+      });
+      mesh.name = `annex-treeline-${i}`;
+      mesh.computeBoundingSphere();
+      out.push(mesh);
+    });
+  }
+  return out;
 }

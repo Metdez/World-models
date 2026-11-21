@@ -22,9 +22,9 @@ import { simToThree } from '../../contracts/units';
 import type { GroundHit, GroundWorld } from '../../contracts/world';
 import { provingGround } from '../../sim-core/content/proving-ground';
 import { compileZones, type CompiledZone } from '../../sim-core/world/zones';
-import { annexMarkings, buildMarkings } from './markings';
+import { annexMarkings, buildMarkings, grassEdges } from './markings';
 import { createAnnexMaterials, setAnisotropy, TEXTURE_ASSETS, type AnnexTextures } from './materials';
-import { createCones, createSigns } from './props';
+import { createCones, createFacility, createSigns, type FacilityPlacement } from './props';
 import { ANNEX_MATERIALS, buildZoneMesh } from './surface';
 
 /** Footprint area above which a zone is drawn as its own mesh (frustum culling, level of detail), m^2. */
@@ -123,6 +123,44 @@ function installViewHook(render: RenderService, world: GroundWorld, frame: () =>
   };
 }
 
+/** Where the 11-05 facility props go: the big slabs' grass edges, the braking lanes' brake bars, the hut between the
+ *  dynamics pad and the braking platform, the field rectangle. */
+export function facilityPlacement(world: GroundWorld, zones: readonly CompiledZone[], field: FacilityPlacement['field']): FacilityPlacement {
+  const p = { x: 0, y: 0 };
+  const q = { x: 0, y: 0 };
+  const edges: FacilityPlacement['edges'][number][] = [];
+  const brake: FacilityPlacement['brake'][number][] = [];
+  for (const z of zones) {
+    if (z.def.shape.kind !== 'rect') continue;
+    if (z.length * 2 * z.halfWidth > 8000) {
+      for (const e of grassEdges(z, world)) {
+        const sign = e.at > 0 ? 1 : -1;
+        const pt = (t: number, off: number): [number, number] => {
+          if (e.side === 'w') z.toWorld(t, e.at + sign * off, p);
+          else z.toWorld(e.at + sign * off, t, p);
+          return [p.x, p.y];
+        };
+        const a = pt(e.from, 0);
+        const b = pt(e.to, 0);
+        const o = pt((e.from + e.to) / 2, 1);
+        const m = pt((e.from + e.to) / 2, 0);
+        edges.push({ a, b, n: [o[0] - m[0], o[1] - m[1]], zone: z.def.id });
+      }
+    }
+    const patches = z.def.patches ?? [];
+    if (patches.length && !z.def.features?.length) {
+      const u0 = Math.min(...patches.map((pp) => pp.u[0]));
+      const lane = Math.max(...patches.map((pp) => pp.w[1] - pp.w[0]));
+      const w0 = Math.max(-z.halfWidth + 0.5, Math.min(...patches.map((pp) => pp.w[0])) - lane);
+      const w1 = Math.min(z.halfWidth - 0.5, Math.max(...patches.map((pp) => pp.w[1])) + lane);
+      z.toWorld(u0, (w0 + w1) / 2, p);
+      z.toWorld(u0 + 1, (w0 + w1) / 2, q);
+      brake.push({ x: p.x, y: p.y, dir: [q.x - p.x, q.y - p.y], half: (w1 - w0) / 2 });
+    }
+  }
+  return { edges, brake, hut: { x: 104, y: 190, heading: Math.PI }, field };
+}
+
 /**
  * Contributes the proving-ground world (10-02 content) and draws it (ARCHITECTURE-M2 §8.4): zone meshes sampled from
  * the simulation's own GroundWorld, wet patches, painted markings, cones and station signs. Static: no per-frame work.
@@ -175,12 +213,13 @@ export default {
       root.add(lod);
     });
     const paint = new MeshStandardMaterial({ vertexColors: true, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
-    const markings = new Mesh(buildMarkings(world, annexMarkings(def, zones)), paint);
+    const markings = new Mesh(buildMarkings(world, annexMarkings(def, zones, world)), paint);
     markings.name = 'annex-markings';
     markings.receiveShadow = true;
     root.add(markings);
     const cones = createCones(world, def);
     if (cones) root.add(cones);
+    root.add(...createFacility(world, facilityPlacement(world, zones, def.field ?? null)));
     performance.measure('proving-ground-meshes', { start: t0, end: performance.now() });
     const signs = await createSigns(world, def);
     if (signs) root.add(signs);
