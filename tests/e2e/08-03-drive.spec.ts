@@ -19,6 +19,8 @@ const dYaw = (a: number, b: number) => Math.atan2(Math.sin(b - a), Math.cos(b - 
 
 test.describe('08-03 take the wheel', () => {
   test.use({ viewport: { width: 1280, height: 720 } });
+  // SwiftShader renders a few frames per second and the plant runs 240 Hz in the page: generous timeouts.
+  test.setTimeout(240_000);
 
   test('the pill in Auto and the motorcycle says Auto only', async ({ page }) => {
     const errors = captureConsole(page);
@@ -30,7 +32,7 @@ test.describe('08-03 take the wheel', () => {
     await expect(toggle).toHaveAccessibleName(/^Driving mode: Auto/);
     // the takeover prompt appears after 4 s of Auto (only when this vehicle can be driven)
     if (await page.evaluate(() => globalThis.__app!.drive().available)) {
-      await expect(page.locator('.sl-drive-hint')).toHaveAttribute('data-kind', 'prompt', { timeout: 8000 });
+      await expect(page.locator('.sl-drive-hint')).toHaveAttribute('data-kind', 'prompt', { timeout: 60_000 });
       await page.waitForTimeout(600);
     }
     await page.screenshot({ path: join(SHOTS, '08-03-auto-pill.png') });
@@ -82,7 +84,7 @@ test.describe('08-03 take the wheel', () => {
     // stop, then keep holding ↓ at standstill: reverse
     await page.keyboard.down('ArrowDown');
     await page.waitForTimeout(100);
-    for (let i = 0; i < 30 && (await drive(page)).speed > 0.3; i++) await advance(page, 0.5);
+    for (let i = 0; i < 12 && (await drive(page)).speed > 0.3; i++) await advance(page, 1.5);
     await advance(page, 2);
     expect((await drive(page)).u).toBeLessThan(0);
     await page.keyboard.up('ArrowDown');
