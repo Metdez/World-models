@@ -129,6 +129,8 @@ const PIO2_3 = 2.02226624871116645580e-21;
 const PIO2_3T = 8.47842766036889956997e-32;
 const MEDIUM = 0x413921fb;
 const Y = new Float64Array(2);
+/** Scratch argument/result of expm1Scratch. */
+const EX = new Float64Array(1);
 function rempio2(x: number, ix: number): number {
   if (ix >= MEDIUM) throw new Error('det: trigonometric argument beyond 2^20 * pi/2');
   // fdlibm rounds x * 2/pi to nearest (ties to even via the 0x1.8p52 trick); a tie is impossible for finite x here.
@@ -422,16 +424,34 @@ export function dlog(xIn: number): number {
 const HALF_LN2 = 0.34657359027997264;
 const LN2x56 = 3.88162421113569373274e1;
 const LN2_HALFX3 = 1.03972077083991796413;
-function expm1(xIn: number): number {
+/** expm1 of EX[0] into EX[0] (fdlibm s_expm1.c). Through a scratch slot: it is too large for V8 to inline, and a double
+ * crossing a non-inlined call is boxed (an allocation per dtanh call otherwise). */
+function expm1Scratch(): void {
+  const xIn = EX[0]!;
   let x = xIn;
-  if (x === Infinity || x !== x) return x;
-  if (x === -Infinity) return -1;
-  if (x === 0) return x;
+  if (x === Infinity || x !== x) {
+    EX[0] = x;
+    return;
+  }
+  if (x === -Infinity) {
+    EX[0] = -1;
+    return;
+  }
+  if (x === 0) {
+    EX[0] = x;
+    return;
+  }
   const sign = x < 0;
   let y = sign ? -x : x;
   if (y >= LN2x56) {
-    if (sign) return -1;
-    if (y >= EXP_OVERFLOW) return Infinity;
+    if (sign) {
+      EX[0] = -1;
+      return;
+    }
+    if (y >= EXP_OVERFLOW) {
+      EX[0] = Infinity;
+      return;
+    }
   }
   const hx = highWord(y);
   let k: number;
@@ -456,23 +476,35 @@ function expm1(xIn: number): number {
     }
     x = hi - lo;
     c = hi - x - lo;
-  } else if (hx < 1016070144) return x;
-  else k = 0;
+  } else if (hx < 1016070144) {
+    EX[0] = x;
+    return;
+  } else k = 0;
   const halfX = 0.5 * x;
   const z = x * halfX;
   const r1 = 1 + z * (-0.03333333333333313 + z * (0.0015873015872548146 + z * (-0.0000793650757867488 + z * (0.000004008217827329362 + z * -2.0109921818362437e-7))));
   let t = 3 - r1 * halfX;
   let e = z * ((r1 - t) / (6 - x * t));
-  if (k === 0) return x - (x * e - z);
+  if (k === 0) {
+    EX[0] = x - (x * e - z);
+    return;
+  }
   const twopk = fromWords((1023 + k) << 20, 0);
   e = x * (e - c) - c;
   e -= z;
-  if (k === -1) return 0.5 * (x - e) - 0.5;
-  if (k === 1) return x < -0.25 ? -2 * (e - (x + 0.5)) : 1 + 2 * (x - e);
+  if (k === -1) {
+    EX[0] = 0.5 * (x - e) - 0.5;
+    return;
+  }
+  if (k === 1) {
+    EX[0] = x < -0.25 ? -2 * (e - (x + 0.5)) : 1 + 2 * (x - e);
+    return;
+  }
   if (k <= -2 || k > 56) {
     y = 1 - (e - x);
     y = k === 1024 ? y * 2 * fromWords(0x7fe00000, 0) : y * twopk;
-    return y - 1;
+    EX[0] = y - 1;
+    return;
   }
   if (k < 20) {
     t = fromWords(1072693248 - (0x200000 >> k), 0);
@@ -482,24 +514,28 @@ function expm1(xIn: number): number {
     y = x - (e + t);
     y += 1;
   }
-  return y * twopk;
+  EX[0] = y * twopk;
 }
 
 export function dtanh(x: number): number {
   const jx = highWord(x);
   const ix = jx & 0x7fffffff;
   if (ix >= 0x7ff00000) return jx >= 0 ? 1 / x + 1 : 1 / x - 1;
-  let z: number;
+  let z = 1; // |x| >= 22
   if (ix < 0x40360000) {
     if (ix < 0x3c800000) return x * (1 + x);
     if (ix >= 0x3ff00000) {
-      const t = expm1(2 * Math.abs(x));
+      EX[0] = 2 * Math.abs(x);
+      expm1Scratch();
+      const t = EX[0]!;
       z = 1 - 2 / (t + 2);
     } else {
-      const t = expm1(-2 * Math.abs(x));
+      EX[0] = -2 * Math.abs(x);
+      expm1Scratch();
+      const t = EX[0]!;
       z = -t / (t + 2);
     }
-  } else z = 1;
+  }
   return jx >= 0 ? z : -z;
 }
 

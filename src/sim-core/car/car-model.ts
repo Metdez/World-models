@@ -17,6 +17,7 @@ import { G, type AxleId, type XYZ } from '../../contracts/units';
 import type { CarAxleSpec, CarDefinition, VehicleDefinition } from '../../contracts/vehicle';
 import { createCornerSolution, solveAxleKinematics, type CornerSolution, type KinematicsTable } from '../kinematics/table';
 import { clamp, interp1, wrap, wrapAngle } from '../math/interp';
+import { datan, dcos, dsin, dtan } from '../math/det';
 import * as q from '../math/quat';
 import {
   arbRateFromRollStiffness,
@@ -260,14 +261,14 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
   function roadInputs(path: PathState): void {
     track.sample(path.s, ts);
     const dpsi = wrapAngle(path.heading - ts.heading);
-    const c = Math.cos(dpsi);
-    const sn = Math.sin(dpsi);
-    const tb = Math.tan(path.bank);
+    const c = dcos(dpsi);
+    const sn = dsin(dpsi);
+    const tb = dtan(path.bank);
     for (let i = 0; i < 4; i++) {
       const si = path.s + cx[i]! * c - cy[i]! * sn;
       const li = path.l + cx[i]! * sn + cy[i]! * c;
       const h = (track.roadHeight(si - ENVELOPE, li) + track.roadHeight(si, li) + track.roadHeight(si + ENVELOPE, li)) / 3;
-      input.road[i] = h - swellA * Math.sin(swellK * si) - li * tb - refZ - refSlope * cx[i]!;
+      input.road[i] = h - swellA * dsin(swellK * si) - li * tb - refZ - refSlope * cx[i]!;
       surf[i] = SURFACE_KINDS.indexOf(loopSurface(track, si, li));
     }
   }
@@ -276,8 +277,8 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
   function vcPlane(s: number): void {
     const xF = (cx[0]! + cx[1]!) / 2;
     const xR = (cx[2]! + cx[3]!) / 2;
-    const vcF = track.sample(s + xF, ts).z - swellA * Math.sin(swellK * (s + xF));
-    const vcR = track.sample(s + xR, ts).z - swellA * Math.sin(swellK * (s + xR));
+    const vcF = track.sample(s + xF, ts).z - swellA * dsin(swellK * (s + xF));
+    const vcR = track.sample(s + xR, ts).z - swellA * dsin(swellK * (s + xR));
     vc.slope = (vcF - vcR) / (xF - xR);
     vc.cg = vcR - vc.slope * xR;
   }
@@ -286,7 +287,7 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
   function bodyInputs(path: PathState): void {
     const drag = (0.5 * RHO_AIR * vehicle.dragArea * path.v * path.v) / vehicle.mass;
     input.ax = path.ax + (G * path.grade) / Math.sqrt(1 + path.grade * path.grade) + drag;
-    input.ay = path.ay * Math.cos(path.bank) + G * Math.sin(path.bank);
+    input.ay = path.ay * dcos(path.bank) + G * dsin(path.bank);
     // Front anti-dive under braking; rear anti-squat when driving. shortcut: no rear anti-lift under braking (the
     // table only reports the rear drive path), so braking pitch is slightly overstated for all types alike.
     input.antiPitch.front = input.ax < 0 ? tables[0].antiPitch : 0;
@@ -391,7 +392,7 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
   }
 
   function steer(path: PathState): void {
-    scalar[0] = tables[0].rackForSteer(Math.atan(L * path.curvature));
+    scalar[0] = tables[0].rackForSteer(datan(L * path.curvature));
   }
 
   /**
@@ -421,12 +422,12 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
   const ang = new Float64Array(3);
   /** q = Rz(ang[2]) * Ry(ang[1]) * Rx(ang[0]) (quat.fromRollPitchYaw, angles passed in a typed array). */
   function rpy(out: q.Quat): void {
-    const cr = Math.cos(ang[0]! / 2);
-    const sr = Math.sin(ang[0]! / 2);
-    const cp = Math.cos(ang[1]! / 2);
-    const sp = Math.sin(ang[1]! / 2);
-    const cy = Math.cos(ang[2]! / 2);
-    const sy = Math.sin(ang[2]! / 2);
+    const cr = dcos(ang[0]! / 2);
+    const sr = dsin(ang[0]! / 2);
+    const cp = dcos(ang[1]! / 2);
+    const sp = dsin(ang[1]! / 2);
+    const cy = dcos(ang[2]! / 2);
+    const sy = dsin(ang[2]! / 2);
     out[0] = sr * cp * cy - cr * sp * sy;
     out[1] = cr * sp * cy + sr * cp * sy;
     out[2] = cr * cp * sy - sr * sp * cy;
@@ -656,7 +657,7 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
       vcPlane(path.s);
       const vcCg = vc.cg;
       const pitchPlane = -vc.slope;
-      const vc0 = path.z - path.l * Math.tan(path.bank) - swellA * Math.sin(swellK * path.s);
+      const vc0 = path.z - path.l * dtan(path.bank) - swellA * dsin(swellK * path.s);
       const heave = smp[HEAVE]! + refZ - vcCg;
       const pitch = smp[PITCH]! - refSlope - pitchPlane;
       const roll = smp[ROLL]!;
@@ -667,7 +668,7 @@ export function createCarModel(vehicleDef: VehicleDefinition, suspensionDef: Sus
 
       // Body pose: path frame (heading, swell grade, bank) * (vertical-curve pitch + amplified relative pitch, roll).
       ang[0] = path.bank;
-      ang[1] = -Math.atan(swellA * swellK * Math.cos(swellK * path.s));
+      ang[1] = -datan(swellA * swellK * dcos(swellK * path.s));
       ang[2] = path.heading;
       rpy(qa);
       ang[0] = roll * amp;

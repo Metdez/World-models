@@ -20,6 +20,7 @@
  */
 import { G } from '../../contracts/units';
 import type { KinematicsCurves } from '../../contracts/suspension';
+import { dtanh } from '../math/det';
 import { interp1 } from '../math/interp';
 import { solveInPlace } from '../math/linsolve';
 
@@ -257,7 +258,7 @@ export function createRideModel(params: RideParams): RideModel {
         cImplicit += dt * rate0 * (a < STOP_CAP - 1 ? 1 + 2 * a : STOP_CAP);
       }
       if (k.friction > 0) {
-        const th = Math.tanh(rate / FRICTION_V0);
+        const th = dtanh(rate / FRICTION_V0);
         const slope = (k.friction * (1 - th * th)) / FRICTION_V0;
         // Linearised about the current rate: f(r') ≈ f(r) + slope*(r' - r).
         suspension += k.friction * th - slope * rate;
