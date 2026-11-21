@@ -122,7 +122,8 @@ button {
 [data-status='denied'] .rm-dot,
 [data-status='gone'] .rm-dot,
 [data-status='full'] .rm-dot,
-[data-status='outdated'] .rm-dot {
+[data-status='outdated'] .rm-dot,
+[data-status='replaced'] .rm-dot {
   background: var(--warn);
 }
 

@@ -203,3 +203,8 @@
     grid-template-columns: 88px 1fr;
   }
 }
+
+/* while a phone drives, the drive feature's keyboard hint row (WASD, Enter) is not what anyone in the room is using */
+#overlay:has(> .sl-phone-drive[data-state='driving']:not([hidden])) .sl-drive-hint[data-kind='controls'] {
+  visibility: hidden;
+}

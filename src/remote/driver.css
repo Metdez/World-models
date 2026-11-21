@@ -13,8 +13,8 @@ html:has(body[data-role='driver']) {
 body[data-role='driver'] #remote {
   max-width: none;
   height: 100dvh;
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   padding: 0 max(var(--sp-3), env(safe-area-inset-right)) max(var(--sp-3), env(safe-area-inset-bottom)) max(var(--sp-3), env(safe-area-inset-left));
 }
 
@@ -66,6 +66,7 @@ body[data-role='driver'] .rm-room {
 /* ---------------------------------------------------------------- the controls */
 .rm-drive {
   position: relative;
+  flex: 1;
   min-height: 0;
   display: grid;
   gap: var(--sp-3);
@@ -134,15 +135,19 @@ body[data-role='driver'] .rm-room {
 }
 
 .rm-drive-knob {
+  position: absolute;
+  top: 50%;
+  left: calc(50% + var(--s, 0) * (50% - 38px));
+  translate: -50% -50%;
   width: 68px;
   height: 68px;
   border-radius: var(--radius-pill);
-  background: var(--hair-strong);
+  background: linear-gradient(var(--hair-strong), var(--hair-strong)), var(--bg-1);
   border: 1px solid var(--hair-strong);
   box-shadow:
     var(--shadow-panel),
     inset 0 0 0 9px var(--bg-1);
-  transition: transform var(--dur-thumb) var(--ease);
+  transition: left var(--dur-thumb) var(--ease);
 }
 
 .rm-drive-steer.is-held .rm-drive-knob {

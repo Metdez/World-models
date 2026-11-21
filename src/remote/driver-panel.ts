@@ -64,7 +64,7 @@ export function createDriverPanel(code: string, link: () => RemoteLink | null): 
   const modeText = h('p', { class: 'rm-drive-mode', 'aria-live': 'polite' }, 'Connecting to the big screen');
   const tiltBtn = h('button', { type: 'button', class: 'rm-button rm-drive-btn', 'aria-pressed': 'false' }, 'Tilt to steer');
   const centreBtn = h('button', { type: 'button', class: 'rm-button rm-drive-btn', hidden: true }, 'Re-centre');
-  const handBtn = h('button', { type: 'button', class: 'rm-button rm-drive-btn' }, 'Hand back');
+  const handBtn = h('button', { type: 'button', class: 'rm-button rm-drive-btn', hidden: true }, 'Hand back');
   const tiltNote = h('p', { class: 'rm-drive-tiltnote', hidden: true });
   const centre = h(
     'div',
@@ -338,7 +338,7 @@ export function createDriverPanel(code: string, link: () => RemoteLink | null): 
     const s = steerRight();
     if (s === painted) return;
     painted = s;
-    knob.style.transform = `translateX(${(s * 0.85 * 50).toFixed(1)}%)`;
+    knob.parentElement!.style.setProperty('--s', s.toFixed(3));
     wheel.style.transform = `rotate(${(s * 90).toFixed(1)}deg)`;
     steerEl.setAttribute('aria-valuenow', s.toFixed(2));
   }

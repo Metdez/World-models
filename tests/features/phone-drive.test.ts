@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { inFrame, learnSign, OneEuro, pedalStep, rawAngle, sliderSteer, steerFromAngle, TILT, wrap180 } from '../../src/remote/tilt';
 import { createPhoneLink, deliberate, failsafeGain, LINK, linkLevel, phaseOf, seqNewer, telFrame, type LinkOutput } from '../../src/features/phone-drive/link';
 
 const out = (): LinkOutput => ({ steer: 0, throttle: 0, brake: 0, handbrake: 0, wanted: false });
@@ -151,5 +152,112 @@ describe('arbiter input and tel', () => {
     expect(telFrame(27.8, 4, 'manual', 3)).toEqual({ t: 'tel', v: 100, g: 4, m: 1, k: 3 });
     expect(telFrame(400, 20, 'returning', 7)).toEqual({ t: 'tel', v: 999, g: 12, m: 2, k: 3 });
     expect(telFrame(Number.NaN, -3, 'auto', 0)).toEqual({ t: 'tel', v: 0, g: -1, m: 0, k: 0 });
+  });
+});
+
+// ---------------------------------------------------------------- phone side (src/remote/tilt.ts): synthetic gravity
+
+const G = 9.81;
+/**
+ * Gravity as a device reports it when its screen plane is upright and the device is rolled by `roll` degrees about
+ * its screen normal, starting from a base hold (`base` = where gravity points at rest: 0 portrait, ±90 landscape).
+ * `flipX` / `flipAll` model engines that report the axes with other signs (MDN: Chrome vs Firefox; iOS vs Android).
+ */
+function gravity(base: number, roll: number, opts: { flipX?: boolean; flipAll?: boolean } = {}): [number, number] {
+  const a = ((base - roll) * Math.PI) / 180; // rolling the device clockwise turns gravity counter-clockwise in its frame
+  let x = G * Math.sin(a);
+  let y = G * Math.cos(a);
+  if (opts.flipX) x = -x;
+  if (opts.flipAll) [x, y] = [-x, -y];
+  return [x, y];
+}
+
+/** Calibrate (Centre at rest, Done after turning right by 20°) and return the steer (+ = right) for a roll. */
+function calibratedSteer(base: number, roll: number, opts: { flipX?: boolean; flipAll?: boolean } = {}): number {
+  const neutral = rawAngle(...gravity(base, 0, opts))!;
+  const dir = learnSign(neutral, rawAngle(...gravity(base, 20, opts))!);
+  expect(dir).not.toBe(0);
+  return steerFromAngle(dir * wrap180(rawAngle(...gravity(base, roll, opts))! - neutral));
+}
+
+describe('tilt maths (synthetic gravity vectors)', () => {
+  it('wraps angles to (-180, 180]', () => {
+    expect([0, 180, -180, 190, -190, 540, 359].map(wrap180)).toEqual([0, 180, 180, -170, 170, 180, -1]);
+  });
+
+  it('reads the wheel angle in portrait, both landscapes and upside down; holds when the phone lies flat', () => {
+    expect(rawAngle(0, G)).toBeCloseTo(0, 9);
+    expect(rawAngle(G, 0)).toBeCloseTo(90, 9);
+    expect(rawAngle(-G, 0)).toBeCloseTo(-90, 9);
+    expect(Math.abs(rawAngle(0, -G)!)).toBeCloseTo(180, 9);
+    expect(rawAngle(1, 2)).toBeNull(); // gravity mostly along z: flat on a table
+  });
+
+  it('after Centre + Turn right, turning right steers right and left steers left in every hold and sign convention', () => {
+    for (const base of [0, 90, -90, 180])
+      for (const opts of [{}, { flipX: true }, { flipAll: true }]) {
+        const right = calibratedSteer(base, 20, opts);
+        const left = calibratedSteer(base, -20, opts);
+        expect(right, `base ${base} ${JSON.stringify(opts)}`).toBeGreaterThan(0.3);
+        expect(left).toBeCloseTo(-right, 9);
+        expect(calibratedSteer(base, 2, opts)).toBe(0); // inside the dead zone
+        expect(calibratedSteer(base, 50, opts)).toBe(1); // past full lock
+      }
+  });
+
+  it('neutral capture makes a tilted resting hold read as straight ahead', () => {
+    const base = 90;
+    const tiltedRest = 12; // the visitor holds the "wheel" a bit crooked
+    const neutral = rawAngle(...gravity(base, tiltedRest))!;
+    expect(wrap180(rawAngle(...gravity(base, tiltedRest))! - neutral)).toBeCloseTo(0, 9);
+    const dir = learnSign(neutral, rawAngle(...gravity(base, tiltedRest + 20))!);
+    expect(steerFromAngle(dir * wrap180(rawAngle(...gravity(base, tiltedRest + 10))! - neutral))).toBeGreaterThan(0);
+  });
+
+  it('does not learn a sign from a turn that is too small; the curve has the dead zone, lock and exponent', () => {
+    expect(learnSign(90, 95)).toBe(0);
+    expect(learnSign(90, 110)).toBe(1);
+    expect(learnSign(-170, 175)).toBe(-1); // across the ±180 seam
+    expect(steerFromAngle(TILT.deadZone)).toBe(0);
+    expect(steerFromAngle(TILT.lock)).toBe(1);
+    const mid = (TILT.deadZone + TILT.lock) / 2;
+    expect(steerFromAngle(mid)).toBeCloseTo(0.5 ** TILT.exponent, 9);
+    expect(steerFromAngle(-mid)).toBeCloseTo(-(0.5 ** TILT.exponent), 9);
+  });
+});
+
+describe('One-Euro filter', () => {
+  it('smooths tremor at rest and follows a deliberate turn with little lag', () => {
+    const f = new OneEuro();
+    let maxRest = 0;
+    for (let i = 0; i < 120; i++) maxRest = Math.max(maxRest, Math.abs(f.filter(Math.sin(i * 1.9) * 1.5, i * 16))); // ±1.5° at ~19 Hz
+    expect(maxRest).toBeLessThan(0.75);
+    // a 30° turn over 200 ms: within a few degrees 100 ms after it ends
+    let y = 0;
+    for (let t = 0; t <= 300; t += 16) y = f.filter(Math.min(30, (t / 200) * 30), 2000 + t);
+    expect(y).toBeGreaterThan(26);
+    f.reset();
+    expect(f.filter(10, 0)).toBe(10);
+  });
+});
+
+describe('touch controls and the input frame', () => {
+  it('slider: relative drag with a dead band, full lock before the track end; pedals bite then ramp', () => {
+    expect(sliderSteer(3, 200)).toBe(0);
+    expect(sliderSteer(100, 200)).toBeGreaterThan(0.5);
+    expect(sliderSteer(-400, 200)).toBe(-1);
+    expect(pedalStep(0, true, 0)).toBe(0.25);
+    expect(pedalStep(0.25, true, 0.1)).toBeCloseTo(0.85, 9);
+    expect(pedalStep(0.9, true, 1)).toBe(1);
+    expect(pedalStep(1, false, 0.05)).toBeCloseTo(0.4, 9);
+    expect(pedalStep(0.1, false, 0.05)).toBe(0);
+  });
+
+  it('packs integer frames in the contract ranges, steer + = LEFT on the wire, small enough for the room', () => {
+    expect(inFrame(0xffffffff + 1, 0.5, 1, 0, 5)).toEqual({ t: 'in', n: 0, s: -500, th: 1000, br: 0, f: 5 });
+    expect(inFrame(7, -2, 2, -1, 15)).toEqual({ t: 'in', n: 7, s: 1000, th: 1000, br: 0, f: 7 });
+    expect(inFrame(1, Number.NaN, 0, 0, 1).s).toBe(0);
+    expect(Object.is(inFrame(1, 0, 0, 0, 1).s, -0)).toBe(false);
+    expect(JSON.stringify(inFrame(0xfffffffe, -1, 1, 1, 7)).length).toBeLessThan(128);
   });
 });
