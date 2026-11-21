@@ -18,6 +18,12 @@
  *   Permission to use, copy, modify, and distribute this software is freely granted, provided that this notice
  *   is preserved.
  *
+ * - the pow core: stdlib-js `@stdlib/math-base-special-pow` 0.3.1 (Apache-2.0; fdlibm e_pow.c).
+ * Modified (Apache-2.0 §4(b)): translated from JavaScript into TypeScript and merged into this module; kernelSin/
+ * kernelCos use the fdlibm 5.3 evaluation order; the pow core omits stdlib's y = 3/4 shortcuts; expm1 runs through a
+ * scratch slot; dsincos (13-01) returns sin and cos together. Licence, NOTICE and attributions: CREDITS.md and the
+ * in-app credits panel.
+ *
  * dpow (x > 0): integer |y| <= 16 by repeated squaring, otherwise the fdlibm pow core.
  * Arguments of dsin/dcos/dtan must satisfy |x| < 2^20 * pi/2 (the medium reduction; the plant never passes more).
  */

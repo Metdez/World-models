@@ -4,7 +4,7 @@
  */
 import type { FeatureModule } from '../../contracts/app';
 import { h, mount } from '../../ui/dom';
-import { CODE_CREDITS, LICENSE_TEXTS } from './code-credits';
+import { CODE_CREDITS, LICENSE_NOTICES } from './code-credits';
 import './credits.css';
 import { attributionText, licenseName } from './text';
 
@@ -63,10 +63,7 @@ export default {
         h('h3', { class: 'sl-credits-h sl-label' }, 'Code, data and fonts'),
         h('ul', { class: 'sl-credits-list' }, ...code),
         h('h3', { class: 'sl-credits-h sl-label' }, 'Licence notices'),
-        h('p', { class: 'sl-credits-text' }, 'Project Chrono (BSD-3-Clause):'),
-        h('pre', { class: 'sl-credits-notice' }, LICENSE_TEXTS['BSD-3-Clause']!),
-        h('p', { class: 'sl-credits-text' }, 'MIT licence, for every entry marked MIT, with its copyright line above:'),
-        h('pre', { class: 'sl-credits-notice' }, LICENSE_TEXTS.MIT!),
+        ...LICENSE_NOTICES.flatMap((n) => [h('p', { class: 'sl-credits-text' }, n.title), h('pre', { class: 'sl-credits-notice' }, n.text)]),
         h('p', { class: 'sl-credits-text' }, ...linkify('Geist fonts: SIL Open Font License 1.1 (https://openfontlicense.org). postprocessing: zlib licence. n8ao: ISC licence.')),
       );
     };

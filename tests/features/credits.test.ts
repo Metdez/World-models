@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { Attribution } from '../../src/contracts/app';
-import { CODE_CREDITS, LICENSE_TEXTS } from '../../src/features/credits/code-credits';
+import { APACHE_2_0, CODE_CREDITS, LICENSE_NOTICES, LICENSE_TEXTS, STDLIB_ATTRIBUTION, STDLIB_NOTICE } from '../../src/features/credits/code-credits';
 import { attributionText } from '../../src/features/credits/text';
 
 const attributions = JSON.parse(readFileSync('assets-src/ATTRIBUTION.json', 'utf8')) as Attribution[];
@@ -43,4 +43,31 @@ describe('CREDITS.md mirrors the panel', () => {
     expect(md).toContain(LICENSE_TEXTS['BSD-3-Clause']);
     expect(md).toContain(LICENSE_TEXTS.MIT);
   });
+
+  it.each(LICENSE_NOTICES.map((n) => [n.title, n.text] as const))('reproduces the notice "%s" in full', (_t, text) => {
+    expect(md).toContain(text);
+  });
 });
+
+describe('M2 lifted code (13-01, MD-62)', () => {
+  const names = CODE_CREDITS.map((k) => k.name);
+  it('credits every lift and idea the M2 summaries list', () => {
+    for (const n of ['stdlib-js', 'Go math (exp)', 'fdlibm (FreeBSD msun)', 'Project Chrono', 'Jolt Physics', 'Godot-Easy-Vehicle-Physics', 'ArcadeCarPhysics', 'PythonRobotics', 'folio-2025', 'V8']) expect(names).toContain(n);
+  });
+  it('Apache-2.0: the full licence, the NOTICE line, the changes, the Sun and Go notices', () => {
+    expect(APACHE_2_0).toMatch(/^\s*Apache License\n\s*Version 2\.0, January 2004/);
+    expect(APACHE_2_0).toMatch(/END OF TERMS AND CONDITIONS$/);
+    expect(APACHE_2_0.length).toBeGreaterThan(9000);
+    expect(STDLIB_NOTICE).toContain('Copyright (c) 2016-2026 The Stdlib Authors.');
+    expect(STDLIB_NOTICE).toMatch(/Changes made in Suspension Lab/);
+    expect(STDLIB_ATTRIBUTION).toContain('Permission to use, copy, modify, and distribute this\nsoftware is freely granted, provided that this notice\nis preserved.');
+    expect(STDLIB_ATTRIBUTION).toContain('Copyright (c) 2009 The Go Authors. All rights reserved.');
+    expect(STDLIB_ATTRIBUTION).toContain('Neither the name of Google Inc. nor the names of its');
+    // the source keeps its notice too
+    const det = readFileSync('src/sim-core/math/det.ts', 'utf8');
+    expect(det).toContain('Permission to use, copy, modify, and distribute this software is freely granted, provided that this notice');
+    expect(det).toContain('SPDX-License-Identifier: Apache-2.0');
+    expect(det).toMatch(/Modified \(Apache-2\.0 §4\(b\)\)/);
+  });
+});
+
