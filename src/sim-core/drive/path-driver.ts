@@ -62,9 +62,19 @@ const STEER_SLEW = 0.6;
 const PEDAL_SLEW = 4;
 /** Speed loop: P, I, integral clamp. Feedback deceleration cap outside BRAKE, m/s^2. */
 const KP = 1.2;
+/** P gain while slower than the target (catching up with the lap after a recovery). */
+const KP_UP = 2.0;
 const KI = 0.2;
 const I_MAX = 2;
 const FB_DECEL = 4;
+/** Feedback deceleration cap when the car is not faster than the line speed (only the error derate slows it). */
+const GENTLE_DECEL = 2;
+/** Preview of the line speed ahead for the braking cap: PREVIEW_N points every PREVIEW_STEP m; cap limit, m/s^2. */
+const PREVIEW_N = 8;
+const PREVIEW_STEP = 12;
+const MAX_DECEL = 10;
+/** Speed error over which the profile feed-forward fades out when it would act against the error, m/s. */
+const FF_FADE = 1.5;
 /** RECOVER (far off the line or heading well away from it) slows down more firmly, still short of a lock-up, m/s^2. */
 const RECOVER_DECEL = 7;
 /** Recovery machine thresholds (hysteresis: enter RECOVER beyond, leave it inside). */
@@ -83,8 +93,8 @@ const LOOKAHEAD_MIN = 8;
 const LOOKAHEAD_T = 0.8;
 const LOOKAHEAD_E = 1.5;
 const LOOKAHEAD_MAX = 30;
-const RECOVER_SPEED = 12;
-const OFFROAD_SPEED = 10;
+const RECOVER_SPEED = 15;
+const OFFROAD_SPEED = 12;
 /** Speed away from the line (m/s) beyond which RECOVER brakes straight first (BRAKE). */
 const AWAY_SPEED = 10;
 /** Stuck: throttle without motion for STUCK_S s -> a K-turn (TURNAROUND); its legs last <= LEG_S s, or end when
@@ -132,7 +142,8 @@ const STUCK_T = 17;
 const LEG = 18; // TURNAROUND leg direction (-1 reverse, +1 forward)
 const LEG_T = 19;
 const LEGS = 20; // 1 until a reverse leg has finished (a K-turn entered because stuck)
-const SLOTS = 21;
+const SEVERE = 21; // RECOVER off the road or pointing away (speed cap, firm braking)
+const SLOTS = 22;
 
 const clamp = (x: number, lo: number, hi: number): number => (x < lo ? lo : x > hi ? hi : x);
 const slew = (from: number, to: number, max: number): number => from + clamp(to - from, -max, max);
@@ -303,7 +314,11 @@ export function createPathDriver(vehicle: CarDefinition, line: ReferenceLine, op
           // a target behind the car (|alpha| > 90 deg) asks for full lock toward it
           const sa = alpha > Math.PI / 2 ? 1 : alpha < -Math.PI / 2 ? -1 : dsin(alpha);
           steer = datan2(2 * L * sa, Math.max(ld, 1));
-          vt = Math.min(ae > OFFROAD_E ? OFFROAD_SPEED : RECOVER_SPEED, vRef);
+          // speed caps only when off the road or pointing well away from the line; a car a few metres off, roughly
+          // aligned, keeps the (derated) line speed
+          const severe = ae > OFFROAD_E || ap > PSI_OUT;
+          vt = severe ? Math.min(ae > OFFROAD_E ? OFFROAD_SPEED : RECOVER_SPEED, vRef) : vRef / (1 + (0.5 * ae) / 4.5 + 1.5 * ap);
+          st[SEVERE] = severe ? 1 : 0;
         } else {
           // Stanley + curvature feed-forward + understeer feed-forward + yaw-rate damping. The heading term is the
           // front axle's COURSE error (velocity direction - line heading), zero when the front axle tracks the line in
@@ -331,7 +346,23 @@ export function createPathDriver(vehicle: CarDefinition, line: ReferenceLine, op
         if (dir > 0) {
           const err = vt - u;
           if (s === TRACK || s === RESUME) st[INTEG] = clamp(st[INTEG]! + err * dt, -I_MAX, I_MAX);
-          const acmd = ff + Math.max(s === RECOVER ? -RECOVER_DECEL : -FB_DECEL, KP * err + KI * st[INTEG]!);
+          // the profile's feed-forward only where it helps: no braking feed-forward while still slower than the
+          // target (the profile is braking down to a speed the car is already below), no driving one while faster
+          const ffe = ff * clamp(ff < 0 ? 1 - err / FF_FADE : 1 + err / FF_FADE, 0, 1);
+          // Feedback braking is capped (no hard braking at a hand-over) unless a slower line speed ahead needs more:
+          // the deceleration that reaches the line speed PREVIEW_STEP..PREVIEW_N*PREVIEW_STEP m ahead (x 1.1)
+          let need = 0;
+          if (u > vt + 1 && u > line.at(fr.s, tp).speed) {
+            for (let k = 1; k <= PREVIEW_N; k++) {
+              const d = k * PREVIEW_STEP;
+              const va = line.at(fr.s + d, tp).speed;
+              if (va < u) need = Math.max(need, (1.1 * (u * u - va * va)) / (2 * d));
+            }
+          }
+          // gentle when only the error derate asks for less speed than the line's (a hand-over at the lap's speed)
+          const base = s === RECOVER && st[SEVERE]! ? RECOVER_DECEL : u <= vRef * scale + 1 ? GENTLE_DECEL : FB_DECEL;
+          const cap = Math.max(base, Math.min(need, MAX_DECEL));
+          const acmd = ffe + Math.max(-cap, (err > 0 ? KP_UP : KP) * err + KI * st[INTEG]!);
           throttle = acmd > 0 ? Math.min(1, acmd / accelLimit) : 0;
           brake = acmd < 0 ? Math.min(1, -acmd / G) : 0;
         }
